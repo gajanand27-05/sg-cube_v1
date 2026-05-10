@@ -11,3 +11,9 @@ python-dotenv==1.0.1
 # ── Phase 2: Supabase + JWT verification ──
 supabase==2.10.0
 pyjwt[crypto]==2.10.1
+
+# ── Phase 3: Speech-to-Text (Whisper) + recording tool ──
+faster-whisper==1.1.0
+sounddevice==0.5.1
+python-multipart==0.0.20
+requests==2.32.3
