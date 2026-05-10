@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtualenv
+.venv/
+venv/
+env/
+
+# Env / secrets
+.env
+.env.local
+*.secret
+
+# DB / data
+*.db
+*.sqlite
+*.sqlite3
+backend/database/*.db
+
+# Logs / runtime
+backend/logs/**
+!backend/logs/.gitkeep
+*.log
+
+# Audio scratch
+*.wav
+*.mp3
+tools/_recordings/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/
+
+# Build / dist
+build/
+dist/

@@ -1,0 +1,13 @@
+# SG_CUBE — accumulated dependencies through Phase 2.
+# Phase 3 (Whisper STT), Phase 4 (Ollama HTTP), Phase 7 (pyttsx3) added later.
+
+# ── Phase 1: server core ──
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+pydantic-settings==2.7.0
+python-dotenv==1.0.1
+
+# ── Phase 2: Supabase + JWT verification ──
+supabase==2.10.0
+pyjwt[crypto]==2.10.1
