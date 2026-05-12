@@ -1,18 +1,19 @@
 from fastapi import FastAPI
 
 from backend.server.config import settings
-from backend.server.routes import admin, auth, orchestrate, voice
+from backend.server.routes import admin, auth, execute, orchestrate, voice
 
 app = FastAPI(
     title="SG_CUBE",
     description="Local-first AI Operating System — voice-first MVP",
-    version="0.4.0",
+    version="0.5.0",
 )
 
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(voice.router)
 app.include_router(orchestrate.router)
+app.include_router(execute.router)
 
 
 @app.get("/health")
