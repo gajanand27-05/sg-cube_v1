@@ -4,13 +4,19 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
 
 from backend.ai_modules.speech.stt_whisper import transcribe
+from backend.ai_modules.speech.tts_piper import speak
 from backend.core.auth.deps import get_current_user
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 
 ALLOWED_EXTS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}
+
+
+class SayRequest(BaseModel):
+    text: str
 
 
 @router.post("/transcribe")
@@ -43,3 +49,13 @@ async def transcribe_endpoint(
         return {**result, "latency_ms": latency_ms}
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+
+
+@router.post("/say")
+def say_endpoint(
+    body: SayRequest,
+    _user: Annotated[dict, Depends(get_current_user)],
+):
+    if not body.text.strip():
+        raise HTTPException(status_code=400, detail="text must not be empty")
+    return speak(body.text)

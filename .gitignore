@@ -33,6 +33,10 @@ backend/logs/**
 *.mp3
 tools/_recordings/
 
+# Piper voice models (download via tools/download_piper_voice.py)
+backend/ai_modules/speech/piper_voices/*.onnx
+backend/ai_modules/speech/piper_voices/*.onnx.json
+
 # IDE
 .idea/
 .vscode/

@@ -17,3 +17,8 @@ faster-whisper==1.1.0
 sounddevice==0.5.1
 python-multipart==0.0.20
 requests==2.32.3
+
+# ── Phase 7: Text-to-Speech (Piper — offline neural TTS) ──
+# Voice models live in backend/ai_modules/speech/piper_voices/ (gitignored).
+# Fetch with: python tools/download_piper_voice.py [voice-name]
+piper-tts==1.4.2
