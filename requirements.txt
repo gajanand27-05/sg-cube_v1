@@ -22,3 +22,8 @@ requests==2.32.3
 # Voice models live in backend/ai_modules/speech/piper_voices/ (gitignored).
 # Fetch with: python tools/download_piper_voice.py [voice-name]
 piper-tts==1.4.2
+
+# ── Phase 9: Wake-word listener (Vosk — offline, grammar-restricted) ──
+# Model lives in backend/ai_modules/speech/vosk_models/ (gitignored).
+# Fetch with: python tools/download_vosk_model.py
+vosk==0.3.45

@@ -37,6 +37,9 @@ tools/_recordings/
 backend/ai_modules/speech/piper_voices/*.onnx
 backend/ai_modules/speech/piper_voices/*.onnx.json
 
+# Vosk acoustic models (download via tools/download_vosk_model.py)
+backend/ai_modules/speech/vosk_models/
+
 # IDE
 .idea/
 .vscode/
