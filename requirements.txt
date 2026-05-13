@@ -27,3 +27,7 @@ piper-tts==1.4.2
 # Model lives in backend/ai_modules/speech/vosk_models/ (gitignored).
 # Fetch with: python tools/download_vosk_model.py
 vosk==0.3.45
+
+# ── Phase 9b: System tray icon ──
+pystray==0.19.5
+Pillow==11.0.0

@@ -3,6 +3,9 @@ import wave
 import winsound
 from pathlib import Path
 
+import numpy as np
+import sounddevice as sd
+
 from backend.ai_modules.speech.stt_whisper import transcribe
 from backend.ai_modules.speech.tts_piper import speak
 from backend.core.orchestrator.llm_layer import Intent, LLMResolveError
@@ -15,6 +18,23 @@ from backend.core.safe_executor.executor import execute as do_execute
 DAEMON_USER_ID = "21c19bf1-b73f-4001-80de-789b93c8d703"
 
 SAMPLE_RATE = 16000
+ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
+
+
+def _play_chime() -> None:
+    """Play assets/chime.wav if present; fall back to a sine-tone Beep."""
+    chime = ASSETS_DIR / "chime.wav"
+    if chime.exists():
+        try:
+            with wave.open(str(chime), "rb") as w:
+                rate = w.getframerate()
+                frames = w.readframes(w.getnframes())
+            audio = np.frombuffer(frames, dtype=np.int16)
+            sd.play(audio, samplerate=rate, blocking=True)
+            return
+        except Exception:
+            pass
+    winsound.Beep(880, 120)
 
 
 def _save_wav(audio_bytes: bytes) -> Path:
@@ -50,7 +70,7 @@ def _spoken_response(intent: Intent, result: ExecutionResult) -> str:
 
 def handle_wake(audio_bytes: bytes) -> None:
     """Called by WakeWordListener with the 5s of audio captured after the wake phrase."""
-    winsound.Beep(880, 120)  # short "I'm listening" chime
+    _play_chime()
 
     wav_path = _save_wav(audio_bytes)
     try:
