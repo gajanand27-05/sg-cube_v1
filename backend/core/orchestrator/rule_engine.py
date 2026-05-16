@@ -4,18 +4,38 @@ from typing import Callable
 from backend.core.orchestrator.llm_layer import Intent
 
 APP_ALIASES = {
+    # Built-in
     "calculator": "calc",
     "calc": "calc",
     "notepad": "notepad",
     "text editor": "notepad",
+    "explorer": "explorer",
+    "file explorer": "explorer",
+    "files": "explorer",
+    # Browsers
     "chrome": "chrome",
     "google chrome": "chrome",
     "browser": "chrome",
+    "firefox": "firefox",
+    "edge": "msedge",
+    "brave": "brave",
+    # Dev
     "vscode": "code",
     "vs code": "code",
     "visual studio code": "code",
     "code": "code",
     "code editor": "code",
+    # Media / messaging
+    "spotify": "spotify",
+    "discord": "discord",
+    "whatsapp": "whatsapp",
+    "telegram": "telegram",
+    "slack": "slack",
+    "teams": "teams",
+    "microsoft teams": "teams",
+    "vlc": "vlc",
+    "media player": "vlc",
+    "music": "spotify",
 }
 
 

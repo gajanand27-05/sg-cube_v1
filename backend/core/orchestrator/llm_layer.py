@@ -14,22 +14,32 @@ Convert the user's natural-language command into a JSON object with this exact s
 }
 
 Valid actions:
-- open_app   : open a desktop application. target is the app name (e.g. "notepad", "chrome", "calc").
+- open_app   : open a desktop application. target is the app name. ANY installed app is valid (notepad, chrome, firefox, spotify, discord, whatsapp, vscode, vlc, etc.).
 - close_app  : close a desktop application. target is the app name.
 - get_time   : return the current time. target is empty.
 - unknown    : the input does not match any known action.
 
 Examples:
-User: "open notepad"        -> {"action":"open_app","target":"notepad","args":{}}
-User: "launch chrome"       -> {"action":"open_app","target":"chrome","args":{}}
-User: "close calculator"    -> {"action":"close_app","target":"calc","args":{}}
-User: "what time is it"     -> {"action":"get_time","target":"","args":{}}
-User: "tell me a joke"      -> {"action":"unknown","target":"","args":{}}
+User: "open notepad"          -> {"action":"open_app","target":"notepad","args":{}}
+User: "launch chrome"         -> {"action":"open_app","target":"chrome","args":{}}
+User: "start firefox"         -> {"action":"open_app","target":"firefox","args":{}}
+User: "open spotify"          -> {"action":"open_app","target":"spotify","args":{}}
+User: "launch discord"        -> {"action":"open_app","target":"discord","args":{}}
+User: "open whatsapp"         -> {"action":"open_app","target":"whatsapp","args":{}}
+User: "open vscode"           -> {"action":"open_app","target":"vscode","args":{}}
+User: "open visual studio code" -> {"action":"open_app","target":"vscode","args":{}}
+User: "close calculator"      -> {"action":"close_app","target":"calc","args":{}}
+User: "quit spotify"          -> {"action":"close_app","target":"spotify","args":{}}
+User: "what time is it"       -> {"action":"get_time","target":"","args":{}}
+User: "tell me a joke"        -> {"action":"unknown","target":"","args":{}}
+User: "play some music"       -> {"action":"unknown","target":"","args":{}}
 
 Rules:
 - Output ONLY the JSON object. No commentary, no markdown fences.
 - Always include all three keys: action, target, args.
-- If unsure, use "unknown".
+- If the user is asking to open or close an app and you can identify its name, USE open_app/close_app — don't fall back to unknown just because the app isn't in the examples.
+- If unsure or the request isn't an app action or time query, use "unknown".
+- Use lowercase for `target` and drop adjectives like "the" or "my".
 """
 
 
