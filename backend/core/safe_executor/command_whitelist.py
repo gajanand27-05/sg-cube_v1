@@ -56,34 +56,45 @@ DANGEROUS_TARGETS = (
     "../",
 )
 
-# Apps that require Windows elevation. Phase 10a blocks these.
-# Phase 10b will route them through UAC's runas verb (Windows shows its own
-# password prompt — we never see/store the password).
-SYSTEM_APPS = {
-    "regedit",
-    "regedit.exe",
-    "services.msc",
-    "gpedit.msc",
-    "mmc",
-    "mmc.exe",
-    "control panel",
-    "control",
-    "control.exe",
-    "task manager",
-    "taskmgr",
-    "taskmgr.exe",
-    "cmd",
-    "cmd.exe",
-    "powershell",
-    "powershell.exe",
-    "computer management",
-    "compmgmt.msc",
-    "device manager",
-    "devmgmt.msc",
-    "diskmgmt.msc",
-    "event viewer",
-    "eventvwr",
+# Apps that require Windows elevation. Phase 10b routes these through UAC's
+# `runas` verb — Windows shows its own password / consent dialog. We never see
+# or store the password.
+#
+# Map of user-spoken name -> actual launchable command. (e.g. "task manager"
+# isn't a real launch token; "taskmgr.exe" is.)
+SYSTEM_APP_COMMANDS: dict[str, str] = {
+    "regedit": "regedit.exe",
+    "regedit.exe": "regedit.exe",
+    "registry editor": "regedit.exe",
+    "services": "services.msc",
+    "services.msc": "services.msc",
+    "gpedit": "gpedit.msc",
+    "gpedit.msc": "gpedit.msc",
+    "group policy editor": "gpedit.msc",
+    "mmc": "mmc.exe",
+    "mmc.exe": "mmc.exe",
+    "control panel": "control.exe",
+    "control": "control.exe",
+    "control.exe": "control.exe",
+    "task manager": "taskmgr.exe",
+    "taskmgr": "taskmgr.exe",
+    "taskmgr.exe": "taskmgr.exe",
+    "cmd": "cmd.exe",
+    "cmd.exe": "cmd.exe",
+    "command prompt": "cmd.exe",
+    "powershell": "powershell.exe",
+    "powershell.exe": "powershell.exe",
+    "computer management": "compmgmt.msc",
+    "compmgmt.msc": "compmgmt.msc",
+    "device manager": "devmgmt.msc",
+    "devmgmt.msc": "devmgmt.msc",
+    "disk management": "diskmgmt.msc",
+    "diskmgmt.msc": "diskmgmt.msc",
+    "event viewer": "eventvwr.msc",
+    "eventvwr": "eventvwr.msc",
+    "eventvwr.msc": "eventvwr.msc",
 }
+SYSTEM_APPS = set(SYSTEM_APP_COMMANDS.keys())
 
 
 def is_target_dangerous(target: str) -> bool:
@@ -95,6 +106,40 @@ def is_system_app(target: str) -> bool:
     return target.strip().lower() in SYSTEM_APPS
 
 
+def _launch_elevated(target_label: str, command: str) -> dict:
+    """Trigger Windows UAC for `command`. Windows shows the password / consent
+    dialog itself — we never see or handle the password. Blocks until UAC
+    resolves (typically 1–30 seconds depending on user response time).
+    """
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                f"Start-Process '{command}' -Verb RunAs",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"status": "blocked", "reason": f"UAC prompt timed out for {target_label!r}"}
+    except Exception as e:
+        return {"status": "error", "reason": str(e)}
+
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout).strip()
+        # PowerShell's Start-Process raises "The operation was canceled by the user."
+        # when the UAC dialog is dismissed (Cancel / No).
+        if "cancel" in err.lower() or "operation" in err.lower():
+            return {"status": "blocked", "reason": f"UAC declined for {target_label!r}"}
+        return {"status": "error", "reason": err or "elevation failed"}
+
+    return {"status": "success", "message": f"opened {target_label} (elevated)"}
+
+
 # ── Handlers ─────────────────────────────────────────────────────────────
 
 
@@ -103,20 +148,21 @@ def handle_open_app(intent: Intent) -> dict:
     target = target_raw.lower()
     if not target:
         return {"status": "blocked", "reason": "empty target"}
+
+    # 1. System app? Route through UAC — Windows handles the password prompt.
+    #    This check runs BEFORE is_target_dangerous so that exact-match system
+    #    names (regedit, taskmgr, etc.) go through UAC instead of being hard
+    #    blocked by the substring filter.
+    if is_system_app(target):
+        elevated_cmd = SYSTEM_APP_COMMANDS[target]
+        return _launch_elevated(target_raw, elevated_cmd)
+
+    # 2. Substring dangerous filter (catches abuse like "open random-regedit-tool").
     if is_target_dangerous(target):
         return {"status": "blocked", "reason": f"dangerous target rejected: {target_raw!r}"}
-    if is_system_app(target):
-        return {
-            "status": "blocked",
-            "reason": f"system app '{target_raw}' requires elevation (Phase 10b will gate this with UAC)",
-        }
 
+    # 3. Regular app — `start` resolves Start-Menu shortcuts, PATH, App-Paths.
     canonical = OPEN_ALIASES.get(target, target_raw)
-
-    # `start` is a cmd builtin: resolves Start-Menu shortcuts, PATH, and App-Paths
-    # registry entries. shell=True is safe here because `canonical` came from a
-    # parsed Intent.target, not raw user input concatenated into a shell string —
-    # quoting via the format string handles any spaces.
     try:
         subprocess.Popen(f'start "" "{canonical}"', shell=True)
     except Exception as e:
