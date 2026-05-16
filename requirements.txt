@@ -28,6 +28,10 @@ piper-tts==1.4.2
 # Fetch with: python tools/download_vosk_model.py
 vosk==0.3.45
 
-# ── Phase 9b: System tray icon ──
+# ── Phase 9b: System tray icon (legacy — kept in repo, no longer wired in main.py) ──
 pystray==0.19.5
 Pillow==11.0.0
+
+# ── Phase 9d: Textual sci-fi terminal UI ──
+textual==0.86.0
+pyfiglet==1.0.2

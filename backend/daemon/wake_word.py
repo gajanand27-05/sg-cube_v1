@@ -24,7 +24,7 @@ class WakeWordListener:
         self,
         on_wake: Callable[[bytes], None],
         wake_phrase: str = "sg cube",
-        capture_seconds: int = 5,
+        capture_seconds: float = 2.5,
         sample_rate: int = 16000,
         device: Optional[int] = None,
         model_name: str = DEFAULT_MODEL,
@@ -60,7 +60,7 @@ class WakeWordListener:
                 break
 
     def _capture(self) -> bytes:
-        target = self.capture_seconds * self.sample_rate * 2
+        target = int(self.capture_seconds * self.sample_rate * 2)
         chunks: list[bytes] = []
         got = 0
         while got < target:

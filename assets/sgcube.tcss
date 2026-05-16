@@ -1,0 +1,130 @@
+/* SG_CUBE Terminal UI — hacker green on black */
+
+Screen {
+    background: #000000;
+    color: #00ff41;
+}
+
+/* ── Wordmark ────────────────────────────────────────── */
+
+#wordmark-box {
+    height: 7;
+    align: center middle;
+    padding: 0;
+    background: #000000;
+}
+
+#wordmark {
+    color: #00ff41;
+    text-style: bold;
+    content-align: center middle;
+    width: auto;
+    height: 7;
+}
+
+/* ── Status bar ──────────────────────────────────────── */
+
+#status-bar {
+    layout: horizontal;
+    height: 3;
+    border: solid #00ff41;
+    padding: 0 2;
+    margin: 1 2 0 2;
+    background: #000000;
+}
+
+#status-left {
+    width: 1fr;
+    color: #00ff41;
+    content-align: left middle;
+    height: 1fr;
+}
+
+#status-clock {
+    width: auto;
+    color: #7fff90;
+    text-style: bold;
+    content-align: center middle;
+    height: 1fr;
+}
+
+#status-right {
+    width: 1fr;
+    color: #00ff41;
+    content-align: right middle;
+    height: 1fr;
+}
+
+/* ── Main two-column row ─────────────────────────────── */
+
+#main-row {
+    height: 1fr;
+    margin: 0 2;
+}
+
+#left-col, #right-col {
+    width: 1fr;
+    height: 100%;
+}
+
+Panel {
+    border: round #007f30;
+    height: 1fr;
+    min-height: 4;
+    margin: 1 0 0 0;
+    padding: 0 1;
+    background: #000000;
+}
+
+Panel > .panel-body {
+    color: #00ff41;
+    padding: 0 1;
+    height: 1fr;
+}
+
+Panel:focus-within {
+    border: round #00ff41;
+}
+
+/* ── Live mic strip ──────────────────────────────────── */
+
+#mic-strip {
+    layout: horizontal;
+    height: 3;
+    border: solid #00ff41;
+    padding: 0 2;
+    margin: 1 2 0 2;
+    background: #000000;
+}
+
+#mic-label {
+    width: auto;
+    color: #007f30;
+    text-style: bold;
+    content-align: left middle;
+    height: 1fr;
+    padding: 0 2 0 0;
+}
+
+#mic-bars {
+    width: 1fr;
+    color: #7fff90;
+    content-align: left middle;
+    height: 1fr;
+}
+
+/* ── Footer ──────────────────────────────────────────── */
+
+Footer {
+    background: #001100;
+    color: #00cc33;
+}
+
+Footer > .footer--description {
+    color: #00ff41;
+}
+
+Footer > .footer--key {
+    background: #002a00;
+    color: #7fff90;
+}

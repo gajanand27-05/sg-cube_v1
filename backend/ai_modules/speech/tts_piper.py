@@ -42,8 +42,13 @@ def speak(text: str) -> dict:
 
     rate = chunks[0].sample_rate
     audio = np.concatenate([c.audio_int16_array for c in chunks])
+    # Pad with 250ms of trailing silence — without this PortAudio sometimes
+    # truncates the last syllable when the stream closes.
+    silence = np.zeros(int(0.25 * rate), dtype=np.int16)
+    audio = np.concatenate([audio, silence])
 
     sd.play(audio, samplerate=rate, blocking=True)
+    sd.wait()
 
     return {
         "status": "spoke",
