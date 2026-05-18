@@ -1,12 +1,22 @@
-"""Built-in tools — Phase 11a.
+"""Built-in tools.
 
-Wraps the existing Phase 6/10 handlers so the agent can call them. Importing
-this module is what populates the registry; backend.core.agent.agent imports
-it eagerly at boot.
+Importing this module populates the registry with every shipped tool.
+backend.core.agent.agent imports it eagerly at boot.
+
+- Phase 11a tools defined here (wrap the Phase 6/10 handlers).
+- Phase 11b tools live in dedicated modules under backend.core.tools.* —
+  their @tool decorators run when their module is imported below.
 """
 from backend.core.orchestrator.llm_layer import Intent
 from backend.core.safe_executor import command_whitelist as cw
 from backend.core.tools.registry import tool
+
+# Phase 11b: importing these modules registers their @tool functions.
+from backend.core.tools import audio as _audio  # noqa: F401
+from backend.core.tools import display as _display  # noqa: F401
+from backend.core.tools import files as _files  # noqa: F401
+from backend.core.tools import system_info as _system_info  # noqa: F401
+from backend.core.tools import windowing as _windowing  # noqa: F401
 
 
 @tool
