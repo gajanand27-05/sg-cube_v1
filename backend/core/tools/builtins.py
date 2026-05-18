@@ -11,6 +11,14 @@ from backend.core.orchestrator.llm_layer import Intent
 from backend.core.safe_executor import command_whitelist as cw
 from backend.core.tools.registry import tool
 
+
+@tool
+def respond(text: str) -> dict:
+    """Speak `text` as the final answer to the user. Use this to end the
+    conversation after other tools have run, or to answer factual questions
+    directly. The agent treats calls to this tool as the terminating step."""
+    return {"status": "success", "message": text}
+
 # Phase 11b: importing these modules registers their @tool functions.
 from backend.core.tools import audio as _audio  # noqa: F401
 from backend.core.tools import display as _display  # noqa: F401
@@ -22,6 +30,11 @@ from backend.core.tools import windowing as _windowing  # noqa: F401
 from backend.core.tools import comms as _comms  # noqa: F401
 from backend.core.tools import notes as _notes  # noqa: F401
 from backend.core.tools import reminders as _reminders  # noqa: F401
+
+# Phase 11d — information feeds (weather, stocks, crypto, news, trending, briefing)
+from backend.core.tools import finance as _finance  # noqa: F401
+from backend.core.tools import news as _news  # noqa: F401
+from backend.core.tools import weather as _weather  # noqa: F401
 
 
 @tool

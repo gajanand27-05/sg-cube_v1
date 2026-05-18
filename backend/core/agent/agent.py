@@ -29,6 +29,14 @@ log = logging.getLogger(__name__)
 
 MAX_ITER = 5
 
+# Models often hallucinate a "speak" / "say" / "final_response" tool when
+# they really mean "produce the final response". Treat any of these as
+# terminal — extract the text and return immediately.
+RESPONSE_ALIASES = {
+    "respond", "speak", "say", "answer", "reply", "tell_user", "tell",
+    "final_response", "final_answer", "result", "output",
+}
+
 
 def _system_prompt() -> str:
     return f"""You are SG_CUBE, a local AI Operating System running on the user's Windows machine.
@@ -83,10 +91,56 @@ def _ollama_chat(messages: list[dict], model: str | None = None) -> str:
 
 def _parse(raw: str) -> dict[str, Any]:
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
     except json.JSONDecodeError as e:
         log.warning("agent: bad JSON from LLM: %s; raw=%r", e, raw[:200])
         return {"final_response": "Sorry, I got confused."}
+    return _normalize(parsed)
+
+
+def _normalize(parsed: Any) -> dict[str, Any]:
+    """Different models like different tool-call JSON shapes. Coerce them all
+    into one of: {"tool_calls": [{"name": ..., "args": ...}, ...]} or
+    {"final_response": "..."}."""
+    if not isinstance(parsed, dict):
+        return {"final_response": "Sorry, I got confused."}
+
+    # final_response synonyms
+    for key in ("final_response", "final_answer", "response", "answer", "reply"):
+        v = parsed.get(key)
+        if isinstance(v, str) and v.strip():
+            return {"final_response": v.strip()}
+
+    def _extract_call(c: dict) -> dict | None:
+        if not isinstance(c, dict):
+            return None
+        name = c.get("name") or c.get("tool_name") or c.get("function") or c.get("function_name")
+        if not name:
+            return None
+        args = c.get("args") or c.get("arguments") or c.get("parameters") or c.get("params") or {}
+        if not isinstance(args, dict):
+            args = {}
+        return {"name": str(name).strip(), "args": args}
+
+    # Multiple tool calls in a list
+    tc = parsed.get("tool_calls") or parsed.get("toolCalls") or parsed.get("calls")
+    if isinstance(tc, list):
+        calls = [c for c in (_extract_call(x) for x in tc) if c and c["name"]]
+        if calls:
+            return {"tool_calls": calls}
+
+    # Single tool call without the array wrapper
+    if isinstance(tc, dict):
+        c = _extract_call(tc)
+        if c and c["name"]:
+            return {"tool_calls": [c]}
+
+    # Top-level single tool call
+    c = _extract_call(parsed)
+    if c and c["name"]:
+        return {"tool_calls": [c]}
+
+    return {"final_response": "Sorry, I got confused."}
 
 
 def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]:
@@ -121,13 +175,27 @@ def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]:
             context.add_assistant(spoken)
             return spoken, tool_records
 
-        # Execute each tool call and append results back into the conversation
-        # for the model to reason about on the next iteration.
+        # Execute each tool call. If any call is a "respond" / "speak" /
+        # "say" alias, treat its text as the final answer and exit.
         for c in calls:
             name = (c.get("name") or "").strip()
             args = c.get("args") or {}
             if not isinstance(args, dict):
                 args = {}
+
+            if name.lower() in RESPONSE_ALIASES:
+                spoken = (
+                    args.get("text")
+                    or args.get("message")
+                    or args.get("response")
+                    or args.get("content")
+                    or "Done."
+                )
+                spoken = str(spoken).strip() or "Done."
+                tool_records.append({"name": name, "args": args, "result": {"status": "success"}})
+                context.add_assistant(spoken)
+                return spoken, tool_records
+
             result = call_tool(name, args)
             tool_records.append({"name": name, "args": args, "result": result})
 
@@ -136,11 +204,28 @@ def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]:
             {
                 "role": "user",
                 "content": json.dumps(
-                    {"tool_results": tool_records[-len(calls):]}
+                    {
+                        "tool_results": tool_records[-len(calls):],
+                        "instruction": "Now reply with {\"final_response\": \"<short sentence to speak>\"} based on the tool result above. Do not call the same tool again.",
+                    }
                 ),
             }
         )
 
-    spoken = "I tried a few steps but couldn't finish that."
+    # MAX_ITER exhausted. If we managed to run at least one successful tool,
+    # speak its message rather than giving up — gemma did the work, it just
+    # couldn't formulate a clean final_response.
+    last_success = next(
+        (
+            r
+            for r in reversed(tool_records)
+            if isinstance(r.get("result"), dict) and r["result"].get("status") == "success"
+        ),
+        None,
+    )
+    if last_success and last_success["result"].get("message"):
+        spoken = str(last_success["result"]["message"])
+    else:
+        spoken = "I tried a few steps but couldn't finish that."
     context.add_assistant(spoken)
     return spoken, tool_records
