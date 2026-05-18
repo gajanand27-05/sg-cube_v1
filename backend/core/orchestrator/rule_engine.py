@@ -36,6 +36,12 @@ APP_ALIASES = {
     "vlc": "vlc",
     "media player": "vlc",
     "music": "spotify",
+    # System (rule layer captures them; executor routes to UAC)
+    "registry editor": "regedit",
+    "regedit": "regedit",
+    "task manager": "task manager",
+    "command prompt": "cmd",
+    "powershell": "powershell",
 }
 
 
@@ -56,7 +62,35 @@ def _get_time(_m: re.Match) -> Intent:
     return Intent(action="get_time", target="")
 
 
+def _play_youtube(m: re.Match) -> Intent:
+    return Intent(action="play_youtube", target=m.group("query").strip())
+
+
+def _search_youtube(m: re.Match) -> Intent:
+    return Intent(action="search_youtube", target=m.group("query").strip())
+
+
+def _search_google(m: re.Match) -> Intent:
+    return Intent(action="search_google", target=m.group("query").strip())
+
+
+# ── Patterns ────────────────────────────────────────────────────────────
+# Order matters: most-specific first. The match() function takes the first
+# pattern that matches. So "play X on youtube" must be checked before "play X",
+# otherwise the latter would greedily swallow the "on youtube" suffix.
+
 RULES: list[tuple[re.Pattern, Callable[[re.Match], Intent]]] = [
+    # ── Phase 10c (more specific phrasings first) ──
+    (re.compile(r"^play\s+(?P<query>.+?)\s+on\s+youtube$"), _play_youtube),
+    (re.compile(r"^search\s+(?:for\s+)?(?P<query>.+?)\s+on\s+youtube$"), _search_youtube),
+    (re.compile(r"^show\s+(?:me\s+)?(?P<query>.+?)\s+on\s+youtube$"), _search_youtube),
+    (re.compile(r"^search\s+(?:for\s+)?(?P<query>.+?)\s+on\s+google$"), _search_google),
+    (re.compile(r"^youtube\s+(?P<query>.+)$"), _search_youtube),
+    (re.compile(r"^google\s+(?P<query>.+)$"), _search_google),
+    (re.compile(r"^search\s+(?:for\s+)?(?P<query>.+)$"), _search_google),
+    (re.compile(r"^play\s+(?P<query>.+)$"), _play_youtube),
+
+    # ── Phases 5/6/10a (apps + time) ──
     (re.compile(r"^(?:open|launch|start)\s+(?P<app>.+?)$"), _open_app),
     (re.compile(r"^(?:close|quit|exit)\s+(?P<app>.+?)$"), _close_app),
     (

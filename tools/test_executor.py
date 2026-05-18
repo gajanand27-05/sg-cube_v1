@@ -1,15 +1,21 @@
-"""Phase 6 + 10a + 10b verification: call SafeExecutor.execute() with assorted Intents.
+"""Phase 6 + 10a + 10b + 10c verification: call SafeExecutor.execute() with assorted Intents.
 
-Default run (no flag): only side effect is opening Notepad. All system-app /
-dangerous / unknown cases are rejected before any process spawn.
+Default run: only side effect is opening Notepad (test 1). Validation/blocked
+cases never spawn anything.
 
   python tools/test_executor.py
 
-UAC run (--include-uac): also fires real Windows UAC prompts for regedit,
-task manager, powershell. You'll see UAC dialogs pop up — click No on each
-to verify the "blocked" path, or Yes if you actually want them to launch.
+UAC run: also fires real Windows UAC prompts for regedit / task manager /
+powershell. Click No on each dialog to keep the test non-destructive.
 
   python tools/test_executor.py --include-uac
+
+Browser run: also opens 4 browser tabs (Google, YouTube search, YouTube watch
+via yt-dlp first-result, and a URL). Close them after.
+
+  python tools/test_executor.py --include-browser
+
+  All three:  --include-uac --include-browser
 """
 import argparse
 import sys
@@ -26,10 +32,8 @@ from backend.core.orchestrator.llm_layer import Intent  # noqa: E402
 from backend.core.safe_executor.executor import execute  # noqa: E402
 
 SAFE_CASES: list[tuple[str, Intent]] = [
-    # ── happy path ────────────────────────────────────────────────────
+    # ── happy path: app launch ────────────────────────────────────────
     ("open_app/notepad — opens notepad",             Intent(action="open_app", target="notepad")),
-
-    # ── any-installed-app launch (no allowlist) ───────────────────────
     ("open_app/firefox — start command attempt",     Intent(action="open_app", target="firefox")),
     ("open_app/spotify — start command attempt",     Intent(action="open_app", target="spotify")),
     ("open_app/fakeappxyz — start launches anyway",  Intent(action="open_app", target="fakeappxyz")),
@@ -43,6 +47,13 @@ SAFE_CASES: list[tuple[str, Intent]] = [
     ("unknown action",                               Intent(action="delete_system32", target="")),
     ("intent action='unknown'",                      Intent(action="unknown", target="")),
 
+    # ── 10c validation (queries blocked when empty) ───────────────────
+    ("search_google empty",                          Intent(action="search_google", target="")),
+    ("search_youtube empty",                         Intent(action="search_youtube", target="")),
+    ("play_youtube empty",                           Intent(action="play_youtube", target="")),
+    ("open_url empty",                               Intent(action="open_url", target="")),
+    ("open_url dangerous",                           Intent(action="open_url", target="system32")),
+
     # ── meta ──────────────────────────────────────────────────────────
     ("get_time",                                     Intent(action="get_time", target="")),
 ]
@@ -53,18 +64,27 @@ UAC_CASES: list[tuple[str, Intent]] = [
     ("open_app/powershell — UAC prompt",             Intent(action="open_app", target="powershell")),
 ]
 
+BROWSER_CASES: list[tuple[str, Intent]] = [
+    ("open_url github.com",                          Intent(action="open_url", target="github.com")),
+    ("search_google 'python tutorials'",             Intent(action="search_google", target="python tutorials")),
+    ("search_youtube 'lo-fi beats'",                 Intent(action="search_youtube", target="lo-fi beats")),
+    ("play_youtube 'happy by pharrell' (yt-dlp)",    Intent(action="play_youtube", target="happy by pharrell")),
+]
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "--include-uac",
-        action="store_true",
-        help="Run system-app tests that trigger real Windows UAC dialogs. "
-             "You'll need to click No on each to keep the test non-destructive.",
-    )
+    ap.add_argument("--include-uac", action="store_true",
+                    help="Run system-app tests that trigger real Windows UAC dialogs.")
+    ap.add_argument("--include-browser", action="store_true",
+                    help="Run tests that open browser tabs (search/play/url).")
     args = ap.parse_args()
 
-    cases = SAFE_CASES + (UAC_CASES if args.include_uac else [])
+    cases = SAFE_CASES.copy()
+    if args.include_uac:
+        cases += UAC_CASES
+    if args.include_browser:
+        cases += BROWSER_CASES
 
     print(f"{'case':<48} {'status':<8} {'lat':>5}  detail")
     print("-" * 100)
@@ -75,7 +95,7 @@ def main() -> None:
         detail = r.message or r.reason or ""
         if len(detail) > 70:
             detail = detail[:67] + "..."
-        print(f"{label:<48} {r.status:<8} {r.latency_ms:>4}ms  {detail}")
+        print(f"{label:<48} {r.status:<8} {r.latency_ms:>5}ms  {detail}")
 
 
 if __name__ == "__main__":

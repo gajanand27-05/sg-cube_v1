@@ -1,7 +1,11 @@
+import logging
 import subprocess
 from datetime import datetime
+from urllib.parse import quote_plus
 
 from backend.core.orchestrator.llm_layer import Intent
+
+log = logging.getLogger(__name__)
 
 # ── Aliases ──────────────────────────────────────────────────────────────
 # user-spoken name -> canonical launch name (consumed by Windows `start`)
@@ -216,9 +220,114 @@ def handle_unknown(_intent: Intent) -> dict:
     return {"status": "blocked", "reason": "intent action is 'unknown'"}
 
 
+# ── Phase 10c: in-app actions (web search + YouTube play) ────────────────
+
+def _open_url(url: str) -> dict:
+    """Open `url` in the user's default browser via Windows `start`."""
+    try:
+        subprocess.Popen(f'start "" "{url}"', shell=True)
+    except Exception as e:
+        return {"status": "error", "reason": str(e)}
+    return {"status": "success", "message": url}
+
+
+def handle_open_url(intent: Intent) -> dict:
+    target = intent.target.strip()
+    if not target:
+        return {"status": "blocked", "reason": "empty URL"}
+    if is_target_dangerous(target):
+        return {"status": "blocked", "reason": f"dangerous URL rejected: {target!r}"}
+    url = target if "://" in target else f"https://{target}"
+    return _open_url(url)
+
+
+def handle_search_google(intent: Intent) -> dict:
+    query = intent.target.strip()
+    if not query:
+        return {"status": "blocked", "reason": "empty search query"}
+    url = f"https://www.google.com/search?q={quote_plus(query)}"
+    r = _open_url(url)
+    if r["status"] == "success":
+        r["message"] = f"google search for {query!r}"
+    return r
+
+
+def handle_search_youtube(intent: Intent) -> dict:
+    query = intent.target.strip()
+    if not query:
+        return {"status": "blocked", "reason": "empty search query"}
+    url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
+    r = _open_url(url)
+    if r["status"] == "success":
+        r["message"] = f"youtube search for {query!r}"
+    return r
+
+
+def handle_play_youtube(intent: Intent) -> dict:
+    """Resolve the first YouTube search result via yt-dlp, then open that
+    watch URL in the default browser. Falls back to the search results page
+    on network/parse failure."""
+    query = intent.target.strip()
+    if not query:
+        return {"status": "blocked", "reason": "empty play query"}
+
+    fallback_url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
+
+    try:
+        import yt_dlp  # lazy import: keeps daemon startup snappy
+    except ImportError:
+        return _open_url(fallback_url)
+
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "extract_flat": True,
+        "default_search": "ytsearch1",
+        "socket_timeout": 10,
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+    except Exception as e:
+        log.warning("yt-dlp search failed for %r: %s", query, e)
+        r = _open_url(fallback_url)
+        if r["status"] == "success":
+            r["message"] = f"youtube search for {query!r} (yt-dlp unavailable, opened results page)"
+        return r
+
+    entries = (info or {}).get("entries") or []
+    if not entries:
+        r = _open_url(fallback_url)
+        if r["status"] == "success":
+            r["message"] = f"no results for {query!r}, opened YouTube search page"
+        return r
+
+    first = entries[0]
+    vid = first.get("id") or first.get("url")
+    title = first.get("title") or query
+    if not vid:
+        r = _open_url(fallback_url)
+        if r["status"] == "success":
+            r["message"] = f"could not resolve video id for {query!r}, opened results"
+        return r
+
+    watch_url = vid if vid.startswith("http") else f"https://www.youtube.com/watch?v={vid}"
+    r = _open_url(watch_url)
+    if r["status"] == "success":
+        r["message"] = f"playing {title!r}"
+    return r
+
+
 HANDLERS = {
     "open_app": handle_open_app,
     "close_app": handle_close_app,
     "get_time": handle_get_time,
     "unknown": handle_unknown,
+    # Phase 10c
+    "open_url": handle_open_url,
+    "search_google": handle_search_google,
+    "search_youtube": handle_search_youtube,
+    "play_youtube": handle_play_youtube,
 }

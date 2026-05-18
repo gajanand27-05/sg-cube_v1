@@ -32,6 +32,9 @@ vosk==0.3.45
 pystray==0.19.5
 Pillow==11.0.0
 
+# ── Phase 10c: in-app actions (YouTube first-result resolver) ──
+yt-dlp==2026.3.3
+
 # ── Phase 9d: Textual sci-fi terminal UI ──
 textual==0.86.0
 pyfiglet==1.0.2
