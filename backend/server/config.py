@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
 
     ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "phi3"
+    ollama_model: str = "phi3"  # fast intent classifier (cache/rule-miss path)
+    agent_model: str = "gemma4:e4b-it-q8_0"  # heavier tool-calling agent
     whisper_model: str = "base"
 
 

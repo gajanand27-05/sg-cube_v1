@@ -76,6 +76,9 @@ def _spoken_response(intent: Intent, result: ExecutionResult) -> str:
     status = result.status
     action = intent.action
     target = intent.target
+    # Phase 11a: agent already wrote the spoken response.
+    if action == "agent_complete":
+        return (intent.args or {}).get("spoken") or result.message or "Done."
     if status == "success":
         if action == "open_app":
             return f"Opening {target}"
@@ -83,11 +86,19 @@ def _spoken_response(intent: Intent, result: ExecutionResult) -> str:
             return f"Closing {target}"
         if action == "get_time":
             return f"The time is {result.message}"
+        if action == "play_youtube":
+            return result.message or f"Playing {target}"
+        if action == "search_google":
+            return f"Searching Google for {target}"
+        if action == "search_youtube":
+            return f"Searching YouTube for {target}"
+        if action == "open_url":
+            return f"Opening {target}"
         return "Done"
     if status == "blocked":
         if action == "unknown":
             return "Sorry, I didn't understand"
-        return "Sorry, that command is not allowed"
+        return result.reason or "Sorry, that command is not allowed"
     return "Something went wrong"
 
 

@@ -320,6 +320,14 @@ def handle_play_youtube(intent: Intent) -> dict:
     return r
 
 
+def handle_agent_complete(intent: Intent) -> dict:
+    """Synthetic intent emitted by the Phase 11a agent path. The agent has
+    already run all the tools internally; the executor is a no-op and just
+    surfaces the spoken response for TTS."""
+    spoken = (intent.args or {}).get("spoken", "Done.")
+    return {"status": "success", "message": spoken}
+
+
 HANDLERS = {
     "open_app": handle_open_app,
     "close_app": handle_close_app,
@@ -330,4 +338,6 @@ HANDLERS = {
     "search_google": handle_search_google,
     "search_youtube": handle_search_youtube,
     "play_youtube": handle_play_youtube,
+    # Phase 11a
+    "agent_complete": handle_agent_complete,
 }

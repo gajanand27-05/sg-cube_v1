@@ -3,6 +3,8 @@ import time
 
 from pydantic import BaseModel
 
+from backend.core.agent import agent as agent_module
+from backend.core.agent.context import get_context
 from backend.core.orchestrator import cache_layer, rule_engine
 from backend.core.orchestrator.llm_layer import Intent, LLMResolveError
 from backend.core.orchestrator.llm_layer import resolve as llm_resolve
@@ -66,14 +68,25 @@ def process_input(text: str, user_id: str) -> RouterResult:
         _log_to_db(user_id, text, rule_hit, "rule", "success", latency)
         return RouterResult(intent=rule_hit, source_layer="rule", latency_ms=latency)
 
+    # ── Phase 11a: agent path ────────────────────────────────────────
+    # Cache + rules miss → invoke the tool-calling agent (gemma4). It can
+    # chain tool calls, answer questions directly, and use recent
+    # conversation context for follow-ups.
     try:
-        llm_hit = llm_resolve(text)
-    except LLMResolveError:
+        spoken, tool_records = agent_module.run(text, get_context())
+    except Exception as e:
+        log.exception("agent run failed: %s", e)
         latency = int((time.perf_counter() - t0) * 1000)
         _log_to_db(user_id, text, None, "llm", "error", latency)
-        raise
+        raise LLMResolveError(str(e)) from e
 
     latency = int((time.perf_counter() - t0) * 1000)
-    cache_layer.set(norm, llm_hit)
-    _log_to_db(user_id, text, llm_hit, "llm", "success", latency)
-    return RouterResult(intent=llm_hit, source_layer="llm", latency_ms=latency)
+    synthetic = Intent(
+        action="agent_complete",
+        target=text,
+        args={"spoken": spoken, "tool_records": tool_records},
+    )
+    # NOT cached: agent responses are context-dependent (e.g. "louder" means
+    # different things at different times).
+    _log_to_db(user_id, text, synthetic, "llm", "success", latency)
+    return RouterResult(intent=synthetic, source_layer="llm", latency_ms=latency)
