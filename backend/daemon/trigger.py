@@ -123,11 +123,13 @@ def on_wake_detected(emit: EmitFn | None = None) -> None:
     threading.Thread(target=_play_chime, daemon=True).start()
 
 
-def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> None:
+def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
     """Called by WakeWordListener with audio captured after the wake phrase.
 
-    If `emit` is provided, structured events are pushed for the UI to consume
-    in addition to the existing console prints.
+    Returns True if a real command was recognised and processed, False if
+    the capture was empty (silence / noise) or the LLM was unavailable.
+    The listener uses this signal to decide whether to keep the follow-up
+    window open or close it after consecutive empty rounds.
     """
     arr = np.frombuffer(audio_bytes, dtype=np.int16)
     peak = int(np.max(np.abs(arr))) if arr.size else 0
@@ -141,10 +143,10 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> None:
         _emit(emit, CommandTranscribed(text=command, peak=peak))
 
         if not command:
-            reply = "Sorry, I did not catch that"
-            speak(reply)
-            _emit(emit, SpokenResponse(text=reply))
-            return
+            # Silent capture — almost certainly a false-positive wake or
+            # follow-up trigger. Skip the "didn't catch that" TTS so we
+            # don't feed our own speaker into the open follow-up window.
+            return False
 
         try:
             routed = process_input(command, DAEMON_USER_ID)
@@ -154,7 +156,7 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> None:
             reply = "Sorry, my reasoning model is unavailable"
             speak(reply)
             _emit(emit, SpokenResponse(text=reply))
-            return
+            return False
 
         _emit(
             emit,
@@ -184,5 +186,6 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> None:
         reply = _spoken_response(routed.intent, result)
         speak(reply)
         _emit(emit, SpokenResponse(text=reply))
+        return True
     finally:
         wav_path.unlink(missing_ok=True)

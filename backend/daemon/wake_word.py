@@ -2,7 +2,7 @@ import json
 import queue
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 import sounddevice as sd
@@ -25,7 +25,15 @@ _VAD_INITIAL_WAIT_S = 3.0  # how long to wait for the user to start speaking
 # and trigger capture on ANY speech, no wake word required. Lets the user
 # chain commands ("open chrome" ... "and the news" ... "lock") without
 # saying "sg cube" each time.
+#
+# A SEPARATE, higher threshold is used for follow-up triggering — the main
+# _VAD_RMS_THRESHOLD is for "is this chunk speech vs silence" inside an
+# already-triggered capture, where false positives just extend the window.
+# Follow-up triggering is upstream: a false positive here STARTS a whole
+# capture+STT+TTS round on ambient noise. Worth being conservative.
+_FOLLOWUP_TRIGGER_RMS = 1000
 _FOLLOWUP_WINDOW_S = 8.0
+_FOLLOWUP_MAX_EMPTY = 2  # close follow-up after this many empty captures in a row
 
 
 class WakeWordListener:
@@ -45,7 +53,7 @@ class WakeWordListener:
 
     def __init__(
         self,
-        on_wake: Callable[[bytes], None],
+        on_wake: Callable[[bytes], Any],
         on_wake_detected: Optional[Callable[[], None]] = None,
         wake_phrase: str = "sg cube",
         capture_seconds: float = 2.5,  # legacy arg, ignored by VAD path
@@ -160,6 +168,7 @@ class WakeWordListener:
             callback=self._cb,
         ):
             followup_until: float = 0.0  # monotonic timestamp; <= now == off
+            empty_in_a_row: int = 0  # consecutive empty/error captures in followup
 
             while self._running:
                 try:
@@ -186,14 +195,17 @@ class WakeWordListener:
                     trigger = True
                     trigger_label = f"wake: {partial!r}"
                     self.recognizer.Reset()
+                    empty_in_a_row = 0
                 # Path B: follow-up mode — any speech triggers a capture, no
                 # wake word required. The chunk that triggered IS the start
                 # of the user's command, so we feed it into the capture buffer.
+                # Uses a HIGHER threshold than the in-capture VAD so ambient
+                # noise / TTS bleed don't start phantom rounds.
                 elif in_followup:
                     arr = np.frombuffer(data, dtype=np.int16)
                     if arr.size:
                         rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
-                        if rms > _VAD_RMS_THRESHOLD:
+                        if rms > _FOLLOWUP_TRIGGER_RMS:
                             trigger = True
                             trigger_label = f"followup-speech (rms={rms:.0f})"
                             initial_audio = [data]
@@ -210,22 +222,39 @@ class WakeWordListener:
                         self.on_wake_detected()
                     except Exception as e:
                         print(f"[wake] on_wake_detected raised: {e}")
+
+                command_handled = False
                 try:
                     # Do NOT drain — if the user said wake+command in one
                     # breath ("sg cube open notepad"), the command audio is
                     # sitting in the queue. _capture will read it first.
                     audio = self._capture(initial=initial_audio)
-                    self.on_wake(audio)
+                    result = self.on_wake(audio)
+                    # on_wake can return True (real command) / False (empty
+                    # or error). Old handlers returning None are treated as
+                    # successful so wake-only mode behaves as before.
+                    command_handled = result is None or bool(result)
                 except Exception as e:
                     print(f"[wake] on_wake handler raised: {e}")
                 finally:
                     self.recognizer.Reset()
                     self._drain()
                     self._capturing = False
-                    # Open the follow-up window so the next command needs no
-                    # wake phrase.
-                    followup_until = time.monotonic() + _FOLLOWUP_WINDOW_S
-                    print(f"[wake] follow-up window open for {_FOLLOWUP_WINDOW_S:.0f}s")
+                    # Update follow-up window based on what just happened.
+                    if command_handled:
+                        empty_in_a_row = 0
+                        followup_until = time.monotonic() + _FOLLOWUP_WINDOW_S
+                        print(f"[wake] follow-up window open for {_FOLLOWUP_WINDOW_S:.0f}s")
+                    else:
+                        empty_in_a_row += 1
+                        if empty_in_a_row >= _FOLLOWUP_MAX_EMPTY:
+                            followup_until = 0.0
+                            empty_in_a_row = 0
+                            print(f"[wake] follow-up closed after {_FOLLOWUP_MAX_EMPTY} empty captures; say {self.wake_phrase!r} again")
+                        else:
+                            # Single empty capture — keep the window open but
+                            # don't extend it.
+                            print(f"[wake] empty capture ({empty_in_a_row}/{_FOLLOWUP_MAX_EMPTY}); follow-up still open")
 
     def stop(self) -> None:
         self._running = False
