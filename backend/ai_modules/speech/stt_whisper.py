@@ -22,8 +22,25 @@ def get_model() -> WhisperModel:
 
 
 def transcribe(audio_path: str | Path) -> dict:
+    """Transcribe a short voice-command clip.
+
+    Tuned for ~2s English command audio:
+      - language="en" — skip Whisper's language-detect pass (~200ms saved,
+        avoids occasional misidentification on noisy short clips).
+      - beam_size=1 — greedy decoding. Beam search helps with long-form
+        audio; for 1-3 word commands it's strictly slower with no gain.
+      - vad_filter=True — drop silence/noise around the spoken bit so the
+        decoder only sees the audio that matters. Big speedup when the user
+        speaks for <1s inside a 2.5s capture window.
+    """
     model = get_model()
-    segments, info = model.transcribe(str(audio_path), beam_size=5)
+    segments, info = model.transcribe(
+        str(audio_path),
+        language="en",
+        beam_size=1,
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 300},
+    )
     text = " ".join(seg.text.strip() for seg in segments).strip()
     return {
         "text": text,
