@@ -21,6 +21,23 @@ def get_model() -> WhisperModel:
     )
 
 
+# Initial-prompt biasing for Whisper. Single-word commands ("lock",
+# "next", "stop") often get rewritten to common everyday words ("luck",
+# "neck") because they have no context. The prompt below is prose-style
+# (NOT a comma-separated list — comma lists teach Whisper to split words
+# like "notepad" into "note, pad"). Reads as if a previous user just
+# spoke similar commands, which is how Whisper's prompt mechanism is
+# designed to work.
+_COMMAND_PROMPT = (
+    "I am using a voice assistant. I say things like open notepad, "
+    "close chrome, lock the screen, play music on youtube, search google, "
+    "what time is it, whats the weather, read the news, set a reminder, "
+    "translate this to spanish, summarize this article. The assistant "
+    "controls notepad, chrome, firefox, vscode, spotify, whatsapp, "
+    "discord, telegram, calculator, explorer, and other apps."
+)
+
+
 def transcribe(audio_path: str | Path) -> dict:
     """Transcribe a short voice-command clip.
 
@@ -32,6 +49,8 @@ def transcribe(audio_path: str | Path) -> dict:
       - vad_filter=True — drop silence/noise around the spoken bit so the
         decoder only sees the audio that matters. Big speedup when the user
         speaks for <1s inside a 2.5s capture window.
+      - initial_prompt — biases decoding toward command vocabulary so
+        "lock" doesn't come through as "luck" / "next" as "neck", etc.
     """
     model = get_model()
     segments, info = model.transcribe(
@@ -40,6 +59,7 @@ def transcribe(audio_path: str | Path) -> dict:
         beam_size=1,
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 300},
+        initial_prompt=_COMMAND_PROMPT,
     )
     text = " ".join(seg.text.strip() for seg in segments).strip()
     return {

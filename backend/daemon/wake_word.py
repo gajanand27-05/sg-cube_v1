@@ -131,11 +131,13 @@ class WakeWordListener:
     def listen(self) -> None:
         self._running = True
         print(f"[wake] listening for {self.wake_phrase!r}... (Ctrl+C to stop)")
+        # Smaller blocksize (250ms vs prior 500ms) gives PartialResult more
+        # frequent updates, halving wake-detection latency in practice.
         with sd.RawInputStream(
             samplerate=self.sample_rate,
             channels=1,
             dtype="int16",
-            blocksize=8000,
+            blocksize=4000,
             device=self.device,
             callback=self._cb,
         ):
@@ -146,11 +148,17 @@ class WakeWordListener:
                     continue
                 if self._capturing:
                     continue
-                if not self.recognizer.AcceptWaveform(data):
+
+                # Feed audio into Vosk. We check PartialResult on every
+                # chunk — it fires the moment the wake phrase appears in
+                # the in-progress recognition, NOT only at end-of-utterance.
+                # That cuts wake latency from ~1-2s (waiting for the user
+                # to finish a phrase) to ~250-400ms.
+                self.recognizer.AcceptWaveform(data)
+                partial = (json.loads(self.recognizer.PartialResult()).get("partial") or "").lower()
+                if self.wake_phrase not in partial:
                     continue
-                text = (json.loads(self.recognizer.Result()).get("text") or "").lower()
-                if self.wake_phrase not in text:
-                    continue
+                text = partial
 
                 print(f"[wake] heard: {text!r}")
                 self._capturing = True
