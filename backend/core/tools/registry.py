@@ -103,13 +103,60 @@ def schemas_prompt() -> str:
     return json.dumps(all_schemas(), indent=2)
 
 
+def _resolve_name(name: str, args: dict) -> str | None:
+    """Fuzzy-match a tool name. LLMs (gemma4 in particular) often drop
+    suffixes ("summarize" -> "summarize_url") or generalize ("weather" ->
+    "get_weather"). When the exact name is missing, look for tools whose
+    name *contains* the requested name, then disambiguate by which one's
+    required params best match the provided args.
+
+    Returns the resolved name, or None if no confident match.
+    """
+    if name in REGISTRY:
+        return name
+
+    q = name.lower()
+    if not q:
+        return None
+
+    # Candidates: any tool whose name contains the requested string.
+    candidates = [n for n in REGISTRY if q in n.lower()]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Multiple matches — score by how well args fit each candidate's params.
+    arg_keys = set(args.keys())
+
+    def score(tool_name: str) -> tuple[int, int, int]:
+        params = REGISTRY[tool_name].schema["parameters"]
+        required = set(params.get("required", []))
+        properties = set(params.get("properties", {}).keys())
+        missing_required = len(required - arg_keys)
+        matched_known = len(arg_keys & properties)
+        # Lower missing_required is better; higher matched_known is better;
+        # shorter name is better as a tiebreaker (closer to what the LLM said).
+        return (-missing_required, matched_known, -len(tool_name))
+
+    best = max(candidates, key=score)
+    # Reject if the best candidate is still missing required args — we'd
+    # rather surface "unknown tool" than dispatch to a wrong tool.
+    best_params = REGISTRY[best].schema["parameters"]
+    if set(best_params.get("required", [])) - arg_keys:
+        return None
+    return best
+
+
 def call(name: str, args: dict) -> dict:
-    """Invoke a registered tool. Raises KeyError if not found."""
-    if name not in REGISTRY:
+    """Invoke a registered tool. Falls back to fuzzy name resolution before
+    giving up — see _resolve_name."""
+    resolved = _resolve_name(name, args)
+    if resolved is None:
         return {"status": "error", "reason": f"unknown tool: {name!r}"}
     try:
-        return REGISTRY[name](**args)
+        return REGISTRY[resolved](**args)
     except TypeError as e:
-        return {"status": "error", "reason": f"bad arguments to {name}: {e}"}
+        return {"status": "error", "reason": f"bad arguments to {resolved}: {e}"}
     except Exception as e:
-        return {"status": "error", "reason": f"{name} raised: {e}"}
+        return {"status": "error", "reason": f"{resolved} raised: {e}"}

@@ -199,16 +199,43 @@ def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]:
             result = call_tool(name, args)
             tool_records.append({"name": name, "args": args, "result": result})
 
+        last_batch = tool_records[-len(calls):]
+
+        # Short-circuit: if EXACTLY ONE tool ran, succeeded, and produced a
+        # user-ready `message`, speak it directly without asking gemma to
+        # compose. Skips a second LLM round-trip (~10s) and eliminates the
+        # "gemma re-calls the same tool" failure mode. Multi-tool chains
+        # still fall through to composition.
+        if len(last_batch) == 1:
+            r = last_batch[0]
+            res = r.get("result") or {}
+            if res.get("status") == "success" and isinstance(res.get("message"), str) and res["message"].strip():
+                spoken = res["message"].strip()
+                context.add_assistant(spoken)
+                return spoken, tool_records
+
+        any_success = any(
+            isinstance(r.get("result"), dict) and r["result"].get("status") == "success"
+            for r in last_batch
+        )
+        if any_success:
+            instruction = (
+                "Multiple tools ran. Compose ONE final_response that summarizes "
+                "all the results for the user. Reply with "
+                "{\"final_response\": \"<short prose>\"}. Do NOT call any more tools."
+            )
+        else:
+            instruction = (
+                "Every tool failed. Either call a different tool listed in the schema, "
+                "or reply with {\"final_response\": \"<short apology>\"}. "
+                "Do NOT invent tool names — use only names from the schema."
+            )
+
         messages.append({"role": "assistant", "content": raw})
         messages.append(
             {
                 "role": "user",
-                "content": json.dumps(
-                    {
-                        "tool_results": tool_records[-len(calls):],
-                        "instruction": "Now reply with {\"final_response\": \"<short sentence to speak>\"} based on the tool result above. Do not call the same tool again.",
-                    }
-                ),
+                "content": json.dumps({"tool_results": last_batch, "instruction": instruction}),
             }
         )
 
