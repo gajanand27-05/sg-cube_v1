@@ -3,6 +3,7 @@ import queue
 from pathlib import Path
 from typing import Callable, Optional
 
+import numpy as np
 import sounddevice as sd
 import vosk
 
@@ -11,20 +12,36 @@ vosk.SetLogLevel(-1)
 MODELS_DIR = Path(__file__).resolve().parents[1] / "ai_modules" / "speech" / "vosk_models"
 DEFAULT_MODEL = "vosk-model-small-en-us-0.15"
 
+# VAD tuning for command capture. RMS values are int16-amplitude scaled
+# (full-scale = 32768). 400 is well above mic noise floor on consumer
+# laptops but below normal speech (~1500-3000).
+_VAD_RMS_THRESHOLD = 400
+_VAD_TRAILING_SILENCE_MS = 700  # stop after this much silence post-speech
+_VAD_MAX_CAPTURE_S = 8.0  # hard cap so a stuck mic doesn't hang forever
+_VAD_INITIAL_WAIT_S = 1.5  # if user never starts speaking, give up
+
 
 class WakeWordListener:
     """Continuously samples the mic and fires `on_wake(captured_audio_bytes)`
-    when `wake_phrase` is recognised. After firing, it collects the next
-    `capture_seconds` of audio from the same stream and hands it to the
-    callback as int16 mono PCM bytes (16kHz). Listening pauses while
-    on_wake runs, then resumes.
+    when `wake_phrase` is recognised.
+
+    Two callbacks:
+      - on_wake_detected(): fires the instant the wake phrase is recognised,
+        BEFORE any audio is captured. Use it to flash the UI and play a
+        chime so the user gets immediate feedback.
+      - on_wake(audio_bytes): fires after the command audio has been
+        captured (variable length, VAD-controlled).
+
+    Capture length is no longer fixed: we read chunks from the mic, look
+    for ~700ms of silence following speech, and stop. Hard caps at 8s.
     """
 
     def __init__(
         self,
         on_wake: Callable[[bytes], None],
+        on_wake_detected: Optional[Callable[[], None]] = None,
         wake_phrase: str = "sg cube",
-        capture_seconds: float = 2.5,
+        capture_seconds: float = 2.5,  # legacy arg, ignored by VAD path
         sample_rate: int = 16000,
         device: Optional[int] = None,
         model_name: str = DEFAULT_MODEL,
@@ -42,7 +59,8 @@ class WakeWordListener:
         )
         self.wake_phrase = wake_phrase.lower()
         self.on_wake = on_wake
-        self.capture_seconds = capture_seconds
+        self.on_wake_detected = on_wake_detected
+        self.capture_seconds = capture_seconds  # unused; kept for arg compat
         self.sample_rate = sample_rate
         self.device = device
         self.queue: queue.Queue = queue.Queue()
@@ -60,17 +78,55 @@ class WakeWordListener:
                 break
 
     def _capture(self) -> bytes:
-        target = int(self.capture_seconds * self.sample_rate * 2)
+        """Read mic chunks until VAD says the user stopped speaking.
+
+        Two phases:
+          1. Wait up to _VAD_INITIAL_WAIT_S for the first speech chunk.
+          2. Once speech started, accumulate chunks and stop once
+             _VAD_TRAILING_SILENCE_MS of silence has passed.
+        Hard cap at _VAD_MAX_CAPTURE_S total.
+        """
+        bytes_per_second = self.sample_rate * 2  # int16 mono
+        max_total_bytes = int(_VAD_MAX_CAPTURE_S * bytes_per_second)
+        silence_threshold_bytes = (_VAD_TRAILING_SILENCE_MS / 1000) * bytes_per_second
+        initial_wait_chunks = max(1, int(_VAD_INITIAL_WAIT_S * 2))  # blocksize=8000 -> 0.5s/chunk
+
         chunks: list[bytes] = []
-        got = 0
-        while got < target:
+        total_bytes = 0
+        speech_seen = False
+        trailing_silence_bytes = 0
+        silence_chunks_before_speech = 0
+
+        while total_bytes < max_total_bytes:
             try:
-                chunk = self.queue.get(timeout=10.0)
+                chunk = self.queue.get(timeout=2.0)
             except queue.Empty:
                 break
+
+            arr = np.frombuffer(chunk, dtype=np.int16)
+            if arr.size == 0:
+                continue
+            rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
+            is_speech = rms > _VAD_RMS_THRESHOLD
+
             chunks.append(chunk)
-            got += len(chunk)
-        return b"".join(chunks)[:target]
+            total_bytes += len(chunk)
+
+            if is_speech:
+                speech_seen = True
+                trailing_silence_bytes = 0
+            else:
+                if speech_seen:
+                    trailing_silence_bytes += len(chunk)
+                    if trailing_silence_bytes >= silence_threshold_bytes:
+                        break
+                else:
+                    silence_chunks_before_speech += 1
+                    if silence_chunks_before_speech >= initial_wait_chunks:
+                        # User never started talking — bail rather than hang.
+                        break
+
+        return b"".join(chunks)
 
     def listen(self) -> None:
         self._running = True
@@ -98,6 +154,13 @@ class WakeWordListener:
 
                 print(f"[wake] heard: {text!r}")
                 self._capturing = True
+                # Fire the immediate-feedback callback BEFORE any capture so
+                # the UI lights up the moment the wake phrase is recognised.
+                if self.on_wake_detected is not None:
+                    try:
+                        self.on_wake_detected()
+                    except Exception as e:
+                        print(f"[wake] on_wake_detected raised: {e}")
                 try:
                     self._drain()
                     audio = self._capture()

@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import wave
 from pathlib import Path
 from typing import Any, Callable
@@ -111,18 +112,26 @@ def _emit(emit: EmitFn | None, event: Any) -> None:
         print(f"[ui] emit raised: {e}")
 
 
+def on_wake_detected(emit: EmitFn | None = None) -> None:
+    """Fires the instant the wake phrase is recognised — BEFORE the command
+    audio is captured. Purpose: give the user immediate feedback (chime +
+    UI flash) so they know to start speaking, rather than waiting 2-3s for
+    the legacy fixed capture window to elapse.
+    """
+    _emit(emit, WakeHeard(peak=0))
+    # Play the chime asynchronously so we don't delay capture start.
+    threading.Thread(target=_play_chime, daemon=True).start()
+
+
 def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> None:
     """Called by WakeWordListener with audio captured after the wake phrase.
 
     If `emit` is provided, structured events are pushed for the UI to consume
     in addition to the existing console prints.
     """
-    _play_chime()
-
     arr = np.frombuffer(audio_bytes, dtype=np.int16)
     peak = int(np.max(np.abs(arr))) if arr.size else 0
     print(f"[trigger] captured {len(arr)/SAMPLE_RATE:.2f}s, peak={peak}/32767")
-    _emit(emit, WakeHeard(peak=peak))
 
     wav_path = _save_wav(audio_bytes)
     try:

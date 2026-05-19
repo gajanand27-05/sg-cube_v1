@@ -9,7 +9,7 @@ try:
 except Exception:
     pass
 
-from backend.daemon.trigger import handle_wake
+from backend.daemon.trigger import handle_wake, on_wake_detected
 from backend.daemon.wake_word import WakeWordListener
 
 
@@ -27,8 +27,12 @@ def _run_terminal(args) -> None:
     def on_wake(audio: bytes) -> None:
         handle_wake(audio, emit=emit)
 
+    def on_detected() -> None:
+        on_wake_detected(emit=emit)
+
     listener = WakeWordListener(
         on_wake=on_wake,
+        on_wake_detected=on_detected,
         wake_phrase=args.wake_phrase,
         capture_seconds=args.capture_seconds,
         device=args.device,
@@ -52,6 +56,7 @@ def _run_tray(args) -> None:
 
     listener = WakeWordListener(
         on_wake=handle_wake,
+        on_wake_detected=lambda: on_wake_detected(emit=None),
         wake_phrase=args.wake_phrase,
         capture_seconds=args.capture_seconds,
         device=args.device,
@@ -71,6 +76,7 @@ def _run_tray(args) -> None:
 def _run_headless(args) -> None:
     listener = WakeWordListener(
         on_wake=handle_wake,
+        on_wake_detected=lambda: on_wake_detected(emit=None),
         wake_phrase=args.wake_phrase,
         capture_seconds=args.capture_seconds,
         device=args.device,
