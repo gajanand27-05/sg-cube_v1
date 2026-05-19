@@ -154,9 +154,44 @@ def call(name: str, args: dict) -> dict:
     resolved = _resolve_name(name, args)
     if resolved is None:
         return {"status": "error", "reason": f"unknown tool: {name!r}"}
+    args = _coerce_args(resolved, args)
     try:
         return REGISTRY[resolved](**args)
     except TypeError as e:
         return {"status": "error", "reason": f"bad arguments to {resolved}: {e}"}
     except Exception as e:
         return {"status": "error", "reason": f"{resolved} raised: {e}"}
+
+
+def _coerce_args(tool_name: str, args: dict) -> dict:
+    """Remap argument names when the LLM hallucinates parameter aliases.
+
+    gemma frequently calls open_app({"app_name": "notepad"}) when the schema
+    says `name`, or summarize_url({"link": ...}) instead of `url`. We accept
+    these by mapping any unknown arg key onto the closest schema param via
+    substring containment — same trick the tool-name resolver uses.
+    """
+    if not isinstance(args, dict) or not args:
+        return args
+    schema_params = REGISTRY[tool_name].schema["parameters"].get("properties", {})
+    valid = set(schema_params.keys())
+    if not valid:
+        return args
+    out: dict = {}
+    for key, value in args.items():
+        if key in valid:
+            out[key] = value
+            continue
+        # Find the schema param closest to this hallucinated key.
+        k = key.lower()
+        # Prefer one where the schema name is contained in the hallucinated key
+        # ("name" in "app_name", "url" in "page_url"), then the reverse.
+        contained = [p for p in valid if p.lower() in k]
+        if not contained:
+            contained = [p for p in valid if k in p.lower()]
+        if len(contained) == 1 and contained[0] not in out:
+            out[contained[0]] = value
+        else:
+            # Ambiguous or no match — keep the original key (will TypeError).
+            out[key] = value
+    return out

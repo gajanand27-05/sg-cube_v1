@@ -16,6 +16,7 @@ set into REGISTRY.
 """
 import json
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -69,13 +70,18 @@ RULES:
 - Conversation history is provided. Resolve follow-ups ("louder", "next song",
   "and then close it") relative to the most recent commands.
 - REFERENT RESOLUTION: when the user says "that", "it", "this", or "the result",
-  it refers to the most recent assistant message in the conversation. Take the
-  text of that message and use it as the relevant tool argument. DO NOT ask
-  the user to repeat themselves. Example:
-    [assistant]: Albert Einstein was a German-born theoretical physicist...
-    [user]: translate that to spanish
-    YOU MUST RESPOND:
-    {{"tool_calls": [{{"name": "translate", "args": {{"text": "Albert Einstein was a German-born theoretical physicist...", "target_language": "Spanish"}}}}]}}
+  it refers to the text of the MOST RECENT assistant message in the conversation
+  history above. Find that message, then copy its EXACT text into the relevant
+  tool argument. Example pattern (placeholders in angle brackets):
+    History contains: [assistant]: <PREVIOUS_ASSISTANT_TEXT>
+    Current user message: "translate that to <LANG>"
+    You output:
+      {{"tool_calls": [{{"name": "translate", "args": {{"text": "<PREVIOUS_ASSISTANT_TEXT>", "target_language": "<LANG>"}}}}]}}
+  Substitute the placeholders with real values from history — do NOT output
+  the angle-bracket placeholders literally.
+- Use the EXACT parameter names listed in the schema above. Do not invent
+  aliases like "app_name" when the schema says "name", or "link" when it says
+  "url". Wrong parameter names break the tool call.
 """
 
 
@@ -152,11 +158,38 @@ def _normalize(parsed: Any) -> dict[str, Any]:
     return {"final_response": "Sorry, I got confused."}
 
 
+_REFERENT_RE = re.compile(r"\b(that|this)\b", re.IGNORECASE)
+
+
+def _inline_referent(text: str, context: ConversationContext) -> str:
+    """Pre-resolve "that"/"this" against the most recent assistant turn.
+
+    gemma intermittently fails to connect referents to prior assistant
+    responses despite being given the history. Doing the substitution in
+    code is reliable: "and translate that to french" + prior reply of
+    "Tokyo, Japan: partly cloudy, 18°C" becomes "and translate \"Tokyo,
+    Japan: partly cloudy, 18°C\" to french" — gemma now sees explicit text.
+    """
+    if not _REFERENT_RE.search(text):
+        return text
+    last_assistant = next((t.text for t in reversed(context.turns) if t.role == "assistant"), None)
+    if not last_assistant:
+        return text
+    quoted = f'"{last_assistant}"'
+    return _REFERENT_RE.sub(quoted, text, count=1)
+
+
 def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]:
     """Run the agent loop. Returns (spoken_text, [tool_call_records])."""
+    resolved_text = _inline_referent(text, context)
+    # Store the original phrasing in history so future turns see the actual
+    # words the user said, not our rewritten form.
     context.add_user(text)
 
     history = context.render()
+    # Replace the most recent user entry (which we just added) with the
+    # referent-resolved version for the LLM only.
+    history[-1] = {"role": "user", "content": resolved_text}
     messages = [{"role": "system", "content": _system_prompt()}, *history]
 
     tool_records: list[dict] = []
