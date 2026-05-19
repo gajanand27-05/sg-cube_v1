@@ -1,3 +1,4 @@
+import json
 import logging
 import subprocess
 from datetime import datetime
@@ -7,45 +8,25 @@ from backend.core.orchestrator.llm_layer import Intent
 
 log = logging.getLogger(__name__)
 
-# ── Aliases ──────────────────────────────────────────────────────────────
-# user-spoken name -> canonical launch name (consumed by Windows `start`)
-OPEN_ALIASES: dict[str, str] = {
-    "calculator": "calc",
+# ── Human-language hints ────────────────────────────────────────────────
+# Spoken phrases that won't naturally substring-match a Start Menu name
+# (because the spoken word is a generic concept, not a brand). Anything
+# brand-named (whatsapp, spotify, chrome, calculator, ...) is resolved at
+# runtime — no per-app code lives here.
+OPEN_HINTS: dict[str, str] = {
+    "browser": "chrome",  # falls back to whatever browser the user has installed
+    "files": "file explorer",
+    "file explorer": "file explorer",
     "text editor": "notepad",
-    "browser": "chrome",
-    "google chrome": "chrome",
-    "vscode": "code",
-    "vs code": "code",
-    "visual studio code": "code",
     "code editor": "code",
-    "vlc": "vlc",
-    "media player": "vlc",
-    "explorer": "explorer",
-    "file explorer": "explorer",
-    "files": "explorer",
 }
 
-# user-spoken name -> Windows .exe name used by taskkill /IM
-CLOSE_ALIASES: dict[str, str] = {
-    "calc": "Calculator.exe",
-    "calculator": "Calculator.exe",
-    "notepad": "notepad.exe",
-    "chrome": "chrome.exe",
-    "browser": "chrome.exe",
-    "google chrome": "chrome.exe",
-    "code": "Code.exe",
-    "vscode": "Code.exe",
-    "vs code": "Code.exe",
-    "firefox": "firefox.exe",
-    "spotify": "Spotify.exe",
-    "discord": "Discord.exe",
-    "whatsapp": "WhatsApp.exe",
-    "telegram": "Telegram.exe",
-    "vlc": "vlc.exe",
-    "media player": "vlc.exe",
-    "explorer": "explorer.exe",
-    "file explorer": "explorer.exe",
-    "files": "explorer.exe",
+CLOSE_HINTS: dict[str, str] = {
+    "browser": "chrome",
+    "files": "explorer",
+    "file explorer": "explorer",
+    "text editor": "notepad",
+    "code editor": "code",
 }
 
 # ── Safety filters ───────────────────────────────────────────────────────
@@ -144,6 +125,144 @@ def _launch_elevated(target_label: str, command: str) -> dict:
     return {"status": "success", "message": f"opened {target_label} (elevated)"}
 
 
+# ── Generic app resolution (Start Menu + running processes) ─────────────
+
+# Cached list of (Name, AppID) tuples from PowerShell's Get-StartApps.
+# Populated lazily on first open. Use refresh_apps_cache() if a new app
+# was installed after the daemon started.
+_apps_cache: list[tuple[str, str]] | None = None
+
+
+def _load_start_apps() -> list[tuple[str, str]]:
+    """Enumerate every installed app (UWP + Win32 + Start Menu shortcuts)
+    via PowerShell's Get-StartApps. Returns [(Name, AppID), ...].
+    """
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-StartApps | ConvertTo-Json -Compress"],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+    except Exception as e:
+        log.warning("Get-StartApps failed: %s", e)
+        return []
+    raw = (result.stdout or "").strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    # Single result comes back as a dict, multiple as a list.
+    if isinstance(data, dict):
+        data = [data]
+    return [(d.get("Name", ""), d.get("AppID", "")) for d in data if d.get("AppID")]
+
+
+def _get_apps_cache() -> list[tuple[str, str]]:
+    global _apps_cache
+    if _apps_cache is None:
+        _apps_cache = _load_start_apps()
+    return _apps_cache
+
+
+def refresh_apps_cache() -> None:
+    """Re-scan installed apps. Call this if the user installs something new
+    while the daemon is running."""
+    global _apps_cache
+    _apps_cache = _load_start_apps()
+
+
+def _match_app(query: str, candidates: list[str]) -> str | None:
+    """Pick the best app name from `candidates` for the spoken `query`.
+
+    Match order: exact (case-insensitive) > query is a substring of name
+    > name is a substring of query. Ties broken by shortest name.
+    """
+    q = query.strip().lower()
+    if not q or not candidates:
+        return None
+    # 1. Exact
+    for n in candidates:
+        if n.lower() == q:
+            return n
+    # 2. Query is substring of name ("calc" -> "Calculator", "whatsapp" -> "WhatsApp")
+    matches = [n for n in candidates if q in n.lower()]
+    if matches:
+        return min(matches, key=len)
+    # 3. Name is substring of query ("google chrome" -> "Chrome")
+    matches = [n for n in candidates if n.lower() in q]
+    if matches:
+        return max(matches, key=len)
+    return None
+
+
+def _resolve_app_id(query: str) -> tuple[str, str] | None:
+    """Resolve a user query to (display_name, AppID) using Get-StartApps."""
+    apps = _get_apps_cache()
+    if not apps:
+        return None
+    names = [name for name, _ in apps]
+    best = _match_app(query, names)
+    if best is None:
+        return None
+    for name, app_id in apps:
+        if name == best:
+            return name, app_id
+    return None
+
+
+def _running_proc_names() -> list[str]:
+    """Snapshot of running process names (e.g. ['chrome.exe', 'CalculatorApp.exe'])."""
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except Exception:
+        return []
+    procs: list[str] = []
+    for line in (result.stdout or "").splitlines():
+        if line.startswith('"'):
+            name = line.split('","')[0].strip('"')
+            if name:
+                procs.append(name)
+    return procs
+
+
+def _find_running_proc(query: str) -> str | None:
+    """Pick the best running .exe name matching `query`. Handles cases where
+    the spoken name doesn't equal the process name (calculator -> CalculatorApp.exe,
+    whatsapp -> WhatsApp.Root.exe).
+    """
+    q = query.strip().lower().replace(" ", "")
+    if not q:
+        return None
+    procs = _running_proc_names()
+    if not procs:
+        return None
+    # Normalize: drop ".exe" and any dotted suffixes for the matching key only.
+    def base(p: str) -> str:
+        b = p.lower()
+        if b.endswith(".exe"):
+            b = b[:-4]
+        return b
+
+    # 1. Exact base match
+    for p in procs:
+        if base(p) == q:
+            return p
+    # 2. Query is substring of base ("calculator" in "calculatorapp")
+    matches = [p for p in procs if q in base(p)]
+    if matches:
+        return min(matches, key=lambda p: len(base(p)))
+    # 3. Base is substring of query ("chrome" in "google chrome")
+    matches = [p for p in procs if base(p) in q]
+    if matches:
+        return max(matches, key=lambda p: len(base(p)))
+    return None
+
+
 # ── Handlers ─────────────────────────────────────────────────────────────
 
 
@@ -154,21 +273,30 @@ def handle_open_app(intent: Intent) -> dict:
         return {"status": "blocked", "reason": "empty target"}
 
     # 1. System app? Route through UAC — Windows handles the password prompt.
-    #    This check runs BEFORE is_target_dangerous so that exact-match system
-    #    names (regedit, taskmgr, etc.) go through UAC instead of being hard
-    #    blocked by the substring filter.
     if is_system_app(target):
-        elevated_cmd = SYSTEM_APP_COMMANDS[target]
-        return _launch_elevated(target_raw, elevated_cmd)
+        return _launch_elevated(target_raw, SYSTEM_APP_COMMANDS[target])
 
-    # 2. Substring dangerous filter (catches abuse like "open random-regedit-tool").
+    # 2. Substring dangerous filter (blocks abuse like "open random-regedit-tool").
     if is_target_dangerous(target):
         return {"status": "blocked", "reason": f"dangerous target rejected: {target_raw!r}"}
 
-    # 3. Regular app — `start` resolves Start-Menu shortcuts, PATH, App-Paths.
-    canonical = OPEN_ALIASES.get(target, target_raw)
+    # 3. Resolve via Get-StartApps. Apply OPEN_HINTS first for human-language
+    #    phrases that won't naturally match a Start Menu name ("browser", "files").
+    query = OPEN_HINTS.get(target, target_raw)
+    resolved = _resolve_app_id(query)
+    if resolved is not None:
+        name, app_id = resolved
+        try:
+            # explorer.exe shell:AppsFolder\<AppID> launches UWP and Win32 alike.
+            subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{app_id}"])
+        except Exception as e:
+            return {"status": "error", "reason": str(e)}
+        return {"status": "success", "message": f"opened {name}"}
+
+    # 4. Last-resort fallback: hand the raw target to `start` (catches things
+    #    not in Get-StartApps — typed paths, App-Paths registrations, etc.).
     try:
-        subprocess.Popen(f'start "" "{canonical}"', shell=True)
+        subprocess.Popen(f'start "" "{target_raw}"', shell=True)
     except Exception as e:
         return {"status": "error", "reason": str(e)}
     return {"status": "success", "message": f"opened {target_raw}"}
@@ -182,32 +310,22 @@ def handle_close_app(intent: Intent) -> dict:
     if is_target_dangerous(target):
         return {"status": "blocked", "reason": f"dangerous target rejected: {target_raw!r}"}
 
-    proc = CLOSE_ALIASES.get(target, f"{target_raw}.exe")
+    # Apply CLOSE_HINTS for human-language terms, then fuzzy-match against
+    # the live process list.
+    query = CLOSE_HINTS.get(target, target_raw)
+    proc = _find_running_proc(query)
+    if proc is None:
+        return {"status": "blocked", "reason": f"{target_raw!r} is not running"}
 
     try:
         result = subprocess.run(
             ["taskkill", "/IM", proc, "/F"],
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, timeout=10, check=False,
         )
     except Exception as e:
         return {"status": "error", "reason": str(e)}
-
     if result.returncode == 0:
         return {"status": "success", "message": f"closed {target_raw}"}
-
-    # Fallback: if we constructed the .exe name ourselves and it failed,
-    # try the target verbatim once.
-    if target not in CLOSE_ALIASES and proc != target_raw:
-        try:
-            r2 = subprocess.run(
-                ["taskkill", "/IM", target_raw, "/F"],
-                capture_output=True, text=True, check=False,
-            )
-            if r2.returncode == 0:
-                return {"status": "success", "message": f"closed {target_raw}"}
-        except Exception:
-            pass
-
     msg = (result.stderr or result.stdout).strip() or "taskkill failed"
     return {"status": "error", "reason": msg}
 
