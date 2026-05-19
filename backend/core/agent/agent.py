@@ -68,6 +68,14 @@ RULES:
 - For "open X" where X is a website -> call open_url.
 - Conversation history is provided. Resolve follow-ups ("louder", "next song",
   "and then close it") relative to the most recent commands.
+- REFERENT RESOLUTION: when the user says "that", "it", "this", or "the result",
+  it refers to the most recent assistant message in the conversation. Take the
+  text of that message and use it as the relevant tool argument. DO NOT ask
+  the user to repeat themselves. Example:
+    [assistant]: Albert Einstein was a German-born theoretical physicist...
+    [user]: translate that to spanish
+    YOU MUST RESPOND:
+    {{"tool_calls": [{{"name": "translate", "args": {{"text": "Albert Einstein was a German-born theoretical physicist...", "target_language": "Spanish"}}}}]}}
 """
 
 
@@ -105,8 +113,9 @@ def _normalize(parsed: Any) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         return {"final_response": "Sorry, I got confused."}
 
-    # final_response synonyms
-    for key in ("final_response", "final_answer", "response", "answer", "reply"):
+    # final_response synonyms — include "error"/"message" so gemma's
+    # complaint reaches the user instead of being swallowed.
+    for key in ("final_response", "final_answer", "response", "answer", "reply", "message", "error"):
         v = parsed.get(key)
         if isinstance(v, str) and v.strip():
             return {"final_response": v.strip()}
