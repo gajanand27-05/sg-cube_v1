@@ -45,6 +45,14 @@ pyautogui==0.9.54
 # ── Phase 11d: information feeds (RSS only — stocks/crypto/weather hit JSON APIs directly) ──
 feedparser==6.0.11
 
+# ── Phase 11e: content analysis (PDF/web summarize, OCR, translate, read-aloud, explain code) ──
+# pytesseract also needs the Tesseract binary on PATH — install separately:
+#   https://github.com/UB-Mannheim/tesseract/wiki
+pypdf==5.1.0
+beautifulsoup4==4.12.3
+pytesseract==0.3.13
+pyperclip==1.9.0
+
 # ── Phase 9d: Textual sci-fi terminal UI ──
 textual==0.86.0
 pyfiglet==1.0.2

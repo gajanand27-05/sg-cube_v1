@@ -36,6 +36,12 @@ from backend.core.tools import finance as _finance  # noqa: F401
 from backend.core.tools import news as _news  # noqa: F401
 from backend.core.tools import weather as _weather  # noqa: F401
 
+# Phase 11e — content analysis (PDF/web summarize, translate, read-aloud, explain code, OCR)
+from backend.core.tools import ocr as _ocr  # noqa: F401
+from backend.core.tools import read_aloud as _read_aloud  # noqa: F401
+from backend.core.tools import summarize as _summarize  # noqa: F401
+from backend.core.tools import translate as _translate  # noqa: F401
+
 
 @tool
 def open_app(name: str) -> dict:
