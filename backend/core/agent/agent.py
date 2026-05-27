@@ -230,8 +230,9 @@ def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]:
         # ── Verification Layer ───────────────────────────────────────
         valid_calls = []
         verification_errors = []
+        is_multi_step = len(calls) > 1
         for c in calls:
-            v_res = verify_tool_call(text, c)
+            v_res = verify_tool_call(text, c, is_multi_step=is_multi_step)
             bus.publish(VerificationEvent(
                 tool_name=c.get("name") or "unknown",
                 is_valid=v_res.is_valid,

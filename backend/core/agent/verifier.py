@@ -77,17 +77,16 @@ Reply with a single JSON object: {{"verified": true}} or {{"verified": false, "r
         return False
 
 
-def verify(user_query: str, call: dict) -> VerificationResult:
+def verify(user_query: str, call: dict, is_multi_step: bool = False) -> VerificationResult:
     """The SG_CUBE Verification Stack:
     1. Rule-based checks (Hallucination, Schema, Security, Injection)
-    2. Confidence scoring
-    3. Conditional verifier model
+    2. Confidence scoring (Routing Signal)
+    3. Conditional verifier model (Only when needed)
     """
     name = (call.get("name") or "").strip()
     args = call.get("args") or {}
     reasoning = (call.get("reasoning") or "").strip()
-    confidence = call.get("confidence", 0.0)
-
+    
     # ── 1. Rule-based Safety Checks ──────────────────────────────────
     
     # A. Hallucination Check
@@ -128,24 +127,31 @@ def verify(user_query: str, call: dict) -> VerificationResult:
     if tool_obj.security == SecurityLevel.DANGEROUS:
          return VerificationResult(False, error=f"Tool {resolved!r} is marked DANGEROUS and is blocked.")
 
-    # ── 2. Confidence Scoring ────────────────────────────────────────
+    # ── 2. Confidence Scoring (Routing Signal) ───────────────────────
     
-    # If the Agent itself is not confident, we don't even bother the verifier model.
     try:
-        conf_score = float(confidence)
+        conf_score = float(call.get("confidence", 0.0))
     except (TypeError, ValueError):
         conf_score = 0.0
-        
-    if conf_score < 0.7:
-        return VerificationResult(False, error=f"Agent confidence too low ({conf_score}) for tool {resolved!r}.")
 
     # ── 3. Conditional Verifier Model ────────────────────────────────
+    # We only trigger the heavy secondary model if:
+    # - Confidence is low (< 0.80)
+    # - The tool requires confirmation (CONFIRM_REQUIRED)
+    # - It's part of a multi-step plan
     
-    # For critical tools, or if confidence is not perfect, we run the secondary model.
-    needs_model = (tool_obj.security != SecurityLevel.TRUSTED) or (conf_score < 0.9)
+    needs_deep_verification = (
+        conf_score < 0.80 or 
+        tool_obj.security == SecurityLevel.CONFIRM_REQUIRED or
+        is_multi_step
+    )
     
-    if needs_model:
+    if needs_deep_verification:
+        log.info(f"Triggering deep verification for {resolved!r} (conf={conf_score}, multi={is_multi_step})")
         if not _secondary_check(user_query, resolved, args, reasoning):
-            return VerificationResult(False, error="Action rejected by secondary model: logic or relevance mismatch.")
+            return VerificationResult(
+                False, 
+                error="Action rejected by secondary verifier: logic or relevance mismatch."
+            )
 
     return VerificationResult(True, reasoning=reasoning)
