@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -9,12 +10,39 @@ from backend.server.config import settings
 
 log = logging.getLogger(__name__)
 
+# ── Layer 1: Rule-Based Safety Definitions ──────────────────────────
+
+# Deterministic blacklist of dangerous tokens
+DANGEROUS_TOKENS = [
+    "rm -rf", "shutdown", "format", "mkfs", "reg delete", "del /",
+    "system32", "powershell -c", "cmd /c", "net user", "net localgroup"
+]
+
+# Shell injection patterns
+INJECTION_PATTERN = re.compile(r"[;&|`$<>\{\}\[\]\\]")
+
 
 class VerificationResult:
     def __init__(self, is_valid: bool, error: str = "", reasoning: str = ""):
         self.is_valid = is_valid
         self.error = error
         self.reasoning = reasoning
+
+
+def _is_malicious(args: dict) -> str | None:
+    """Scan all tool arguments for injection patterns or dangerous tokens."""
+    for val in args.values():
+        if not isinstance(val, str):
+            continue
+        v = val.lower()
+        # 1. Blacklist check
+        for token in DANGEROUS_TOKENS:
+            if token in v:
+                return f"Dangerous token detected: {token!r}"
+        # 2. Injection check
+        if INJECTION_PATTERN.search(val):
+            return f"Potential injection pattern detected in argument: {val!r}"
+    return None
 
 
 def _secondary_check(user_query: str, tool_name: str, tool_args: dict, reasoning: str) -> bool:
@@ -51,7 +79,7 @@ Reply with a single JSON object: {{"verified": true}} or {{"verified": false, "r
 
 def verify(user_query: str, call: dict) -> VerificationResult:
     """The SG_CUBE Verification Stack:
-    1. Rule-based checks (Hallucination, Schema, Security)
+    1. Rule-based checks (Hallucination, Schema, Security, Injection)
     2. Confidence scoring
     3. Conditional verifier model
     """
@@ -91,10 +119,12 @@ def verify(user_query: str, call: dict) -> VerificationResult:
             if expected_type == "boolean" and not isinstance(val, bool):
                 return VerificationResult(False, error=f"Argument {key!r} must be a boolean.")
 
-    # C. Security Check (DANGEROUS / CONFIRM)
-    from backend.core.tools.sandbox import guard
-    # We don't call guard.check here because it would trigger a confirmation
-    # event/token too early. We just check if it's DANGEROUS which is a hard block.
+    # C. Injection & Blacklist Check
+    malicious_reason = _is_malicious(args)
+    if malicious_reason:
+        return VerificationResult(False, error=malicious_reason)
+
+    # D. Security Check (DANGEROUS / CONFIRM)
     if tool_obj.security == SecurityLevel.DANGEROUS:
          return VerificationResult(False, error=f"Tool {resolved!r} is marked DANGEROUS and is blocked.")
 
