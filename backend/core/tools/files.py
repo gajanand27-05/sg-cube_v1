@@ -1,10 +1,44 @@
 """File ops + dictation tools (Phase 11b)."""
+import os
 import subprocess
 from pathlib import Path
 
 import pyautogui
 
-from backend.core.tools.registry import tool
+from backend.core.tools.registry import SecurityLevel, tool
+
+# ... (rest of imports)
+
+@tool(security=SecurityLevel.CONFIRM_REQUIRED)
+def delete_file(file: str) -> dict:
+    """Delete a file. `file` is a full path or a substring of a file name in
+    your common user folders. REQUIRES CONFIRMATION."""
+    # This logic matches summarize.py's _resolve_file
+    p = Path(file).expanduser()
+    resolved = None
+    if p.exists() and p.is_file():
+        resolved = p
+    else:
+        q = file.strip().lower()
+        if q:
+            for root in SEARCH_ROOTS:
+                if not root.exists(): continue
+                try:
+                    for candidate in root.rglob("*"):
+                        if candidate.is_file() and q in candidate.name.lower():
+                            resolved = candidate
+                            break
+                    if resolved: break
+                except (PermissionError, OSError): continue
+
+    if not resolved:
+        return {"status": "blocked", "reason": f"no file matching {file!r}"}
+    
+    try:
+        os.remove(resolved)
+        return {"status": "success", "message": f"Deleted {resolved.name}"}
+    except Exception as e:
+        return {"status": "error", "reason": f"Delete failed: {e}"}
 
 SPECIAL_FOLDERS = {
     "downloads": "Downloads",

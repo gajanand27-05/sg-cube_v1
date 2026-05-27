@@ -31,6 +31,13 @@ class ToolStatus(str, Enum):
     SUCCESS = "success"
     BLOCKED = "blocked"
     ERROR = "error"
+    PENDING_CONFIRMATION = "pending_confirmation"
+
+
+class SecurityLevel(str, Enum):
+    TRUSTED = "trusted"              # Safe to run (e.g., get_weather)
+    CONFIRM_REQUIRED = "confirm"      # Needs user OK (e.g., delete_file)
+    DANGEROUS = "dangerous"          # Blocked by default (e.g., format C:)
 
 
 class ToolResult(BaseModel):
@@ -52,6 +59,14 @@ class ToolResult(BaseModel):
     def error(cls, reason: str) -> "ToolResult":
         return cls(status=ToolStatus.ERROR, reason=reason)
 
+    @classmethod
+    def pending(cls, confirmation_token: str, message: str) -> "ToolResult":
+        return cls(
+            status=ToolStatus.PENDING_CONFIRMATION,
+            message=message,
+            data={"token": confirmation_token}
+        )
+
 
 @dataclass
 class Tool:
@@ -59,6 +74,7 @@ class Tool:
     description: str
     schema: dict[str, Any]
     func: Callable[..., dict | ToolResult]
+    security: SecurityLevel = SecurityLevel.TRUSTED
 
     def __call__(self, **kwargs) -> ToolResult:
         try:
@@ -95,48 +111,67 @@ def _type_to_json(py_type: Any) -> str:
     return _PRIMITIVE_TYPES.get(py_type, "string")
 
 
-def tool(func: Callable[..., dict]) -> Callable[..., dict]:
-    """Register `func` as a callable tool. The function's docstring becomes
-    the LLM-facing description; its type-hinted parameters become the schema.
-
-    Functions MUST return a dict. Optional params (those with default values)
-    are not listed in the `required` array.
+def tool(security_or_func: Any = SecurityLevel.TRUSTED) -> Any:
+    """Register a function as a tool. Supports:
+      @tool
+      @tool(security=SecurityLevel.CONFIRM_REQUIRED)
     """
-    name = func.__name__
-    description = (func.__doc__ or "").strip().split("\n")[0]
+    security = SecurityLevel.TRUSTED
+    func = None
 
-    sig = inspect.signature(func)
-    hints = get_type_hints(func)
-    properties: dict[str, dict] = {}
-    required: list[str] = []
-    for pname, param in sig.parameters.items():
-        if pname == "self":
-            continue
-        ann = hints.get(pname, str)
-        # Strip Optional[...] / Union[..., None]
-        origin = getattr(ann, "__origin__", None)
-        if origin is type(None):
-            ann_type = str
-        else:
-            args = getattr(ann, "__args__", ())
-            non_none = [a for a in args if a is not type(None)]
-            ann_type = non_none[0] if non_none else ann
-        properties[pname] = {"type": _type_to_json(ann_type)}
-        if param.default is inspect.Parameter.empty:
-            required.append(pname)
+    if callable(security_or_func):
+        # Used as @tool
+        func = security_or_func
+    else:
+        # Used as @tool(security=...)
+        security = security_or_func
 
-    schema = {
-        "name": name,
-        "description": description,
-        "parameters": {
-            "type": "object",
-            "properties": properties,
-            "required": required,
-        },
-    }
+    def decorator(f: Callable[..., dict]) -> Callable[..., dict]:
+        name = f.__name__
+        description = (f.__doc__ or "").strip().split("\n")[0]
 
-    REGISTRY[name] = Tool(name=name, description=description, schema=schema, func=func)
-    return func
+        sig = inspect.signature(f)
+        hints = get_type_hints(f)
+        properties: dict[str, dict] = {}
+        required: list[str] = []
+        for pname, param in sig.parameters.items():
+            if pname == "self":
+                continue
+            ann = hints.get(pname, str)
+            # Strip Optional[...] / Union[..., None]
+            origin = getattr(ann, "__origin__", None)
+            if origin is type(None):
+                ann_type = str
+            else:
+                args = getattr(ann, "__args__", ())
+                non_none = [a for a in args if a is not type(None)]
+                ann_type = non_none[0] if non_none else ann
+            properties[pname] = {"type": _type_to_json(ann_type)}
+            if param.default is inspect.Parameter.empty:
+                required.append(pname)
+
+        schema = {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+            },
+        }
+
+        REGISTRY[name] = Tool(
+            name=name,
+            description=description,
+            schema=schema,
+            func=f,
+            security=security
+        )
+        return f
+
+    if func:
+        return decorator(func)
+    return decorator
 
 
 def all_schemas() -> list[dict]:
@@ -200,6 +235,14 @@ def call(name: str, args: dict) -> ToolResult:
     resolved = _resolve_name(name, args)
     if resolved is None:
         return ToolResult.blocked(f"unknown tool: {name!r}")
+    
+    # ── Security Layer ───────────────────────────────────────────────
+    from backend.core.tools.sandbox import guard
+    check_res = guard.check(resolved, args)
+    if check_res:
+        return check_res
+    # ────────────────────────────────────────────────────────────────
+
     args = _coerce_args(resolved, args)
     return REGISTRY[resolved](**args)
 
