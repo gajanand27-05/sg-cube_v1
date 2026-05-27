@@ -170,7 +170,8 @@ class SGCubeApp(App):
         # Subscribe to all daemon events via the central bus
         for event_type in [
             WakeHeard, CommandTranscribed, IntentResolved,
-            Executed, SpokenResponse, TriggerError, StateChangedEvent
+            Executed, SpokenResponse, TriggerError, StateChangedEvent,
+            VerificationEvent
         ]:
             bus.subscribe(event_type, lambda e: self.call_from_thread(self.handle_daemon_event, e))
 
@@ -248,6 +249,14 @@ class SGCubeApp(App):
         elif isinstance(event, CommandTranscribed):
             text = event.text if event.text else "(no speech detected)"
             self.query_one("#transcript-body", Static).update(f"> {text}")
+
+        elif isinstance(event, VerificationEvent):
+            status = "VERIFIED" if event.is_valid else "FAILED"
+            mark = "✓" if event.is_valid else "✗"
+            msg = f"{mark} {event.tool_name} [{status}]"
+            if event.error:
+                msg += f": {event.error}"
+            self.query_one("#intent-body", Static).update(msg)
 
         elif isinstance(event, IntentResolved):
             self._last_source_layer = event.source_layer

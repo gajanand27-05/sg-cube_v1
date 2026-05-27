@@ -22,8 +22,11 @@ from typing import Any
 import httpx
 
 from backend.core.agent.context import ConversationContext
+from backend.core.agent.verifier import verify as verify_tool_call
+from backend.core.events import bus
 from backend.core.tools import builtins  # noqa: F401 — populates REGISTRY
 from backend.core.tools.registry import REGISTRY, call as call_tool, schemas_prompt
+from backend.daemon.ui_events import VerificationEvent
 from backend.server.config import settings
 
 log = logging.getLogger(__name__)
@@ -49,7 +52,7 @@ Available tools (JSON schema):
 PROTOCOL — every reply MUST be a single JSON object with EXACTLY ONE of these shapes:
 
   TOOL CALL (when an action is needed):
-    {{"tool_calls": [{{"name": "<tool_name>", "args": {{"<param>": "<value>"}}}}]}}
+    {{"tool_calls": [{{"name": "<tool_name>", "args": {{"<param>": "<value>"}}, "confidence": <0.0-1.0>, "reasoning": "<why this tool fits the request>"}}]}}
 
   FINAL ANSWER (when no action is needed, or after seeing tool results, or for a question):
     {{"final_response": "<short sentence to speak aloud>"}}
@@ -135,7 +138,14 @@ def _normalize(parsed: Any) -> dict[str, Any]:
         args = c.get("args") or c.get("arguments") or c.get("parameters") or c.get("params") or {}
         if not isinstance(args, dict):
             args = {}
-        return {"name": str(name).strip(), "args": args}
+        confidence = c.get("confidence")
+        reasoning = c.get("reasoning") or ""
+        return {
+            "name": str(name).strip(),
+            "args": args,
+            "confidence": confidence,
+            "reasoning": str(reasoning).strip()
+        }
 
     # Multiple tool calls in a list
     tc = parsed.get("tool_calls") or parsed.get("toolCalls") or parsed.get("calls")
@@ -216,6 +226,32 @@ def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]:
             spoken = "Sorry, I didn't know what to do with that."
             context.add_assistant(spoken)
             return spoken, tool_records
+
+        # ── Verification Layer ───────────────────────────────────────
+        valid_calls = []
+        verification_errors = []
+        for c in calls:
+            v_res = verify_tool_call(text, c)
+            bus.publish(VerificationEvent(
+                tool_name=c.get("name") or "unknown",
+                is_valid=v_res.is_valid,
+                error=v_res.error if not v_res.is_valid else None
+            ))
+            if v_res.is_valid:
+                valid_calls.append(c)
+            else:
+                verification_errors.append(v_res.error)
+
+        if verification_errors:
+            log.warning(f"agent: verification failed: {verification_errors}")
+            # Re-inject errors for the LLM to fix in the next iteration.
+            error_msg = "Verification failed for some tool calls:\n" + \
+                        "\n".join(f"- {e}" for e in verification_errors) + \
+                        "\nPlease correct the tool names or arguments."
+            messages.append({"role": "assistant", "content": raw})
+            messages.append({"role": "user", "content": error_msg})
+            continue  # retry next iteration
+        # ─────────────────────────────────────────────────────────────
 
         # Execute each tool call. If any call is a "respond" / "speak" /
         # "say" alias, treat its text as the final answer and exit.

@@ -41,3 +41,10 @@ class SpokenResponse:
 @dataclass
 class TriggerError:
     detail: str
+
+
+@dataclass
+class VerificationEvent:
+    tool_name: str
+    is_valid: bool
+    error: str | None = None
