@@ -17,8 +17,40 @@ Example:
 """
 import inspect
 import json
+import logging
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Callable, get_type_hints
+
+from pydantic import BaseModel, Field
+
+log = logging.getLogger(__name__)
+
+
+class ToolStatus(str, Enum):
+    SUCCESS = "success"
+    BLOCKED = "blocked"
+    ERROR = "error"
+
+
+class ToolResult(BaseModel):
+    """Standardized result returned by every tool."""
+    status: ToolStatus
+    message: str | None = None
+    reason: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def success(cls, message: str, data: dict[str, Any] | None = None) -> "ToolResult":
+        return cls(status=ToolStatus.SUCCESS, message=message, data=data or {})
+
+    @classmethod
+    def blocked(cls, reason: str) -> "ToolResult":
+        return cls(status=ToolStatus.BLOCKED, reason=reason)
+
+    @classmethod
+    def error(cls, reason: str) -> "ToolResult":
+        return cls(status=ToolStatus.ERROR, reason=reason)
 
 
 @dataclass
@@ -26,10 +58,24 @@ class Tool:
     name: str
     description: str
     schema: dict[str, Any]
-    func: Callable[..., dict]
+    func: Callable[..., dict | ToolResult]
 
-    def __call__(self, **kwargs) -> dict:
-        return self.func(**kwargs)
+    def __call__(self, **kwargs) -> ToolResult:
+        try:
+            res = self.func(**kwargs)
+            if isinstance(res, ToolResult):
+                return res
+            # Legacy dict support: coerce to ToolResult
+            status = ToolStatus(res.get("status", "success"))
+            return ToolResult(
+                status=status,
+                message=res.get("message"),
+                reason=res.get("reason"),
+                data=res.get("args") or res.get("data") or {},
+            )
+        except Exception as e:
+            log.exception(f"Tool {self.name} failed")
+            return ToolResult.error(str(e))
 
 
 REGISTRY: dict[str, Tool] = {}
@@ -148,19 +194,14 @@ def _resolve_name(name: str, args: dict) -> str | None:
     return best
 
 
-def call(name: str, args: dict) -> dict:
+def call(name: str, args: dict) -> ToolResult:
     """Invoke a registered tool. Falls back to fuzzy name resolution before
     giving up — see _resolve_name."""
     resolved = _resolve_name(name, args)
     if resolved is None:
-        return {"status": "error", "reason": f"unknown tool: {name!r}"}
+        return ToolResult.blocked(f"unknown tool: {name!r}")
     args = _coerce_args(resolved, args)
-    try:
-        return REGISTRY[resolved](**args)
-    except TypeError as e:
-        return {"status": "error", "reason": f"bad arguments to {resolved}: {e}"}
-    except Exception as e:
-        return {"status": "error", "reason": f"{resolved} raised: {e}"}
+    return REGISTRY[resolved](**args)
 
 
 def _coerce_args(tool_name: str, args: dict) -> dict:
