@@ -8,6 +8,8 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Footer, Static
 
+from backend.core.events import bus
+from backend.core.state import AssistantState, StateChangedEvent
 from backend.daemon.ui_events import (
     CommandTranscribed,
     Executed,
@@ -165,6 +167,13 @@ class SGCubeApp(App):
         # again.
         self.set_timer(2.0, self._minimize)
 
+        # Subscribe to all daemon events via the central bus
+        for event_type in [
+            WakeHeard, CommandTranscribed, IntentResolved,
+            Executed, SpokenResponse, TriggerError, StateChangedEvent
+        ]:
+            bus.subscribe(event_type, lambda e: self.call_from_thread(self.handle_daemon_event, e))
+
     def on_unmount(self) -> None:
         if self._listener_stop is not None:
             try:
@@ -217,15 +226,21 @@ class SGCubeApp(App):
     # ── Daemon event handler (called from listener worker thread) ───────
 
     def handle_daemon_event(self, event) -> None:
-        if isinstance(event, WakeHeard):
-            self._restore()  # pop the terminal into view
-            if self._idle_minimize_timer is not None:
-                try:
-                    self._idle_minimize_timer.stop()
-                except Exception:
-                    pass
-                self._idle_minimize_timer = None
-            self.query_one("#status-right", Static).update("STATUS · HEARD")
+        if isinstance(event, StateChangedEvent):
+            self.query_one("#status-right", Static).update(f"STATUS · {event.new_state}")
+            if event.new_state == AssistantState.LISTENING:
+                self._restore()
+                if self._idle_minimize_timer is not None:
+                    try:
+                        self._idle_minimize_timer.stop()
+                    except Exception:
+                        pass
+                    self._idle_minimize_timer = None
+            elif event.new_state == AssistantState.IDLE:
+                self._schedule_idle_minimize()
+
+        elif isinstance(event, WakeHeard):
+            # self._restore()  # now handled by StateChangedEvent(LISTENING)
             self.query_one("#transcript-body", Static).update("> ...")
             self.query_one("#intent-body", Static).update("—")
             self.query_one("#execution-body", Static).update("—")

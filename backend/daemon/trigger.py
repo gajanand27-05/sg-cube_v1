@@ -14,6 +14,7 @@ from backend.core.orchestrator.router import process_input
 from backend.core.safe_executor.executor import ExecutionResult
 from backend.core.safe_executor.executor import execute as do_execute
 from backend.core.events import bus
+from backend.core.state import AssistantState, manager as state_manager
 from backend.daemon.ui_events import (
     CommandTranscribed,
     Executed,
@@ -114,58 +115,48 @@ def _emit(emit: EmitFn | None, event: Any) -> None:
 
 
 def on_wake_detected(emit: EmitFn | None = None) -> None:
-    """Fires the instant the wake phrase is recognised — BEFORE the command
-    audio is captured. Purpose: give the user immediate feedback (chime +
-    UI flash) so they know to start speaking, rather than waiting 2-3s for
-    the legacy fixed capture window to elapse.
-    """
+    """Fires the instant the wake phrase is recognised."""
+    state_manager.transition_to(AssistantState.LISTENING)
     event = WakeHeard(peak=0)
     bus.publish(event)
     _emit(emit, event)
-    # Play the chime asynchronously so we don't delay capture start.
     threading.Thread(target=_play_chime, daemon=True).start()
 
 
 def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
-    """Called by WakeWordListener with audio captured after the wake phrase.
-
-    Returns True if a real command was recognised and processed, False if
-    the capture was empty (silence / noise) or the LLM was unavailable.
-    The listener uses this signal to decide whether to keep the follow-up
-    window open or close it after consecutive empty rounds.
-    """
+    """Main daemon orchestration via events."""
+    state_manager.transition_to(AssistantState.THINKING)
     arr = np.frombuffer(audio_bytes, dtype=np.int16)
     peak = int(np.max(np.abs(arr))) if arr.size else 0
-    print(f"[trigger] captured {len(arr)/SAMPLE_RATE:.2f}s, peak={peak}/32767")
-
+    
     wav_path = _save_wav(audio_bytes)
     try:
         stt = transcribe(str(wav_path))
         command = (stt.get("text") or "").strip()
-        print(f"[command] {command!r}")
         
         event = CommandTranscribed(text=command, peak=peak)
         bus.publish(event)
         _emit(emit, event)
 
         if not command:
-            # Silent capture — almost certainly a false-positive wake or
-            # follow-up trigger. Skip the "didn't catch that" TTS so we
-            # don't feed our own speaker into the open follow-up window.
+            state_manager.transition_to(AssistantState.IDLE)
             return False
 
         try:
             routed = process_input(command, DAEMON_USER_ID)
         except LLMResolveError as e:
-            print(f"[trigger] LLM unavailable: {e}")
+            state_manager.transition_to(AssistantState.ERROR)
             err_event = TriggerError(detail=f"LLM unavailable: {e}")
             bus.publish(err_event)
             _emit(emit, err_event)
             reply = "Sorry, my reasoning model is unavailable"
+            
+            state_manager.transition_to(AssistantState.SPEAKING)
             speak(reply)
             spoken_event = SpokenResponse(text=reply)
             bus.publish(spoken_event)
             _emit(emit, spoken_event)
+            state_manager.transition_to(AssistantState.IDLE)
             return False
 
         intent_event = IntentResolved(
@@ -176,11 +167,9 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
         bus.publish(intent_event)
         _emit(emit, intent_event)
 
+        state_manager.transition_to(AssistantState.EXECUTING)
         result = do_execute(routed.intent)
-        print(
-            f"[trigger] {routed.source_layer} -> "
-            f"{routed.intent.action}/{routed.intent.target!r} -> {result.status}"
-        )
+        
         exec_event = Executed(
             command=command,
             status=result.status,
@@ -192,11 +181,20 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
         _emit(emit, exec_event)
 
         reply = _spoken_response(routed.intent, result)
+        
+        state_manager.transition_to(AssistantState.SPEAKING)
         speak(reply)
         
         spoken_event = SpokenResponse(text=reply)
         bus.publish(spoken_event)
         _emit(emit, spoken_event)
+        
+        state_manager.transition_to(AssistantState.IDLE)
         return True
+    except Exception as e:
+        state_manager.transition_to(AssistantState.ERROR)
+        print(f"[trigger] crash: {e}")
+        state_manager.transition_to(AssistantState.IDLE)
+        return False
     finally:
         wav_path.unlink(missing_ok=True)
