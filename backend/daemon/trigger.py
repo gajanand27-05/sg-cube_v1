@@ -13,6 +13,7 @@ from backend.core.orchestrator.llm_layer import Intent, LLMResolveError
 from backend.core.orchestrator.router import process_input
 from backend.core.safe_executor.executor import ExecutionResult
 from backend.core.safe_executor.executor import execute as do_execute
+from backend.core.events import bus
 from backend.daemon.ui_events import (
     CommandTranscribed,
     Executed,
@@ -118,7 +119,9 @@ def on_wake_detected(emit: EmitFn | None = None) -> None:
     UI flash) so they know to start speaking, rather than waiting 2-3s for
     the legacy fixed capture window to elapse.
     """
-    _emit(emit, WakeHeard(peak=0))
+    event = WakeHeard(peak=0)
+    bus.publish(event)
+    _emit(emit, event)
     # Play the chime asynchronously so we don't delay capture start.
     threading.Thread(target=_play_chime, daemon=True).start()
 
@@ -140,7 +143,10 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
         stt = transcribe(str(wav_path))
         command = (stt.get("text") or "").strip()
         print(f"[command] {command!r}")
-        _emit(emit, CommandTranscribed(text=command, peak=peak))
+        
+        event = CommandTranscribed(text=command, peak=peak)
+        bus.publish(event)
+        _emit(emit, event)
 
         if not command:
             # Silent capture — almost certainly a false-positive wake or
@@ -152,40 +158,45 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
             routed = process_input(command, DAEMON_USER_ID)
         except LLMResolveError as e:
             print(f"[trigger] LLM unavailable: {e}")
-            _emit(emit, TriggerError(detail=f"LLM unavailable: {e}"))
+            err_event = TriggerError(detail=f"LLM unavailable: {e}")
+            bus.publish(err_event)
+            _emit(emit, err_event)
             reply = "Sorry, my reasoning model is unavailable"
             speak(reply)
-            _emit(emit, SpokenResponse(text=reply))
+            spoken_event = SpokenResponse(text=reply)
+            bus.publish(spoken_event)
+            _emit(emit, spoken_event)
             return False
 
-        _emit(
-            emit,
-            IntentResolved(
-                action=routed.intent.action,
-                target=routed.intent.target,
-                source_layer=routed.source_layer,
-            ),
+        intent_event = IntentResolved(
+            action=routed.intent.action,
+            target=routed.intent.target,
+            source_layer=routed.source_layer,
         )
+        bus.publish(intent_event)
+        _emit(emit, intent_event)
 
         result = do_execute(routed.intent)
         print(
             f"[trigger] {routed.source_layer} -> "
             f"{routed.intent.action}/{routed.intent.target!r} -> {result.status}"
         )
-        _emit(
-            emit,
-            Executed(
-                command=command,
-                status=result.status,
-                message=result.message,
-                reason=result.reason,
-                latency_ms=result.latency_ms,
-            ),
+        exec_event = Executed(
+            command=command,
+            status=result.status,
+            message=result.message,
+            reason=result.reason,
+            latency_ms=result.latency_ms,
         )
+        bus.publish(exec_event)
+        _emit(emit, exec_event)
 
         reply = _spoken_response(routed.intent, result)
         speak(reply)
-        _emit(emit, SpokenResponse(text=reply))
+        
+        spoken_event = SpokenResponse(text=reply)
+        bus.publish(spoken_event)
+        _emit(emit, spoken_event)
         return True
     finally:
         wav_path.unlink(missing_ok=True)
