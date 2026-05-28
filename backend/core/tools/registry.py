@@ -76,9 +76,9 @@ class Tool:
     func: Callable[..., dict | ToolResult]
     security: SecurityLevel = SecurityLevel.TRUSTED
 
-    async def __call__(self, **kwargs) -> ToolResult:
+    async def __call__(self, request_id: Optional[str] = None, **kwargs) -> ToolResult:
         from backend.core.runtime import runtime
-        return await runtime.run_tool(self.name, self.func, kwargs)
+        return await runtime.run_tool(self.name, self.func, kwargs, request_id=request_id)
 
 
 REGISTRY: dict[str, Tool] = {}
@@ -216,7 +216,7 @@ def _resolve_name(name: str, args: dict) -> str | None:
     return best
 
 
-async def call(name: str, args: dict) -> ToolResult:
+async def call(name: str, args: dict, request_id: Optional[str] = None) -> ToolResult:
     """Invoke a registered tool. Falls back to fuzzy name resolution before
     giving up — see _resolve_name."""
     resolved = _resolve_name(name, args)
@@ -231,7 +231,7 @@ async def call(name: str, args: dict) -> ToolResult:
     # ────────────────────────────────────────────────────────────────
 
     args = _coerce_args(resolved, args)
-    return await REGISTRY[resolved](**args)
+    return await REGISTRY[resolved](request_id=request_id, **args)
 
 
 def _coerce_args(tool_name: str, args: dict) -> dict:

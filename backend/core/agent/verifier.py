@@ -77,12 +77,14 @@ Reply with a single JSON object: {{"verified": true}} or {{"verified": false, "r
         return False
 
 
-def verify(user_query: str, call: dict, is_multi_step: bool = False) -> VerificationResult:
+def verify(user_query: str, call: dict, is_multi_step: bool = False, request_id: str = "default") -> VerificationResult:
     """The SG_CUBE Verification Stack:
     1. Rule-based checks (Hallucination, Schema, Security, Injection)
     2. Confidence scoring (Routing Signal)
     3. Conditional verifier model (Only when needed)
     """
+    from backend.core.observability import engine as obs_engine
+    
     name = (call.get("name") or "").strip()
     args = call.get("args") or {}
     reasoning = (call.get("reasoning") or "").strip()
@@ -92,8 +94,10 @@ def verify(user_query: str, call: dict, is_multi_step: bool = False) -> Verifica
     # A. Hallucination Check
     resolved = _resolve_name(name, args)
     if not resolved:
+        obs_engine.report_ai_quality(request_id, 0.0, f"Hallucinated tool: {name}")
         return VerificationResult(False, error=f"Tool {name!r} not found in registry.")
 
+    obs_engine.report_ai_quality(request_id, 100.0, f"Tool {resolved} found")
     tool_obj = REGISTRY[resolved]
 
     # B. Malformed Check (Schema)
@@ -101,30 +105,37 @@ def verify(user_query: str, call: dict, is_multi_step: bool = False) -> Verifica
     required = params.get("required", [])
     properties = params.get("properties", {})
 
+    schema_score = 100.0
     for req in required:
         if req not in args:
+            obs_engine.report_context_quality(request_id, 0.0, f"Missing required arg: {req}")
             return VerificationResult(False, error=f"Missing required argument {req!r} for tool {resolved!r}.")
 
     # Simple type validation
     for key, val in args.items():
         if key in properties:
             expected_type = properties[key].get("type")
-            if expected_type == "integer" and not isinstance(val, int):
-                return VerificationResult(False, error=f"Argument {key!r} must be an integer.")
-            if expected_type == "number" and not isinstance(val, (int, float)):
-                return VerificationResult(False, error=f"Argument {key!r} must be a number.")
-            if expected_type == "string" and not isinstance(val, str):
-                return VerificationResult(False, error=f"Argument {key!r} must be a string.")
-            if expected_type == "boolean" and not isinstance(val, bool):
-                return VerificationResult(False, error=f"Argument {key!r} must be a boolean.")
+            valid_type = True
+            if expected_type == "integer" and not isinstance(val, int): valid_type = False
+            if expected_type == "number" and not isinstance(val, (int, float)): valid_type = False
+            if expected_type == "string" and not isinstance(val, str): valid_type = False
+            if expected_type == "boolean" and not isinstance(val, bool): valid_type = False
+            
+            if not valid_type:
+                obs_engine.report_ai_quality(request_id, 50.0, f"Type mismatch for {key}")
+                return VerificationResult(False, error=f"Argument {key!r} type mismatch.")
+
+    obs_engine.report_context_quality(request_id, 100.0, "Schema valid")
 
     # C. Injection & Blacklist Check
     malicious_reason = _is_malicious(args)
     if malicious_reason:
+        obs_engine.report_ai_quality(request_id, 0.0, f"Malicious input detected")
         return VerificationResult(False, error=malicious_reason)
 
-    # D. Security Check (DANGEROUS / CONFIRM)
+    # D. Security Check (DANGEROUS is a hard block)
     if tool_obj.security == SecurityLevel.DANGEROUS:
+         obs_engine.report_ai_quality(request_id, 0.0, "Dangerous tool blocked")
          return VerificationResult(False, error=f"Tool {resolved!r} is marked DANGEROUS and is blocked.")
 
     # ── 2. Confidence Scoring (Routing Signal) ───────────────────────
@@ -134,12 +145,9 @@ def verify(user_query: str, call: dict, is_multi_step: bool = False) -> Verifica
     except (TypeError, ValueError):
         conf_score = 0.0
 
+    obs_engine.report_ai_quality(request_id, conf_score * 100.0, "Self-reported confidence")
+
     # ── 3. Conditional Verifier Model ────────────────────────────────
-    # We only trigger the heavy secondary model if:
-    # - Confidence is low (< 0.80)
-    # - The tool requires confirmation (CONFIRM_REQUIRED)
-    # - It's part of a multi-step plan
-    
     needs_deep_verification = (
         conf_score < 0.80 or 
         tool_obj.security == SecurityLevel.CONFIRM_REQUIRED or
@@ -149,9 +157,11 @@ def verify(user_query: str, call: dict, is_multi_step: bool = False) -> Verifica
     if needs_deep_verification:
         log.info(f"Triggering deep verification for {resolved!r} (conf={conf_score}, multi={is_multi_step})")
         if not _secondary_check(user_query, resolved, args, reasoning):
+            obs_engine.report_ai_quality(request_id, 20.0, "Secondary check failed")
             return VerificationResult(
                 False, 
                 error="Action rejected by secondary verifier: logic or relevance mismatch."
             )
+        obs_engine.report_ai_quality(request_id, 100.0, "Secondary check passed")
 
     return VerificationResult(True, reasoning=reasoning)

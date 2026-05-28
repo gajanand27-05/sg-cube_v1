@@ -7,17 +7,19 @@ from pyfiglet import Figlet
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Footer, Static
-
 from backend.core.events import bus
 from backend.core.state import AssistantState, StateChangedEvent
 from backend.daemon.ui_events import (
     CommandTranscribed,
+    ConfidenceEvent,
     Executed,
     IntentResolved,
     SpokenResponse,
     TriggerError,
+    VerificationEvent,
     WakeHeard,
 )
+
 
 # Force UTF-8 stdout/stderr — Windows console defaults to cp1252 which can't
 # encode block-drawing characters used by the wordmark and panels.
@@ -146,6 +148,7 @@ class SGCubeApp(App):
                 Panel("TRANSCRIPT", "> _", id="transcript", body_id="transcript-body"),
                 Panel("INTENT", "—", id="intent", body_id="intent-body"),
                 Panel("EXECUTION", "—", id="execution", body_id="execution-body"),
+                Panel("RELIABILITY", "—", id="reliability", body_id="reliability-body"),
                 id="right-col",
             ),
             id="main-row",
@@ -171,7 +174,7 @@ class SGCubeApp(App):
         for event_type in [
             WakeHeard, CommandTranscribed, IntentResolved,
             Executed, SpokenResponse, TriggerError, StateChangedEvent,
-            VerificationEvent
+            VerificationEvent, ConfidenceEvent
         ]:
             bus.subscribe(event_type, lambda e: self.call_from_thread(self.handle_daemon_event, e))
 
@@ -266,6 +269,16 @@ class SGCubeApp(App):
             )
             self._layer_counts[event.source_layer] = self._layer_counts.get(event.source_layer, 0) + 1
             self._refresh_routing()
+
+        elif isinstance(event, ConfidenceEvent):
+            s = event.score
+            parts = [
+                f"TOOL    {_bar(s.tool_quality, width=10)} {s.tool_quality:>3.0f}%",
+                f"AI      {_bar(s.ai_quality, width=10)} {s.ai_quality:>3.0f}%",
+                f"CONTEXT {_bar(s.context_quality, width=10)} {s.context_quality:>3.0f}%",
+                f"AGGREGATE: {s.aggregate:.1f}%"
+            ]
+            self.query_one("#reliability-body", Static).update("\n".join(parts))
 
         elif isinstance(event, Executed):
             mark = "✓" if event.status == "success" else "✗"

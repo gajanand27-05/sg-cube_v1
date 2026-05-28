@@ -48,3 +48,20 @@ class VerificationEvent:
     tool_name: str
     is_valid: bool
     error: str | None = None
+
+
+@dataclass
+class ConfidenceScore:
+    tool_quality: float
+    ai_quality: float
+    context_quality: float
+
+    @property
+    def aggregate(self) -> float:
+        return (self.tool_quality + self.ai_quality + self.context_quality) / 3.0
+
+
+@dataclass
+class ConfidenceEvent:
+    request_id: str
+    score: ConfidenceScore

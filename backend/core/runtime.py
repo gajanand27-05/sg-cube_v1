@@ -52,9 +52,10 @@ class Runtime:
     def __init__(self):
         self._tasks: dict[str, Task] = {}
 
-    async def run_tool(self, name: str, func: Callable, args: dict, timeout: float = 30.0) -> ToolResult:
+    async def run_tool(self, name: str, func: Callable, args: dict, timeout: float = 30.0, request_id: Optional[str] = None) -> ToolResult:
         """Run a tool asynchronously with timeout and logging."""
         task_id = str(uuid.uuid4())[:8]
+        rid = request_id or task_id
         
         # Wrap sync functions in a thread pool to avoid blocking
         if not asyncio.iscoroutinefunction(func):
@@ -86,10 +87,18 @@ class Runtime:
             task.result = res
             task.status = TaskStatus.COMPLETED if res.status == ToolStatus.SUCCESS else TaskStatus.FAILED
             
+            # ── Observability Integration ────────────────────────────
+            from backend.core.observability import engine as obs_engine
+            quality = 100.0 if res.status == ToolStatus.SUCCESS else 0.0
+            obs_engine.report_tool_quality(rid, quality, f"Status: {res.status}")
+            # ─────────────────────────────────────────────────────────
+            
         except asyncio.TimeoutError:
             log.error(f"Task {name} ({task_id}) timed out after {timeout}s")
             task.status = TaskStatus.FAILED
             task.result = ToolResult.error(f"Execution timed out after {timeout}s")
+            from backend.core.observability import engine as obs_engine
+            obs_engine.report_tool_quality(task_id, 0.0, "Timeout")
             
         except asyncio.CancelledError:
             log.info(f"Task {name} ({task_id}) was cancelled")

@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import re
+import uuid
 from typing import Any
 
 import httpx
@@ -71,6 +72,7 @@ async def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]
     messages = [{"role": "system", "content": _system_prompt()}, *history]
 
     tool_records: list[dict] = []
+    request_id = str(uuid.uuid4())[:8]
 
     for _iter in range(MAX_ITER):
         try:
@@ -100,7 +102,7 @@ async def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]
         verification_errors = []
         is_multi_step = len(calls) > 1
         for c in calls:
-            v_res = verify_tool_call(text, c, is_multi_step=is_multi_step)
+            v_res = verify_tool_call(text, c, is_multi_step=is_multi_step, request_id=request_id)
             bus.publish(VerificationEvent(
                 tool_name=c.get("name") or "unknown",
                 is_valid=v_res.is_valid,
@@ -143,7 +145,7 @@ async def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]
                 context.add_assistant(spoken)
                 return spoken, tool_records
 
-            result = await call_tool(name, args)
+            result = await call_tool(name, args, request_id=request_id)
             tool_records.append({"name": name, "args": args, "result": result})
 
         last_batch = tool_records[-len(calls):]
