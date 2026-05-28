@@ -65,3 +65,10 @@ class ConfidenceScore:
 class ConfidenceEvent:
     request_id: str
     score: ConfidenceScore
+
+
+@dataclass
+class SelfHealingEvent:
+    tool_name: str
+    error: str
+    path: str

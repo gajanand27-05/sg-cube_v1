@@ -14,6 +14,7 @@ from backend.daemon.ui_events import (
     ConfidenceEvent,
     Executed,
     IntentResolved,
+    SelfHealingEvent,
     SpokenResponse,
     TriggerError,
     VerificationEvent,
@@ -174,7 +175,7 @@ class SGCubeApp(App):
         for event_type in [
             WakeHeard, CommandTranscribed, IntentResolved,
             Executed, SpokenResponse, TriggerError, StateChangedEvent,
-            VerificationEvent, ConfidenceEvent
+            VerificationEvent, ConfidenceEvent, SelfHealingEvent
         ]:
             bus.subscribe(event_type, lambda e: self.call_from_thread(self.handle_daemon_event, e))
 
@@ -279,6 +280,11 @@ class SGCubeApp(App):
                 f"AGGREGATE: {s.aggregate:.1f}%"
             ]
             self.query_one("#reliability-body", Static).update("\n".join(parts))
+
+        elif isinstance(event, SelfHealingEvent):
+            msg = f"HEALING · {event.path.upper()} ({event.tool_name})"
+            self.query_one("#status-right", Static).update(msg)
+            self.query_one("#execution-body", Static).update(f"Attempting recovery: {event.path}...")
 
         elif isinstance(event, Executed):
             mark = "✓" if event.status == "success" else "✗"

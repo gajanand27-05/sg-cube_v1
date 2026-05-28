@@ -26,6 +26,7 @@ import httpx
 from backend.core.agent.context import ConversationContext
 from backend.core.agent.verifier import verify as verify_tool_call
 from backend.core.events import bus
+from backend.core.healing import healer as self_healer
 from backend.core.tools import builtins  # noqa: F401 — populates REGISTRY
 from backend.core.tools.registry import REGISTRY, call as call_tool, schemas_prompt
 from backend.daemon.ui_events import VerificationEvent
@@ -174,11 +175,21 @@ async def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]
                 "{\"final_response\": \"<short prose>\"}. Do NOT call any more tools."
             )
         else:
-            instruction = (
-                "Every tool failed. Either call a different tool listed in the schema, "
-                "or reply with {\"final_response\": \"<short apology>\"}. "
-                "Do NOT invent tool names — use only names from the schema."
-            )
+            # ── Self-Healing Integration ─────────────────────────────
+            last_fail = last_batch[-1] if last_batch else {}
+            error_str = str(last_fail.get("result", {}).get("reason") or "Unknown error")
+            path = self_healer.analyze(last_fail.get("name", "unknown"), error_str)
+            
+            from backend.daemon.ui_events import SelfHealingEvent
+            bus.publish(SelfHealingEvent(
+                tool_name=last_fail.get("name", "unknown"),
+                error=error_str,
+                path=path.value
+            ))
+            
+            instruction = self_healer.get_instruction(path, last_fail.get("name", "unknown"), error_str)
+            instruction += "\nEither call a different tool listed in the schema, or reply with {\"final_response\": \"<short apology>\"}."
+            # ─────────────────────────────────────────────────────────
 
         messages.append({"role": "assistant", "content": raw})
         messages.append(
