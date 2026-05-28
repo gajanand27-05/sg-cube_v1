@@ -76,22 +76,9 @@ class Tool:
     func: Callable[..., dict | ToolResult]
     security: SecurityLevel = SecurityLevel.TRUSTED
 
-    def __call__(self, **kwargs) -> ToolResult:
-        try:
-            res = self.func(**kwargs)
-            if isinstance(res, ToolResult):
-                return res
-            # Legacy dict support: coerce to ToolResult
-            status = ToolStatus(res.get("status", "success"))
-            return ToolResult(
-                status=status,
-                message=res.get("message"),
-                reason=res.get("reason"),
-                data=res.get("args") or res.get("data") or {},
-            )
-        except Exception as e:
-            log.exception(f"Tool {self.name} failed")
-            return ToolResult.error(str(e))
+    async def __call__(self, **kwargs) -> ToolResult:
+        from backend.core.runtime import runtime
+        return await runtime.run_tool(self.name, self.func, kwargs)
 
 
 REGISTRY: dict[str, Tool] = {}
@@ -229,7 +216,7 @@ def _resolve_name(name: str, args: dict) -> str | None:
     return best
 
 
-def call(name: str, args: dict) -> ToolResult:
+async def call(name: str, args: dict) -> ToolResult:
     """Invoke a registered tool. Falls back to fuzzy name resolution before
     giving up — see _resolve_name."""
     resolved = _resolve_name(name, args)
@@ -244,7 +231,7 @@ def call(name: str, args: dict) -> ToolResult:
     # ────────────────────────────────────────────────────────────────
 
     args = _coerce_args(resolved, args)
-    return REGISTRY[resolved](**args)
+    return await REGISTRY[resolved](**args)
 
 
 def _coerce_args(tool_name: str, args: dict) -> dict:

@@ -17,7 +17,7 @@ class ExecutionResult(BaseModel):
     latency_ms: int
 
 
-def execute(intent: Intent) -> ExecutionResult:
+async def execute(intent: Intent) -> ExecutionResult:
     t0 = time.perf_counter()
 
     if is_target_dangerous(intent.target):
@@ -38,7 +38,10 @@ def execute(intent: Intent) -> ExecutionResult:
         )
 
     try:
-        result = handler(intent)
+        from backend.core.runtime import runtime
+        # Rule-based intents use HANDLERS which take the Intent object.
+        # We wrap them in the runtime for consistency, logging, and timeouts.
+        res = await runtime.run_tool(intent.action, handler, {"intent": intent})
     except Exception as e:
         log.exception("executor handler crashed")
         return ExecutionResult(
@@ -49,9 +52,9 @@ def execute(intent: Intent) -> ExecutionResult:
         )
 
     return ExecutionResult(
-        status=result["status"],
+        status=res.status,
         intent=intent,
-        message=result.get("message"),
-        reason=result.get("reason"),
+        message=res.message,
+        reason=res.reason,
         latency_ms=int((time.perf_counter() - t0) * 1000),
     )

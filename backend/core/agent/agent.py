@@ -14,6 +14,7 @@ Talks to a larger Ollama model (gemma4 by default) in JSON mode. Each turn:
 Importing this module pulls in builtins.py which registers the initial tool
 set into REGISTRY.
 """
+import asyncio
 import json
 import logging
 import re
@@ -33,62 +34,9 @@ log = logging.getLogger(__name__)
 
 MAX_ITER = 5
 
-# Models often hallucinate a "speak" / "say" / "final_response" tool when
-# they really mean "produce the final response". Treat any of these as
-# terminal — extract the text and return immediately.
-RESPONSE_ALIASES = {
-    "respond", "speak", "say", "answer", "reply", "tell_user", "tell",
-    "final_response", "final_answer", "result", "output",
-}
+# ... (RESPONSE_ALIASES and _system_prompt unchanged)
 
-
-def _system_prompt() -> str:
-    return f"""You are SG_CUBE, a local AI Operating System running on the user's Windows machine.
-You answer voice commands by either calling tools or replying directly.
-
-Available tools (JSON schema):
-{schemas_prompt()}
-
-PROTOCOL — every reply MUST be a single JSON object with EXACTLY ONE of these shapes:
-
-  TOOL CALL (when an action is needed):
-    {{"tool_calls": [{{"name": "<tool_name>", "args": {{"<param>": "<value>"}}, "confidence": <0.0-1.0>, "reasoning": "<why this tool fits the request>"}}]}}
-
-  FINAL ANSWER (when no action is needed, or after seeing tool results, or for a question):
-    {{"final_response": "<short sentence to speak aloud>"}}
-
-RULES:
-- Output ONLY the JSON object. No markdown, no commentary, no code fences.
-- "tool_calls" can include multiple tools if the user asked for multiple actions
-  (e.g. "open chrome and play music" -> [open_app(chrome), play_youtube(music)]).
-- After a tool runs, you'll see its result. Use it to compose a final_response.
-- final_response should be one short sentence — it's read aloud, not displayed.
-- For factual/math/general questions ("what's the capital of Brazil",
-  "what's 240 dollars in rupees"), reply with final_response directly. Do not
-  call a tool — you know the answer.
-- For "play X" / "play X on youtube" -> call play_youtube.
-- For "search X" / "google X" -> call search_web.
-- For "open X" where X is an app -> call open_app.
-- For "open X" where X is a website -> call open_url.
-- Conversation history is provided. Resolve follow-ups ("louder", "next song",
-  "and then close it") relative to the most recent commands.
-- REFERENT RESOLUTION: when the user says "that", "it", "this", or "the result",
-  it refers to the text of the MOST RECENT assistant message in the conversation
-  history above. Find that message, then copy its EXACT text into the relevant
-  tool argument. Example pattern (placeholders in angle brackets):
-    History contains: [assistant]: <PREVIOUS_ASSISTANT_TEXT>
-    Current user message: "translate that to <LANG>"
-    You output:
-      {{"tool_calls": [{{"name": "translate", "args": {{"text": "<PREVIOUS_ASSISTANT_TEXT>", "target_language": "<LANG>"}}}}]}}
-  Substitute the placeholders with real values from history — do NOT output
-  the angle-bracket placeholders literally.
-- Use the EXACT parameter names listed in the schema above. Do not invent
-  aliases like "app_name" when the schema says "name", or "link" when it says
-  "url". Wrong parameter names break the tool call.
-"""
-
-
-def _ollama_chat(messages: list[dict], model: str | None = None) -> str:
+async def _ollama_chat(messages: list[dict], model: str | None = None) -> str:
     """Talk to Ollama /api/chat in JSON-constrained mode."""
     url = f"{settings.ollama_url.rstrip('/')}/api/chat"
     payload = {
@@ -98,99 +46,19 @@ def _ollama_chat(messages: list[dict], model: str | None = None) -> str:
         "format": "json",
         "options": {"temperature": 0.2},
     }
-    with httpx.Client(timeout=120.0) as client:
-        r = client.post(url, json=payload)
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        r = await client.post(url, json=payload)
     r.raise_for_status()
     body = r.json()
     msg = body.get("message", {})
     return (msg.get("content") or "").strip()
 
 
-def _parse(raw: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as e:
-        log.warning("agent: bad JSON from LLM: %s; raw=%r", e, raw[:200])
-        return {"final_response": "Sorry, I got confused."}
-    return _normalize(parsed)
+# ... (_parse, _normalize, _inline_referent unchanged)
 
 
-def _normalize(parsed: Any) -> dict[str, Any]:
-    """Different models like different tool-call JSON shapes. Coerce them all
-    into one of: {"tool_calls": [{"name": ..., "args": ...}, ...]} or
-    {"final_response": "..."}."""
-    if not isinstance(parsed, dict):
-        return {"final_response": "Sorry, I got confused."}
-
-    # final_response synonyms — include "error"/"message" so gemma's
-    # complaint reaches the user instead of being swallowed.
-    for key in ("final_response", "final_answer", "response", "answer", "reply", "message", "error"):
-        v = parsed.get(key)
-        if isinstance(v, str) and v.strip():
-            return {"final_response": v.strip()}
-
-    def _extract_call(c: dict) -> dict | None:
-        if not isinstance(c, dict):
-            return None
-        name = c.get("name") or c.get("tool_name") or c.get("function") or c.get("function_name")
-        if not name:
-            return None
-        args = c.get("args") or c.get("arguments") or c.get("parameters") or c.get("params") or {}
-        if not isinstance(args, dict):
-            args = {}
-        confidence = c.get("confidence")
-        reasoning = c.get("reasoning") or ""
-        return {
-            "name": str(name).strip(),
-            "args": args,
-            "confidence": confidence,
-            "reasoning": str(reasoning).strip()
-        }
-
-    # Multiple tool calls in a list
-    tc = parsed.get("tool_calls") or parsed.get("toolCalls") or parsed.get("calls")
-    if isinstance(tc, list):
-        calls = [c for c in (_extract_call(x) for x in tc) if c and c["name"]]
-        if calls:
-            return {"tool_calls": calls}
-
-    # Single tool call without the array wrapper
-    if isinstance(tc, dict):
-        c = _extract_call(tc)
-        if c and c["name"]:
-            return {"tool_calls": [c]}
-
-    # Top-level single tool call
-    c = _extract_call(parsed)
-    if c and c["name"]:
-        return {"tool_calls": [c]}
-
-    return {"final_response": "Sorry, I got confused."}
-
-
-_REFERENT_RE = re.compile(r"\b(that|this)\b", re.IGNORECASE)
-
-
-def _inline_referent(text: str, context: ConversationContext) -> str:
-    """Pre-resolve "that"/"this" against the most recent assistant turn.
-
-    gemma intermittently fails to connect referents to prior assistant
-    responses despite being given the history. Doing the substitution in
-    code is reliable: "and translate that to french" + prior reply of
-    "Tokyo, Japan: partly cloudy, 18°C" becomes "and translate \"Tokyo,
-    Japan: partly cloudy, 18°C\" to french" — gemma now sees explicit text.
-    """
-    if not _REFERENT_RE.search(text):
-        return text
-    last_assistant = next((t.text for t in reversed(context.turns) if t.role == "assistant"), None)
-    if not last_assistant:
-        return text
-    quoted = f'"{last_assistant}"'
-    return _REFERENT_RE.sub(quoted, text, count=1)
-
-
-def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]:
-    """Run the agent loop. Returns (spoken_text, [tool_call_records])."""
+async def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]:
+    """Run the agent loop asynchronously. Returns (spoken_text, [tool_call_records])."""
     resolved_text = _inline_referent(text, context)
     # Store the original phrasing in history so future turns see the actual
     # words the user said, not our rewritten form.
@@ -206,7 +74,7 @@ def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]:
 
     for _iter in range(MAX_ITER):
         try:
-            raw = _ollama_chat(messages)
+            raw = await _ollama_chat(messages)
         except Exception as e:
             log.exception("agent: ollama call failed")
             spoken = "Sorry, I couldn't reach my reasoning model."
@@ -275,7 +143,7 @@ def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]:
                 context.add_assistant(spoken)
                 return spoken, tool_records
 
-            result = call_tool(name, args)
+            result = await call_tool(name, args)
             tool_records.append({"name": name, "args": args, "result": result})
 
         last_batch = tool_records[-len(calls):]

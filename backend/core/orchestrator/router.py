@@ -44,7 +44,7 @@ def _log_to_db(
         log.warning("command_logs insert failed: %s", e)
 
 
-def process_input(text: str, user_id: str) -> RouterResult:
+async def process_input(text: str, user_id: str) -> RouterResult:
     t0 = time.perf_counter()
     norm = normalize(text)
     if not norm:
@@ -73,7 +73,7 @@ def process_input(text: str, user_id: str) -> RouterResult:
     # chain tool calls, answer questions directly, and use recent
     # conversation context for follow-ups.
     try:
-        spoken, tool_records = agent_module.run(text, get_context())
+        spoken, tool_records = await agent_module.run(text, get_context())
     except Exception as e:
         log.exception("agent run failed: %s", e)
         latency = int((time.perf_counter() - t0) * 1000)

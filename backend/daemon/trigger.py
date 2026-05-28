@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 import threading
 import wave
@@ -124,7 +125,12 @@ def on_wake_detected(emit: EmitFn | None = None) -> None:
 
 
 def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
-    """Main daemon orchestration via events."""
+    """Synchronous entry point for the wake word listener."""
+    return asyncio.run(_handle_wake_async(audio_bytes, emit))
+
+
+async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
+    """Main daemon orchestration via async events."""
     state_manager.transition_to(AssistantState.THINKING)
     arr = np.frombuffer(audio_bytes, dtype=np.int16)
     peak = int(np.max(np.abs(arr))) if arr.size else 0
@@ -133,6 +139,7 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
     try:
         stt = transcribe(str(wav_path))
         command = (stt.get("text") or "").strip()
+        print(f"[command] {command!r}")
         
         event = CommandTranscribed(text=command, peak=peak)
         bus.publish(event)
@@ -143,7 +150,7 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
             return False
 
         try:
-            routed = process_input(command, DAEMON_USER_ID)
+            routed = await process_input(command, DAEMON_USER_ID)
         except LLMResolveError as e:
             state_manager.transition_to(AssistantState.ERROR)
             err_event = TriggerError(detail=f"LLM unavailable: {e}")
@@ -168,7 +175,7 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
         _emit(emit, intent_event)
 
         state_manager.transition_to(AssistantState.EXECUTING)
-        result = do_execute(routed.intent)
+        result = await do_execute(routed.intent)
         
         exec_event = Executed(
             command=command,
@@ -193,7 +200,7 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
         return True
     except Exception as e:
         state_manager.transition_to(AssistantState.ERROR)
-        print(f"[trigger] crash: {e}")
+        log.exception(f"trigger crash: {e}")
         state_manager.transition_to(AssistantState.IDLE)
         return False
     finally:
