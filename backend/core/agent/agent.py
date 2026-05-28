@@ -27,6 +27,8 @@ from backend.core.agent.context import ConversationContext
 from backend.core.agent.verifier import verify as verify_tool_call
 from backend.core.events import bus
 from backend.core.healing import healer as self_healer
+from backend.core.memory.episodic import summarizer as episodic_summarizer
+from backend.core.memory.manager import memory as memory_manager
 from backend.core.tools import builtins  # noqa: F401 — populates REGISTRY
 from backend.core.tools.registry import REGISTRY, call as call_tool, schemas_prompt
 from backend.daemon.ui_events import VerificationEvent
@@ -70,7 +72,13 @@ async def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]
     # Replace the most recent user entry (which we just added) with the
     # referent-resolved version for the LLM only.
     history[-1] = {"role": "user", "content": resolved_text}
-    messages = [{"role": "system", "content": _system_prompt()}, *history]
+    
+    # ── Memory Integration ───────────────────────────────────────────
+    mem_context = memory_manager.get_relevant_context(text)
+    system_prompt = f"{_system_prompt()}\n\n{mem_context}"
+    # ─────────────────────────────────────────────────────────────────
+    
+    messages = [{"role": "system", "content": system_prompt}, *history]
 
     tool_records: list[dict] = []
     request_id = str(uuid.uuid4())[:8]
@@ -89,6 +97,14 @@ async def run(text: str, context: ConversationContext) -> tuple[str, list[dict]]
         if "final_response" in parsed:
             spoken = str(parsed["final_response"]).strip() or "Done."
             context.add_assistant(spoken)
+            
+            # ── Episodic Memory Learning ─────────────────────────────
+            # Run in background to avoid blocking response
+            asyncio.create_task(episodic_summarizer.summarize_and_store(text, tool_records))
+            # Clear working memory as the task is finished
+            memory_manager.wm.clear()
+            # ─────────────────────────────────────────────────────────
+            
             return spoken, tool_records
 
         calls = parsed.get("tool_calls") or []

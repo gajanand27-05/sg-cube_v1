@@ -28,6 +28,7 @@ from backend.core.tools import windowing as _windowing  # noqa: F401
 
 # Phase 11c — productivity (notes, reminders, clipboard, messaging)
 from backend.core.tools import comms as _comms  # noqa: F401
+from backend.core.tools import memory as _memory  # noqa: F401
 from backend.core.tools import notes as _notes  # noqa: F401
 from backend.core.tools import reminders as _reminders  # noqa: F401
 
