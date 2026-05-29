@@ -10,6 +10,7 @@ import sounddevice as sd
 
 from backend.ai_modules.speech.stt_whisper import transcribe
 from backend.ai_modules.speech.tts_piper import speak
+from backend.core.agents.commander import commander
 from backend.core.orchestrator.llm_layer import Intent, LLMResolveError
 from backend.core.orchestrator.router import process_input
 from backend.core.safe_executor.executor import ExecutionResult
@@ -117,6 +118,9 @@ def _emit(emit: EmitFn | None, event: Any) -> None:
 
 def on_wake_detected(emit: EmitFn | None = None) -> None:
     """Fires the instant the wake phrase is recognised."""
+    # Interrupt any current reasoning/execution
+    commander.interrupt()
+    
     state_manager.transition_to(AssistantState.LISTENING)
     event = WakeHeard(peak=0)
     bus.publish(event)

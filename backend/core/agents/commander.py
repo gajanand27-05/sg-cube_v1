@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from backend.core.agent.context import ConversationContext
 from backend.core.agents.guardian import GuardianAgent
@@ -23,8 +23,24 @@ class CommanderAgent:
         self.planner = PlannerAgent()
         self.guardian = GuardianAgent()
         self.operator = OperatorAgent()
+        self._current_task: Optional[asyncio.Task] = None
+
+    def interrupt(self):
+        """Stop the current reasoning/execution loop."""
+        if self._current_task and not self._current_task.done():
+            self._current_task.cancel()
+            log.info("Commander: Interrupted by user.")
 
     async def run(self, text: str, context: ConversationContext) -> Tuple[str, List[dict]]:
+        self._current_task = asyncio.current_task()
+        try:
+            return await self._run_loop(text, context)
+        except asyncio.CancelledError:
+            return "Interrupted.", []
+        finally:
+            self._current_task = None
+
+    async def _run_loop(self, text: str, context: ConversationContext) -> Tuple[str, List[dict]]:
         # 1. Setup Request
         request_id = str(uuid.uuid4())[:8]
         context.add_user(text)

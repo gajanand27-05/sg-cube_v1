@@ -72,3 +72,23 @@ class SelfHealingEvent:
     tool_name: str
     error: str
     path: str
+
+
+@dataclass
+class InternalAgentEvent:
+    agent_name: str
+    action: str
+    details: dict
+
+
+@dataclass
+class TokenStreamEvent:
+    agent_name: str
+    token: str
+    full_content: str
+
+
+@dataclass
+class AgentThinkingEvent:
+    agent_name: str
+    is_thinking: bool

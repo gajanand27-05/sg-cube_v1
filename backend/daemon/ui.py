@@ -8,8 +8,10 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Footer, Static
 from backend.core.events import bus
+from backend.core.runtime import TaskEvent, TaskStatus
 from backend.core.state import AssistantState, StateChangedEvent
 from backend.daemon.ui_events import (
+    AgentThinkingEvent,
     CommandTranscribed,
     ConfidenceEvent,
     Executed,
@@ -17,6 +19,7 @@ from backend.daemon.ui_events import (
     InternalAgentEvent,
     SelfHealingEvent,
     SpokenResponse,
+    TokenStreamEvent,
     TriggerError,
     VerificationEvent,
     WakeHeard,
@@ -177,7 +180,8 @@ class SGCubeApp(App):
             WakeHeard, CommandTranscribed, IntentResolved,
             Executed, SpokenResponse, TriggerError, StateChangedEvent,
             VerificationEvent, ConfidenceEvent, SelfHealingEvent,
-            InternalAgentEvent
+            InternalAgentEvent, AgentThinkingEvent, TokenStreamEvent,
+            TaskEvent
         ]:
             bus.subscribe(event_type, lambda e: self.call_from_thread(self.handle_daemon_event, e))
 
@@ -251,10 +255,21 @@ class SGCubeApp(App):
             self.query_one("#transcript-body", Static).update("> ...")
             self.query_one("#intent-body", Static).update("—")
             self.query_one("#execution-body", Static).update("—")
+            self.query_one("#reliability-body", Static).update("—")
 
         elif isinstance(event, CommandTranscribed):
             text = event.text if event.text else "(no speech detected)"
             self.query_one("#transcript-body", Static).update(f"> {text}")
+
+        elif isinstance(event, TokenStreamEvent):
+            # Live token streaming in the transcript body
+            self.query_one("#transcript-body", Static).update(f"> {event.full_content} █")
+
+        elif isinstance(event, AgentThinkingEvent):
+            if event.is_thinking:
+                self.query_one("#status-right", Static).update(f"{event.agent_name.upper()} · THINKING...")
+            else:
+                self.query_one("#status-right", Static).update("STATUS · READY")
 
         elif isinstance(event, VerificationEvent):
             status = "VERIFIED" if event.is_valid else "FAILED"
@@ -286,6 +301,15 @@ class SGCubeApp(App):
         elif isinstance(event, InternalAgentEvent):
             msg = f"{event.agent_name.upper()} · {event.action.upper()}"
             self.query_one("#status-right", Static).update(msg)
+
+        elif isinstance(event, TaskEvent):
+            # Live execution logs
+            status_icon = "⚡" if event.status == TaskStatus.RUNNING else "✓" if event.status == TaskStatus.COMPLETED else "✗"
+            tool_name = event.data.get("tool", "task")
+            msg = f"{status_icon} {event.status.upper()} ({tool_name})"
+            if event.message:
+                msg += f": {event.message}"
+            self.query_one("#execution-body", Static).update(msg)
 
         elif isinstance(event, SelfHealingEvent):
             msg = f"HEALING · {event.path.upper()} ({event.tool_name})"

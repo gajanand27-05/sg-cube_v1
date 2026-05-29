@@ -14,6 +14,13 @@ class InternalAgentEvent:
     details: dict[str, Any]
 
 
+@dataclass
+class TokenStreamEvent:
+    agent_name: str
+    token: str
+    full_content: str
+
+
 class BaseInternalAgent:
     """Base class for specialized reasoning roles."""
 

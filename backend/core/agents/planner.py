@@ -1,10 +1,13 @@
+import asyncio
 import json
 from typing import Any, List
 
 import httpx
 
-from backend.core.agents.base import BaseInternalAgent
+from backend.core.agents.base import BaseInternalAgent, TokenStreamEvent
+from backend.core.events import bus
 from backend.core.tools.registry import schemas_prompt
+from backend.daemon.ui_events import AgentThinkingEvent
 from backend.server.config import settings
 
 
@@ -16,6 +19,7 @@ class PlannerAgent(BaseInternalAgent):
 
     async def generate_plan(self, user_query: str, history: list[dict], memory_context: str) -> list[dict]:
         self._emit("planning", query=user_query)
+        bus.publish(AgentThinkingEvent(self.name, True))
 
         prompt = self._build_prompt(memory_context)
         messages = [{"role": "system", "content": prompt}, *history]
@@ -24,19 +28,28 @@ class PlannerAgent(BaseInternalAgent):
         payload = {
             "model": settings.agent_model,
             "messages": messages,
-            "stream": False,
+            "stream": True,  # Enable streaming
             "format": "json",
             "options": {"temperature": 0.2},
         }
 
+        full_content = ""
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
-                r = await client.post(url, json=payload)
-            r.raise_for_status()
-            body = r.json()
-            raw_content = (body.get("message", {}).get("content") or "").strip()
-            
-            parsed = json.loads(raw_content)
+                async with client.stream("POST", url, json=payload) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line: continue
+                        body = json.loads(line)
+                        token = body.get("message", {}).get("content", "")
+                        full_content += token
+                        
+                        # Emit streaming event
+                        bus.publish(TokenStreamEvent(self.name, token, full_content))
+                        
+                        if body.get("done"): break
+
+            parsed = json.loads(full_content)
             # Basic normalization for tool calls
             calls = parsed.get("tool_calls") or parsed.get("toolCalls") or []
             if not isinstance(calls, list):
@@ -47,6 +60,8 @@ class PlannerAgent(BaseInternalAgent):
         except Exception as e:
             self._emit("error", detail=str(e))
             raise
+        finally:
+            bus.publish(AgentThinkingEvent(self.name, False))
 
     def _build_prompt(self, memory_context: str) -> str:
         return f"""You are the PLANNER Agent for SG_CUBE.
