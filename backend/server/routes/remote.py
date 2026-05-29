@@ -32,6 +32,21 @@ class RemoteConnection:
         self.device_id = device_id
         self.audio_buffer = bytearray()
         self.is_active = True
+        self.codec = "pcm"  # Default
+        self.is_local = self._check_local()
+
+    def _check_local(self) -> bool:
+        """Heuristic to check if the device is on the local network."""
+        if not self.websocket.client:
+            return False
+        host = self.websocket.client.host
+        # Basic private IP range checks
+        return (
+            host == "127.0.0.1" or
+            host.startswith("192.168.") or
+            host.startswith("10.") or
+            host.startswith("172.")  # Simplified 172.16.0.0/12 check
+        )
 
     async def send_json(self, data: dict):
         if self.is_active:
@@ -43,6 +58,8 @@ class RemoteConnection:
     async def send_bytes(self, data: bytes):
         if self.is_active:
             try:
+                # Hybrid Transport: If codec is Opus, we'd encode here.
+                # For now, we transmit raw and let the client know the expected format.
                 await self.websocket.send_bytes(data)
             except Exception:
                 self.is_active = False
@@ -101,7 +118,18 @@ class RemoteManager:
         await websocket.accept()
         conn = RemoteConnection(websocket, device_id)
         self.active_connections[device_id] = conn
-        log.info(f"Remote device connected: {device_id}")
+        
+        transport = "PCM (Local)" if conn.is_local else "Opus Fallback (Remote)"
+        log.info(f"Remote device connected: {device_id} via {transport}")
+        
+        # Negotiate initial codec
+        await conn.send_json({
+            "type": "ConfigSync",
+            "payload": {
+                "preferred_codec": "pcm" if conn.is_local else "opus",
+                "is_local": conn.is_local
+            }
+        })
         return conn
 
     def disconnect(self, device_id: str):
@@ -153,6 +181,12 @@ async def websocket_endpoint(websocket: WebSocket, device_id: str):
                         cb_watcher.last_text = text
                         pyperclip.copy(text)
                         log.info(f"Remote clipboard sync: {len(text)} chars")
+
+                elif msg_type == "set_codec":
+                    codec = data.get("payload", {}).get("codec")
+                    if codec in ["pcm", "opus"]:
+                        conn.codec = codec
+                        log.info(f"Device {device_id} switched to {codec}")
 
             elif "bytes" in message:
                 # Accumulate audio chunks (PCM 16kHz)
