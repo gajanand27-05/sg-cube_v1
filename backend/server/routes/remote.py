@@ -51,6 +51,7 @@ class RemoteConnection:
 class RemoteManager:
     def __init__(self):
         self.active_connections: Dict[str, RemoteConnection] = {}
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
         self._setup_event_bridge()
 
     def _setup_event_bridge(self):
@@ -69,8 +70,18 @@ class RemoteManager:
             "type": type(event).__name__,
             "payload": self._serialize_event(event)
         }
-        # Run in a task to avoid blocking the EventBus
-        asyncio.create_task(self.broadcast(data))
+        
+        # Bridge sync EventBus (potentially from sub-threads) to async loop
+        if self.loop and self.loop.is_running():
+            self.loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(self.broadcast(data))
+            )
+        else:
+            log.debug(f"Skipping broadcast of {data['type']}: no active loop captured yet")
+
+    async def broadcast(self, data: dict):
+        for conn in list(self.active_connections.values()):
+            await conn.send_json(data)
 
     def _serialize_event(self, event) -> dict:
         if hasattr(event, "model_dump"):
@@ -84,6 +95,9 @@ class RemoteManager:
         return {"data": str(event)}
 
     async def connect(self, websocket: WebSocket, device_id: str):
+        if not self.loop:
+            self.loop = asyncio.get_running_loop()
+            
         await websocket.accept()
         conn = RemoteConnection(websocket, device_id)
         self.active_connections[device_id] = conn
@@ -95,10 +109,6 @@ class RemoteManager:
             self.active_connections[device_id].is_active = False
             del self.active_connections[device_id]
             log.info(f"Remote device disconnected: {device_id}")
-
-    async def broadcast(self, data: dict):
-        for conn in list(self.active_connections.values()):
-            await conn.send_json(data)
 
     async def broadcast_bytes_to_device(self, device_id: str, data: bytes):
         if device_id in self.active_connections:
