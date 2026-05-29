@@ -44,6 +44,13 @@ class ClipboardChangedEvent:
 
 
 @dataclass
+class HandoverEvent:
+    url: str | None = None
+    text: str | None = None
+    htype: str = "general" # renamed to htype to avoid conflict with builtin type
+
+
+@dataclass
 class TriggerError:
     detail: str
 

@@ -31,6 +31,22 @@ def clipboard_get() -> dict:
 
 
 @tool
+def send_to_phone(content: str, is_url: bool = False) -> dict:
+    """Send a link or a text snippet directly to the connected Android device.
+    Useful for "send this to my phone", "open this link on my mobile"."""
+    from backend.core.events import bus
+    from backend.daemon.ui_events import HandoverEvent
+    
+    event = HandoverEvent(
+        url=content if is_url else None,
+        text=content if not is_url else None,
+        htype="link" if is_url else "text"
+    )
+    bus.publish(event)
+    return {"status": "success", "message": f"Sent {'link' if is_url else 'text'} to mobile device"}
+
+
+@tool
 def send_whatsapp(contact: str, message: str) -> dict:
     """Open WhatsApp with a pre-filled message to `contact`.
     `contact` must be a phone number with country code (e.g. "+919876543210"

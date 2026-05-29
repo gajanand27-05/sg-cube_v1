@@ -14,6 +14,7 @@ from backend.daemon.ui_events import (
     CommandTranscribed,
     ConfidenceEvent,
     Executed,
+    HandoverEvent,
     IntentResolved,
     InternalAgentEvent,
     SelfHealingEvent,
@@ -58,7 +59,7 @@ class RemoteManager:
             StateChangedEvent, CommandTranscribed, IntentResolved,
             Executed, SpokenResponse, TokenStreamEvent,
             ConfidenceEvent, SelfHealingEvent, InternalAgentEvent,
-            ClipboardChangedEvent
+            ClipboardChangedEvent, HandoverEvent
         ]:
             bus.subscribe(event_type, self._broadcast_event)
 
