@@ -11,12 +11,14 @@ except Exception:
 
 from backend.daemon.trigger import handle_wake, on_wake_detected
 from backend.daemon.wake_word import WakeWordListener
+from backend.daemon.clipboard_watcher import watcher as cb_watcher
 
 
 def _run_terminal(args) -> None:
     from backend.daemon.ui import SGCubeApp
 
     app = SGCubeApp()
+    cb_watcher.start()
 
     def emit(event):
         try:
@@ -47,6 +49,7 @@ def _run_terminal(args) -> None:
     try:
         app.run()
     finally:
+        cb_watcher.stop()
         listener.stop()
         listener_thread.join(timeout=2.0)
 
@@ -54,6 +57,7 @@ def _run_terminal(args) -> None:
 def _run_tray(args) -> None:
     from backend.daemon.tray import TrayController
 
+    cb_watcher.start()
     listener = WakeWordListener(
         on_wake=handle_wake,
         on_wake_detected=lambda: on_wake_detected(emit=None),
@@ -69,11 +73,13 @@ def _run_tray(args) -> None:
     try:
         tray.run()
     finally:
+        cb_watcher.stop()
         listener.stop()
         listener_thread.join(timeout=2.0)
 
 
 def _run_headless(args) -> None:
+    cb_watcher.start()
     listener = WakeWordListener(
         on_wake=handle_wake,
         on_wake_detected=lambda: on_wake_detected(emit=None),
@@ -85,6 +91,7 @@ def _run_headless(args) -> None:
         listener.listen()
     except KeyboardInterrupt:
         print("\n[daemon] stopping...")
+        cb_watcher.stop()
         listener.stop()
 
 

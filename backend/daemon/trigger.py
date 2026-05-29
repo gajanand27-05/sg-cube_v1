@@ -3,7 +3,7 @@ import tempfile
 import threading
 import wave
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import numpy as np
 import sounddevice as sd
@@ -128,12 +128,25 @@ def on_wake_detected(emit: EmitFn | None = None) -> None:
     threading.Thread(target=_play_chime, daemon=True).start()
 
 
-def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
+async def _speak_selective(text: str, device_id: Optional[str] = None):
+    """Speak locally or push audio to a remote device."""
+    if device_id:
+        from backend.ai_modules.speech.tts_piper import generate_audio
+        from backend.server.routes.remote import manager as remote_manager
+
+        audio_bytes, rate = generate_audio(text)
+        if audio_bytes:
+            await remote_manager.broadcast_bytes_to_device(device_id, audio_bytes)
+    else:
+        speak(text)
+
+
+def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
     """Synchronous entry point for the wake word listener."""
-    return asyncio.run(_handle_wake_async(audio_bytes, emit))
+    return asyncio.run(_handle_wake_async(audio_bytes, emit, device_id))
 
 
-async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None) -> bool:
+async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
     """Main daemon orchestration via async events."""
     state_manager.transition_to(AssistantState.THINKING)
     arr = np.frombuffer(audio_bytes, dtype=np.int16)
@@ -163,7 +176,7 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None) -> 
             reply = "Sorry, my reasoning model is unavailable"
             
             state_manager.transition_to(AssistantState.SPEAKING)
-            speak(reply)
+            await _speak_selective(reply, device_id)
             spoken_event = SpokenResponse(text=reply)
             bus.publish(spoken_event)
             _emit(emit, spoken_event)
@@ -194,7 +207,7 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None) -> 
         reply = _spoken_response(routed.intent, result)
         
         state_manager.transition_to(AssistantState.SPEAKING)
-        speak(reply)
+        await _speak_selective(reply, device_id)
         
         spoken_event = SpokenResponse(text=reply)
         bus.publish(spoken_event)

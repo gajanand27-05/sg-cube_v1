@@ -25,6 +25,17 @@ def _get_voice() -> PiperVoice:
     return _voice
 
 
+def generate_audio(text: str) -> tuple[bytes, int]:
+    """Synthesize `text` and return raw PCM bytes (16kHz) and sample rate."""
+    voice = _get_voice()
+    chunks = list(voice.synthesize(text))
+    if not chunks:
+        return b"", 0
+    rate = chunks[0].sample_rate
+    audio = np.concatenate([c.audio_int16_array for c in chunks])
+    return audio.tobytes(), rate
+
+
 def speak(text: str) -> dict:
     """Synthesize `text` via Piper and play through the default audio device. Blocks."""
     t0 = time.perf_counter()

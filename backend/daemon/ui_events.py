@@ -39,6 +39,11 @@ class SpokenResponse:
 
 
 @dataclass
+class ClipboardChangedEvent:
+    text: str
+
+
+@dataclass
 class TriggerError:
     detail: str
 

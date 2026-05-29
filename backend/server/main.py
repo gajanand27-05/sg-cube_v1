@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 from backend.server.config import settings
-from backend.server.routes import admin, auth, execute, orchestrate, voice
+from backend.server.routes import admin, auth, execute, orchestrate, remote, voice
 
 app = FastAPI(
     title="SG_CUBE",
@@ -14,6 +14,7 @@ app.include_router(admin.router)
 app.include_router(voice.router)
 app.include_router(orchestrate.router)
 app.include_router(execute.router)
+app.include_router(remote.router)
 
 
 @app.get("/health")
