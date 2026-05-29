@@ -10,6 +10,8 @@ class MemoryType(str, Enum):
     PATTERN = "pattern"     # Successful tool workflow
     DECISION = "decision"   # Past choice made by user/agent
     OUTCOME = "outcome"     # Result of an action (success/fail)
+    VISUAL = "visual"       # Screen context observations
+    EPISODIC = "episodic"   # Narrative interaction history
 
 
 @dataclass

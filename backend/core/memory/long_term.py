@@ -66,9 +66,7 @@ class LongTermMemory:
 
     def search(self, query: str, mtype: Optional[MemoryType] = None, limit: int = 5) -> List[MemoryEntry]:
         """Perform semantic search (RAG) against the vector store."""
-        where = {}
-        if mtype:
-            where["type"] = mtype.value
+        where = {"type": mtype.value} if mtype else None
 
         try:
             results = self.collection.query(

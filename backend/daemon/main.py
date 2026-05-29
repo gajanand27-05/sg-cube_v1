@@ -12,6 +12,7 @@ except Exception:
 from backend.daemon.trigger import handle_wake, on_wake_detected
 from backend.daemon.wake_word import WakeWordListener
 from backend.daemon.clipboard_watcher import watcher as cb_watcher
+from backend.daemon.vision_loop import vision_loop
 
 
 def _run_terminal(args) -> None:
@@ -19,6 +20,7 @@ def _run_terminal(args) -> None:
 
     app = SGCubeApp()
     cb_watcher.start()
+    vision_loop.start()
 
     def emit(event):
         try:
@@ -49,6 +51,7 @@ def _run_terminal(args) -> None:
     try:
         app.run()
     finally:
+        vision_loop.stop()
         cb_watcher.stop()
         listener.stop()
         listener_thread.join(timeout=2.0)
@@ -58,6 +61,7 @@ def _run_tray(args) -> None:
     from backend.daemon.tray import TrayController
 
     cb_watcher.start()
+    vision_loop.start()
     listener = WakeWordListener(
         on_wake=handle_wake,
         on_wake_detected=lambda: on_wake_detected(emit=None),
@@ -73,6 +77,7 @@ def _run_tray(args) -> None:
     try:
         tray.run()
     finally:
+        vision_loop.stop()
         cb_watcher.stop()
         listener.stop()
         listener_thread.join(timeout=2.0)
@@ -80,6 +85,7 @@ def _run_tray(args) -> None:
 
 def _run_headless(args) -> None:
     cb_watcher.start()
+    vision_loop.start()
     listener = WakeWordListener(
         on_wake=handle_wake,
         on_wake_detected=lambda: on_wake_detected(emit=None),
@@ -91,6 +97,7 @@ def _run_headless(args) -> None:
         listener.listen()
     except KeyboardInterrupt:
         print("\n[daemon] stopping...")
+        vision_loop.stop()
         cb_watcher.stop()
         listener.stop()
 

@@ -10,21 +10,24 @@ class OllamaError(RuntimeError):
 def generate(
     prompt: str,
     system: str | None = None,
+    images: list[str] | None = None,
+    model: str | None = None,
     json_mode: bool = False,
     timeout: float = 60.0,
 ) -> str:
     """Call Ollama /api/generate and return the response string.
 
-    json_mode=True passes Ollama's `format: "json"` flag — the model is
-    constrained to emit a syntactically-valid JSON object.
+    images: optional list of base64-encoded strings (JPEG/PNG).
     """
     payload: dict = {
-        "model": settings.ollama_model,
+        "model": model or settings.ollama_model,
         "prompt": prompt,
         "stream": False,
     }
     if system:
         payload["system"] = system
+    if images:
+        payload["images"] = images
     if json_mode:
         payload["format"] = "json"
 

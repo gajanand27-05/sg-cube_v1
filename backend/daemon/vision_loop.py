@@ -1,0 +1,74 @@
+import asyncio
+import logging
+import threading
+import time
+from typing import Optional
+
+from backend.core.vision.capture import capture_screen
+from backend.core.vision.vlm import analyze_screenshot
+from backend.core.memory.screen_memory import screen_memory
+
+log = logging.getLogger(__name__)
+
+class VisionLoop:
+    """Background service that periodically 'looks' at the screen."""
+    
+    def __init__(self, interval: float = 300.0): # Default 5 minutes
+        self.interval = interval
+        self.enabled = True
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self):
+        if self._thread is not None:
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run_loop, name="vision-loop", daemon=True)
+        self._thread.start()
+        log.info(f"Vision loop started (interval: {self.interval}s)")
+
+    def stop(self):
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+        log.info("Vision loop stopped")
+
+    def _run_loop(self):
+        # Vision tasks are async, but the loop is sync-threaded.
+        # We use a dedicated event loop for this thread.
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        while not self._stop_event.is_set():
+            if self.enabled:
+                try:
+                    loop.run_until_complete(self._step())
+                except Exception as e:
+                    log.error(f"Vision loop step failed: {e}")
+            
+            # Wait for interval or stop signal
+            self._stop_event.wait(self.interval)
+        
+        loop.close()
+
+    async def _step(self):
+        """Single 'glance' at the screen."""
+        log.debug("Vision loop: taking a glance...")
+        
+        # 1. Capture
+        img_b64, title = capture_screen()
+        if not img_b64:
+            return
+            
+        # 2. Analyze (Local VLM)
+        observation = await analyze_screenshot(img_b64, title)
+        if not observation:
+            return
+            
+        # 3. Store (Semantic Memory)
+        screen_memory.store_observation(observation)
+        log.info(f"Vision loop: captured state in {observation.get('app')}")
+
+# Global instance
+vision_loop = VisionLoop()
