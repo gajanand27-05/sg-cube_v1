@@ -14,6 +14,7 @@ from backend.daemon.ui_events import (
     ConfidenceEvent,
     Executed,
     IntentResolved,
+    InternalAgentEvent,
     SelfHealingEvent,
     SpokenResponse,
     TriggerError,
@@ -75,9 +76,9 @@ CSS_PATH = Path(__file__).resolve().parents[2] / "assets" / "sgcube.tcss"
 
 
 def _wordmark() -> str:
-    # `ansi_shadow` gives a chunky 3D-shadow look (6 rows tall) — the
-    # original Phase 9d default that you liked in the amber preview.
-    return Figlet(font="ansi_shadow", width=120).renderText("SG_CUBE").rstrip()
+    # `ansi_shadow` gives a chunky 3D-shadow look (6 rows tall)
+    grid = Figlet(font="ansi_shadow", width=120).renderText("SG_CUBE").rstrip()
+    return f"{grid}\n[  M U L T I - A G E N T   A I   O S   ·   v1.0.0-AGENTIC  ]"
 
 
 def _bar(percent: float, width: int = 10) -> str:
@@ -175,7 +176,8 @@ class SGCubeApp(App):
         for event_type in [
             WakeHeard, CommandTranscribed, IntentResolved,
             Executed, SpokenResponse, TriggerError, StateChangedEvent,
-            VerificationEvent, ConfidenceEvent, SelfHealingEvent
+            VerificationEvent, ConfidenceEvent, SelfHealingEvent,
+            InternalAgentEvent
         ]:
             bus.subscribe(event_type, lambda e: self.call_from_thread(self.handle_daemon_event, e))
 
@@ -280,6 +282,10 @@ class SGCubeApp(App):
                 f"AGGREGATE: {s.aggregate:.1f}%"
             ]
             self.query_one("#reliability-body", Static).update("\n".join(parts))
+
+        elif isinstance(event, InternalAgentEvent):
+            msg = f"{event.agent_name.upper()} · {event.action.upper()}"
+            self.query_one("#status-right", Static).update(msg)
 
         elif isinstance(event, SelfHealingEvent):
             msg = f"HEALING · {event.path.upper()} ({event.tool_name})"

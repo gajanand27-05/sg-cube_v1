@@ -5,8 +5,8 @@ from backend.server.routes import admin, auth, execute, orchestrate, voice
 
 app = FastAPI(
     title="SG_CUBE",
-    description="Local-first AI Operating System — voice-first MVP",
-    version="0.5.0",
+    description="Local-first AI Operating System — agentic build",
+    version="1.0.0",
 )
 
 app.include_router(auth.router)
