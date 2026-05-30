@@ -20,7 +20,7 @@ import json
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, get_type_hints
+from typing import Any, Callable, Optional, get_type_hints
 
 from pydantic import BaseModel, Field
 

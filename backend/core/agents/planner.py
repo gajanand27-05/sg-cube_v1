@@ -50,6 +50,11 @@ class PlannerAgent(BaseInternalAgent):
                         if body.get("done"): break
 
             parsed = json.loads(full_content)
+            
+            # If it's a final response, return the whole dict for Commander to handle
+            if "final_response" in parsed:
+                return parsed
+
             # Basic normalization for tool calls
             calls = parsed.get("tool_calls") or parsed.get("toolCalls") or []
             if not isinstance(calls, list):
