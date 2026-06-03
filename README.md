@@ -8,95 +8,133 @@
 
 ## 🚀 Key Features
 
-*   **Voice-First Interaction:** Hands-free control with local Wake-Word detection ("SG Cube"), high-accuracy STT (Whisper), and natural neural TTS (Piper).
-*   **Vision-RAG (Screen Awareness):** A dedicated vision loop that periodically captures and analyzes your screen using local VLMs (like `qwen2.5-vl`), providing situational awareness.
+*   **Voice-First Interaction:** Hands-free control with local Wake-Word detection ("SG Cube"), high-accuracy STT (**faster-whisper**), and natural neural TTS (**Piper**).
+*   **Vision-RAG (Screen Awareness):** A dedicated vision loop that periodically captures and analyzes your screen using local VLMs (like **Qwen2.5-VL**), providing deep situational awareness.
 *   **Semantic Long-Term Memory:** Powered by **ChromaDB**, the system remembers facts, user preferences, and past interactions to provide deeply personalized context.
-*   **Multi-Agent Orchestration:** A sophisticated internal architecture featuring **Planner**, **Guardian**, and **Operator** agents that collaboratively solve tasks and "self-heal" from errors.
-*   **Local-First Architecture:** Core intelligence (LLM, Vision, STT, TTS) runs offline. Internet is only required for Supabase Auth and optional cloud-synced database features.
-*   **Sci-Fi Terminal UI:** A beautiful, immersive command center built with `Textual` for the ultimate "hacker" aesthetic.
+*   **Multi-Agent Orchestration:** A sophisticated internal architecture featuring specialized agents:
+    *   **Planner:** Strategizes and selects the right tools for the task.
+    *   **Guardian:** Verifies safety, security, and tool syntax.
+    *   **Operator:** Executes system commands and handles raw data.
+    *   **Self-Healer:** Automatically diagnoses and fixes tool execution failures.
+*   **Local-First Architecture:** Core intelligence (LLM, Vision, STT, TTS) runs offline via **Ollama**. Internet is only required for initial Supabase Auth and optional cloud-synced database features.
+*   **Sci-Fi Terminal UI:** A beautiful, immersive command center built with **Textual** for the ultimate "hacker" aesthetic.
 *   **Deep System Control:** Native tools for managing windows, audio, brightness, files, and even interacting with web services like YouTube.
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Component | Technology |
+| Layer | Technology |
 |---|---|
-| **API Server** | FastAPI |
-| **LLM Runtime** | Ollama (phi3, llama3, qwen2.5-vl) |
-| **STT (Speech-to-Text)** | faster-whisper |
-| **TTS (Text-to-Speech)** | Piper |
+| **API Server** | FastAPI (Python 3.12) |
+| **LLM Runtime** | Ollama |
+| **STT Engine** | faster-whisper (Local) |
+| **TTS Engine** | Piper (Local Neural TTS) |
 | **Wake-Word** | Vosk |
 | **Vector DB** | ChromaDB |
 | **Cloud Auth/DB** | Supabase |
-| **Terminal UI** | Textual |
+| **UI Framework** | Textual (TUI) |
 
 ---
 
-## 📦 Installation
+## 📂 Project Structure
+
+```text
+D:\sg_cube_v1\
+├── backend/
+│   ├── ai_modules/        # STT, TTS, and LLM clients
+│   ├── core/
+│   │   ├── agent/         # Multi-agent logic (Planner, Guardian, etc.)
+│   │   ├── memory/        # Semantic, Episodic, and Visual memory layers
+│   │   ├── orchestrator/  # Intent routing and rule engine
+│   │   ├── safe_executor/ # Whitelisted system command execution
+│   │   └── tools/         # Native system tools (audio, files, etc.)
+│   ├── daemon/            # Always-on background loop & Terminal UI
+│   ├── database/          # Supabase & ChromaDB clients
+│   └── server/            # FastAPI app & configuration
+├── assets/                # UI assets (chimes, icons, styles)
+├── tools/                 # CLI utilities for testing and setup
+└── requirements.txt       # Project dependencies
+```
+
+---
+
+## 📦 Installation & Setup
 
 ### 1. Prerequisites
 - **Python 3.12+**
-- **Ollama:** [Download and install Ollama](https://ollama.com/).
-- **Models:** Pull the required models:
-  ```bash
-  ollama pull llama3
-  ollama pull qwen2.5-vl
-  ```
-- **Supabase:** A Supabase project for Auth/Database (see `.env.example`).
+- **Ollama:** [Download Ollama](https://ollama.com/).
+- **Tesseract OCR:** Required for some vision features. [Download Tesseract](https://github.com/UB-Mannheim/tesseract/wiki).
 
-### 2. Setup
-1. Clone the repository:
+### 2. Model Preparation
+Pull the recommended local models via Ollama:
+```bash
+ollama pull gemma2:2b       # Default tool-calling agent
+ollama pull qwen2.5-vl      # Vision model
+ollama pull nomic-embed-text # Embedding model
+```
+
+### 3. Environment Configuration
+Create a `.env` file in the root directory:
+```env
+SUPABASE_URL=your_project_url
+SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_JWT_SECRET=your_jwt_secret
+OLLAMA_URL=http://localhost:11434
+```
+
+### 4. Setup Steps
+1. **Clone & Venv:**
    ```bash
    git clone https://github.com/your-repo/sg_cube.git
    cd sg_cube
-   ```
-2. Create and activate a virtual environment:
-   ```bash
    python -m venv .venv
    source .venv/bin/activate  # Windows: .venv\Scripts\activate
    ```
-3. Install dependencies:
+2. **Install:**
    ```bash
    pip install -r requirements.txt
    ```
-4. Configure environment variables:
+3. **Download Assets:**
    ```bash
-   cp .env.example .env
-   # Fill in your SUPABASE_URL, SUPABASE_KEY, etc.
+   python tools/download_vosk_model.py
+   python tools/download_piper_voice.py [voice-name]
    ```
 
 ---
 
-## 🏃 Running SG_CUBE
+## 🏃 Usage
 
-### The Always-On Daemon
-Launch the main daemon with the terminal UI:
+### Start the SG_CUBE Daemon
+This launches the always-on background listener and the immersive Terminal UI:
 ```bash
 python -m backend.daemon.main --ui terminal
 ```
 
-### Useful Tools
-- **Test Vision Memory:** `python tools/test_vision_memory.py`
-- **Diagnose Mic:** `python tools/diagnose_mic.py`
-- **Semantic Memory Test:** `python tools/test_semantic_memory.py`
-- **Download Voices/Models:**
-  ```bash
-  python tools/download_piper_voice.py [voice-name]
-  python tools/download_vosk_model.py
-  ```
+### Advanced Commands
+- **Wake Word:** Say `"SG Cube"` followed by your command.
+- **Clipboard Watcher:** Automatically monitors your clipboard for context-aware actions.
+- **Vision Loop:** Automatically "glances" at your screen every 5 minutes (configurable).
 
 ---
 
-## 🧠 Architecture: The Multi-Agent Loop
+## 🧠 The Multi-Agent Loop
 
-SG_CUBE doesn't just call an LLM; it runs a structured reasoning loop:
+SG_CUBE doesn't just call an LLM; it runs a **Scholar → Planner → Guardian → Operator → Healer** cycle:
 
-1.  **Scholar Stage:** Injects relevant memories (long-term facts + recent visual observations) into the context.
-2.  **Planner:** Devises a multi-step strategy using available system tools.
-3.  **Guardian:** Verifies the plan against security policies and ensures the tool syntax is correct.
-4.  **Operator:** Executes the tools (system commands, web searches, etc.).
-5.  **Self-Healer:** If a tool fails, the system analyzes the error and attempts a corrected plan.
+1.  **Scholar:** Injects relevant memories (long-term facts + recent visual observations) into the context.
+2.  **Planner:** Devises a multi-step strategy using system tools (e.g., "Find the file, then summarize it").
+3.  **Guardian:** Verifies the plan for security and ensures parameters match the tool schema.
+4.  **Operator:** Executes the tools in a safe, controlled environment.
+5.  **Self-Healer:** If a tool fails (e.g., file not found), the Healer analyzes the traceback and prompts the Planner for a corrected approach.
+
+---
+
+## 🛠️ Troubleshooting
+
+- **No audio detected:** Run `python tools/diagnose_mic.py` to verify your input device.
+- **VLM too slow:** Ensure you have enough VRAM for `qwen2.5-vl` or use a lighter vision model.
+- **Ollama Connection Refused:** Ensure the Ollama service is running and `OLLAMA_URL` is correct in `.env`.
 
 ---
 
