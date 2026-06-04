@@ -38,7 +38,10 @@ SG_CUBE features a custom-built **Sci-Fi Terminal Interface** (TUI) that feels l
 Hands-free control with local Wake-Word detection ("SG Cube"), high-accuracy STT (**faster-whisper**), and natural neural TTS (**Piper**). No data ever leaves your mic to the cloud.
 
 ### 👁️ Vision-RAG (Screen Awareness)
-A dedicated vision loop that periodically captures and analyzes your screen using local VLMs (like **Qwen2.5-VL**). SG_CUBE understands what you are looking at, whether it's a code error, a chart, or a video.
+A dedicated vision loop that periodically captures and analyzes your screen using local VLMs (like **Qwen2.5-VL**). 
+*   **🧠 Smart Change Detection:** Efficiently skips redundant analysis if the screen hasn't changed, saving VRAM and CPU.
+*   **⚡ Instant Context Recall:** Quickly retrieves the latest visual observation to answer "What was I just looking at?".
+*   **🔍 Situational Awareness:** Understands code errors, charts, or browser content in real-time.
 
 ### 🧠 Semantic Long-Term Memory
 Powered by **ChromaDB**, the system maintains an episodic and semantic memory. It remembers facts, user preferences, and past interactions to provide deeply personalized context.
