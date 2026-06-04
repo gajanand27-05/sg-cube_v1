@@ -7,8 +7,6 @@
 
 **SG_CUBE** is a voice-first, vision-aware, and highly integrated AI assistant designed to run entirely on your local machine. It transforms your computer into an "AI Operating System" that can see what you see, remember what you've done, and execute complex system commands via voice or text.
 
-![SG_CUBE Terminal UI](resources/Screenshot%202026-03-13%20092901.png)
-
 ---
 
 ## 📖 Table of Contents
