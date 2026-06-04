@@ -7,7 +7,18 @@
 
 **SG_CUBE** is a voice-first, vision-aware, and highly integrated AI assistant designed to run entirely on your local machine. It transforms your computer into an "AI Operating System" that can see what you see, remember what you've done, and execute complex system commands via voice or text.
 
-![SG_CUBE Terminal UI](https://via.placeholder.com/800x450.png?text=SG_CUBE+Sci-Fi+Terminal+UI+Aesthetic)
+![SG_CUBE Terminal UI](resources/Screenshot%202026-03-13%20092901.png)
+
+---
+
+## 📖 Table of Contents
+- [📟 Immersive Terminal UI](#-the-immersive-terminal-ui)
+- [🚀 Core Capabilities](#-core-capabilities)
+- [🛠️ Tool Catalog](#-tool-catalog)
+- [🧠 Multi-Agent Architecture](#-multi-agent-architecture)
+- [🔐 Local-First Philosophy](#-local-first-philosophy)
+- [📦 Quick Start](#-quick-start)
+- [🏃 Usage](#-usage)
 
 ---
 
@@ -34,12 +45,58 @@ A dedicated vision loop that periodically captures and analyzes your screen usin
 ### 🧠 Semantic Long-Term Memory
 Powered by **ChromaDB**, the system maintains an episodic and semantic memory. It remembers facts, user preferences, and past interactions to provide deeply personalized context.
 
-### 🤖 Multi-Agent Orchestration
-A sophisticated internal architecture featuring specialized agents:
-*   **Planner:** Strategizes and selects the right tools for the task.
-*   **Guardian:** Verifies safety, security, and tool syntax.
-*   **Operator:** Executes system commands and handles raw data.
-*   **Self-Healer:** Automatically diagnoses and fixes tool failures.
+---
+
+## 🛠️ Tool Catalog
+
+SG_CUBE comes packed with native tools for deep system integration:
+
+| Category | Capabilities |
+| :--- | :--- |
+| **🖥️ System Control** | Volume, Brightness, Power, Battery info, Screen capture, Window management |
+| **📁 File Operations** | Search, Read, Write, Organize files, Folder summaries |
+| **🌐 Information** | Local Weather, News RSS, Crypto/Stock prices, Wikipedia search |
+| **🎥 Media & Comms** | YouTube search/play, Email drafts, Calendar reminders, Notes management |
+| **🧠 Intelligence** | PDF/Web Summarization, OCR (Text from image), Real-time Translation |
+| **💻 Dev Tools** | Code explanation, Sandbox execution, System info diagnostics |
+
+---
+
+## 🧠 Multi-Agent Architecture
+
+SG_CUBE uses a sophisticated multi-agent orchestration layer to ensure safety and reliability.
+
+```mermaid
+graph TD
+    A[User Voice/Text] --> B(Scholar Agent)
+    B -->|Inject Context| C(Planner Agent)
+    C -->|Draft Plan| D(Guardian Agent)
+    D -->|Verify Safety| E{Safe?}
+    E -- No --> C
+    E -- Yes --> F(Operator Agent)
+    F -->|Execute| G[System Tools]
+    G -->|Error| H(Healer Agent)
+    H -->|Analyze & Fix| C
+    G -->|Success| I[Result]
+    I --> J(Spoken Response)
+```
+
+1.  **Scholar:** Injects relevant memories (long-term facts + recent visual observations) into the context.
+2.  **Planner:** Devises a multi-step strategy using system tools.
+3.  **Guardian:** Verifies the plan for security and ensures parameters match the tool schema.
+4.  **Operator:** Executes the tools in a safe, controlled environment.
+5.  **Self-Healer:** If a tool fails, the Healer analyzes the traceback and prompts a correction.
+
+---
+
+## 🔐 Local-First Philosophy
+
+Unlike cloud-based assistants, SG_CUBE is built on the **Local-First** principle:
+
+*   **Privacy by Design:** Your voice, screen, and data never leave your hardware. No telemetry, no training on your private files.
+*   **Zero Latency:** No "processing..." spinning wheels caused by slow internet. Local STT and LLMs respond instantly.
+*   **Offline Reliability:** Works in a bunker, on a plane, or during an internet outage.
+*   **Full Ownership:** You own the models, you own the memory, you own the OS.
 
 ---
 
@@ -54,28 +111,6 @@ A sophisticated internal architecture featuring specialized agents:
 | **Wake-Word** | Vosk |
 | **Vector DB** | ChromaDB |
 | **UI Framework** | Textual (TUI) |
-
----
-
-## 📂 Project Structure
-
-```text
-D:\sg_cube_v1\
-├── backend/
-│   ├── ai_modules/        # STT, TTS, and LLM clients
-│   ├── core/
-│   │   ├── agent/         # Multi-agent logic (Planner, Guardian, etc.)
-│   │   ├── memory/        # Semantic, Episodic, and Visual memory layers
-│   │   ├── orchestrator/  # Intent routing and rule engine
-│   │   ├── safe_executor/ # Whitelisted system command execution
-│   │   └── tools/         # Native system tools (audio, files, etc.)
-│   ├── daemon/            # Always-on background loop & Terminal UI
-│   ├── database/          # Supabase & ChromaDB clients
-│   └── server/            # FastAPI app & configuration
-├── assets/                # UI assets (chimes, icons, styles)
-├── tools/                 # CLI utilities for testing and setup
-└── requirements.txt       # Project dependencies
-```
 
 ---
 
@@ -123,26 +158,6 @@ python -m backend.daemon.main --ui terminal
 - **Wake Word:** Say `"SG Cube"` followed by your command.
 - **Clipboard:** SG_CUBE monitors your clipboard for context-aware actions.
 - **Vision:** The system "glances" at your screen periodically to build visual context.
-
----
-
-## 🧠 The Multi-Agent Cycle
-
-SG_CUBE doesn't just call an LLM; it runs a **Scholar → Planner → Guardian → Operator → Healer** cycle:
-
-1.  **Scholar:** Injects relevant memories (long-term facts + recent visual observations) into the context.
-2.  **Planner:** Devises a multi-step strategy using system tools.
-3.  **Guardian:** Verifies the plan for security and ensures parameters match the tool schema.
-4.  **Operator:** Executes the tools in a safe, controlled environment.
-5.  **Self-Healer:** If a tool fails, the Healer analyzes the traceback and prompts a correction.
-
----
-
-## 🛠️ Troubleshooting
-
-- **🎤 No audio detected:** Run `python tools/diagnose_mic.py` to verify your input device.
-- **🐌 VLM too slow:** Ensure you have enough VRAM for `qwen2.5-vl`.
-- **🔌 Ollama Connection:** Ensure the Ollama service is running and `OLLAMA_URL` is set in your `.env`.
 
 ---
 
