@@ -24,6 +24,8 @@
 
 SG_CUBE features a custom-built **Sci-Fi Terminal Interface** (TUI) that feels like it's pulled straight from a hacker's workstation. 
 
+### 🟢 Aesthetic: High-Contrast Hacker Green (#00ff41)
+
 ```text
   ███████╗ ██████╗      ██████╗██╗   ██╗██████╗ ███████╗
   ██╔════╝██╔════╝     ██╔════╝██║   ██║██╔══██╗██╔════╝
@@ -34,36 +36,35 @@ SG_CUBE features a custom-built **Sci-Fi Terminal Interface** (TUI) that feels l
 [  M U L T I - A G E N T   A I   O S   ·   v1.0.0-AGENTIC  ]
 
 ┌────────────────────────────────────────────────────────────┐
-│ ● SYSTEM ONLINE           14:20:05        STATUS · LISTENING │
+│ * SYSTEM ONLINE           14:20:05        STATUS : LISTENING │
 └────────────────────────────────────────────────────────────┘
 
 ┌─ ENGINES ──────────────────┐  ┌─ TRANSCRIPT ───────────────┐
-│ ● vosk    ● whisper        │  │ > Summarize the open PDF   │
-│ ● ollama  ● piper          │  │   and send it to my email. │
-│ · ALL READY                │  │                            │
+│ * vosk    * whisper        │  │ > Summarize the open PDF   │
+│ * ollama  * piper          │  │   and send it to my email. │
+│ . ALL READY                │  │                            │
 └────────────────────────────┘  └────────────────────────────┘
 ┌─ ROUTING (session) ────────┐  ┌─ INTENT ───────────────────┐
-│ cache ▰▰▱▱▱ 40%            │  │ summarize / ieee_paper.pdf │
-│ rule  ▰▰▰▰▱ 80%            │  │ (LLM_LAYER)                │
-│ llm   ▰▱▱▱▱ 20%            │  │                            │
+│ cache ███░░░░░ 40%         │  │ summarize / ieee_paper.pdf │
+│ rule  ██████░░ 80%         │  │ (LLM_LAYER)                │
+│ llm   █░░░░░░░ 20%         │  │                            │
 └────────────────────────────┘  └────────────────────────────┘
 ┌─ RECENT ───────────────────┐  ┌─ EXECUTION ────────────────┐
-│ ✓  open spotify     rule   │  │ ✓ PDF analyzed correctly.  │
-│ ✓  set volume 50    rule   │  │ ⚡ RUNNING (comms.email)    │
-│ ✗  find keys        llm    │  │                            │
+│ [v] open spotify     rule  │  │ [v] PDF analyzed correctly.│
+│ [v] set volume 50    rule  │  │ [!] RUNNING (comms.email)  │
+│ [x] find keys        llm   │  │                            │
 └────────────────────────────┘  └────────────────────────────┘
 ┌─ RELIABILITY ──────────────┐
-│ TOOL    ▰▰▰▰▰▰▰▰▰▱ 95%     │
-│ AI      ▰▰▰▰▰▰▰▰▱▱ 82%     │
-│ CONTEXT ▰▰▰▰▰▰▰▰▰▰ 100%    │
+│ TOOL    ██████████░ 95%    │
+│ AI      ████████░░░ 82%    │
+│ CONTEXT ███████████ 100%   │
 └────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────┐
-│ LIVE MIC  ▏▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰  │
+│ LIVE MIC  | ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  │
 └────────────────────────────────────────────────────────────┘
 ```
 
-*   **🟢 Hacker Aesthetic:** A beautiful high-contrast green-on-black interface (`#00ff41`).
 *   **📡 Live Telemetry:** Real-time visualization of mic levels, confidence scores, and multi-agent "thinking" states.
 *   **⚡ Smart Routing:** Watch as the system routes your intent through Cache → Rules → LLM in real-time.
 *   **👻 Pop-on-Wake:** The UI automatically minimizes when idle and "pops up" the moment you say "SG Cube", keeping your workspace clean.
