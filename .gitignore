@@ -49,6 +49,7 @@ Thumbs.db
 
 # Claude Code local settings
 .claude/
+GEMINI.md
 
 # Build / dist
 build/
