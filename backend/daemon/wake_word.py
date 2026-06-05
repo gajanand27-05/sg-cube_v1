@@ -224,7 +224,7 @@ class WakeWordListener:
                 command_handled = False
                 try:
                     # Do NOT drain — if the user said wake+command in one
-                    # breath ("sg cube open notepad"), the command audio is
+                    # breath ("onyx open notepad"), the command audio is
                     # sitting in the queue. _capture will read it first.
                     audio = self._capture(initial=initial_audio)
                     result = self.on_wake(audio)
