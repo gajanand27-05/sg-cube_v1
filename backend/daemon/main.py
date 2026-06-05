@@ -104,7 +104,7 @@ def _run_headless(args) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="SG_CUBE always-on wake-word daemon")
-    ap.add_argument("--wake-phrase", default="sg cube")
+    ap.add_argument("--wake-phrase", default="onyx")
     ap.add_argument("--device", type=int, default=None)
     ap.add_argument("--capture-seconds", type=float, default=2.5)
     ap.add_argument(

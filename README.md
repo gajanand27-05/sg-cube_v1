@@ -67,7 +67,7 @@ SG_CUBE features a custom-built **Sci-Fi Terminal Interface** (TUI) that feels l
 
 *   **📡 Live Telemetry:** Real-time visualization of mic levels, confidence scores, and multi-agent "thinking" states.
 *   **⚡ Smart Routing:** Watch as the system routes your intent through Cache → Rules → LLM in real-time.
-*   **👻 Pop-on-Wake:** The UI automatically minimizes when idle and "pops up" the moment you say "SG Cube", keeping your workspace clean.
+*   **👻 Pop-on-Wake:** The UI automatically minimizes when idle and "pops up" the moment you say "Onyx", keeping your workspace clean.
 *   **🛠️ Self-Healing HUD:** Monitor the "Healer" agent as it automatically recovers from tool execution errors.
 
 ---
@@ -75,7 +75,7 @@ SG_CUBE features a custom-built **Sci-Fi Terminal Interface** (TUI) that feels l
 ## 🚀 Core Capabilities
 
 ### 🎙️ Voice-First Interaction
-Hands-free control with local Wake-Word detection ("SG Cube"), high-accuracy STT (**faster-whisper**), and natural neural TTS (**Piper**). No data ever leaves your mic to the cloud.
+Hands-free control with local Wake-Word detection ("Onyx"), high-accuracy STT (**faster-whisper**), and natural neural TTS (**Piper**). No data ever leaves your mic to the cloud.
 
 ### 👁️ Vision-RAG (Screen Awareness)
 A dedicated vision loop that periodically captures and analyzes your screen using local VLMs (like **Qwen2.5-VL**). 
@@ -196,7 +196,7 @@ python -m backend.daemon.main --ui terminal
 ```
 
 ### Pro Tips
-- **Wake Word:** Say `"SG Cube"` followed by your command.
+- **Wake Word:** Say `"Onyx"` followed by your command.
 - **Clipboard:** SG_CUBE monitors your clipboard for context-aware actions.
 - **Vision:** The system "glances" at your screen periodically to build visual context.
 

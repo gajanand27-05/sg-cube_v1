@@ -5,7 +5,7 @@ import pystray
 from PIL import Image, ImageDraw
 
 ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
-TRAY_TITLE = "SG_CUBE — say 'sg cube' to wake"
+TRAY_TITLE = "SG_CUBE — say 'onyx' to wake"
 
 
 def _generate_default_icon(size: int = 64) -> Image.Image:

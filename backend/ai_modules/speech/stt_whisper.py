@@ -61,7 +61,26 @@ def transcribe(audio_path: str | Path) -> dict:
         vad_parameters={"min_silence_duration_ms": 300},
         initial_prompt=_COMMAND_PROMPT,
     )
-    text = " ".join(seg.text.strip() for seg in segments).strip()
+
+    valid_segments = []
+    for seg in segments:
+        # Filter out segments that are likely noise or hallucinations.
+        # avg_logprob: higher is better (0 is perfect, -1 is okay, -3 is bad).
+        # no_speech_prob: lower is better (0 is speech, 1 is noise).
+        if seg.no_speech_prob > 0.6 or seg.avg_logprob < -1.5:
+            continue
+            
+        cleaned = seg.text.strip()
+        # Whisper often hallucinations "Thank you." or "you" when it hears
+        # static/noise. If the segment is extremely short and low confidence,
+        # drop it.
+        if cleaned.lower() in ["thank you.", "you", "thanks.", "bye."]:
+            if seg.avg_logprob < -0.5:
+                continue
+
+        valid_segments.append(cleaned)
+
+    text = " ".join(valid_segments).strip()
     return {
         "text": text,
         "language": info.language,

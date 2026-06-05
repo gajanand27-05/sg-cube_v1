@@ -1,12 +1,12 @@
 """Launch the SG_CUBE always-on wake-word daemon.
 
-Says "sg cube" to wake it, then your command in the next 5 seconds.
-Example: "sg cube" ... beep ... "open notepad"
+Says "onyx" to wake it, then your command in the next 5 seconds.
+Example: "onyx" ... beep ... "open notepad"
 
 Usage:
     python tools/run_daemon.py
     python tools/run_daemon.py --device 22         # bluetooth headset (see record_clip.py --list)
-    python tools/run_daemon.py --wake-phrase "hey cube"
+    python tools/run_daemon.py --wake-phrase "hey onyx"
 """
 import sys
 from pathlib import Path

@@ -22,6 +22,7 @@ env/
 *.sqlite
 *.sqlite3
 backend/database/*.db
+backend/database/chroma_db/
 
 # Logs / runtime
 backend/logs/**

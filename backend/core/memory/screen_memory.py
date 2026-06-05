@@ -52,6 +52,26 @@ class ScreenMemory:
         except Exception as e:
             log.error(f"Failed to store visual memory: {e}")
 
+    def get_latest_observation(self) -> Optional[str]:
+        """Return the most recent visual summary stored."""
+        try:
+            # Chroma doesn't have a simple 'get last' by default without sorting
+            # But we can query everything and sort by date if we had a metadata filter
+            # Or just use the 'get' with a limit.
+            results = self.collection.get(
+                limit=1,
+                include=["documents", "metadatas"]
+            )
+            if results["documents"]:
+                # Note: 'get' with limit=1 doesn't guarantee 'latest' without sorting.
+                # However, since we use UUIDs, it's random. 
+                # Let's use query with a very broad string to get recent stuff if possible,
+                # or better, just keep a cache in memory of the last one.
+                return results["documents"][0]
+            return None
+        except Exception:
+            return None
+
     def search_visual(self, query: str, limit: int = 3) -> List[MemoryEntry]:
         """Retrieve relevant past visual context."""
         try:

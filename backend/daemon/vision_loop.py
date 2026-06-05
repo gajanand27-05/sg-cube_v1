@@ -18,6 +18,7 @@ class VisionLoop:
         self.enabled = True
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._last_img_hash: Optional[str] = None
 
     def start(self):
         if self._thread is not None:
@@ -60,13 +61,21 @@ class VisionLoop:
         img_b64, title = capture_screen()
         if not img_b64:
             return
+
+        # 2. Simple Change Detection (Efficiency Improvement)
+        # Using the length and a slice of the b64 string as a naive hash
+        current_hash = f"{len(img_b64)}-{img_b64[:100]}-{img_b64[-100:]}"
+        if current_hash == self._last_img_hash:
+            log.debug("Vision loop: screen unchanged, skipping VLM.")
+            return
             
-        # 2. Analyze (Local VLM)
+        # 3. Analyze (Local VLM)
         observation = await analyze_screenshot(img_b64, title)
         if not observation:
             return
             
-        # 3. Store (Semantic Memory)
+        # 4. Store (Semantic Memory)
+        self._last_img_hash = current_hash
         screen_memory.store_observation(observation)
         log.info(f"Vision loop: captured state in {observation.get('app')}")
 

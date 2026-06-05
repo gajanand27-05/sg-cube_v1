@@ -151,6 +151,15 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
     state_manager.transition_to(AssistantState.THINKING)
     arr = np.frombuffer(audio_bytes, dtype=np.int16)
     peak = int(np.max(np.abs(arr))) if arr.size else 0
+    rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) if arr.size else 0
+
+    # Safety check: if the captured audio is exceptionally quiet, it was
+    # likely a false trigger or background noise Vosk misidentified.
+    # rms < 200 is effectively a silent room.
+    if rms < 200:
+        print(f"[trigger] skipping whisper: capture too quiet (rms={rms:.0f})")
+        state_manager.transition_to(AssistantState.IDLE)
+        return False
     
     wav_path = _save_wav(audio_bytes)
     try:

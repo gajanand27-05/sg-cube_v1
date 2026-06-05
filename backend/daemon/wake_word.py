@@ -21,19 +21,12 @@ _VAD_TRAILING_SILENCE_MS = 800  # stop after this much silence post-speech
 _VAD_MAX_CAPTURE_S = 10.0  # hard cap so a stuck mic doesn't hang forever
 _VAD_INITIAL_WAIT_S = 3.0  # how long to wait for the user to start speaking
 
-# Follow-up mode: after a command completes, stay open for this many seconds
-# and trigger capture on ANY speech, no wake word required. Lets the user
-# chain commands ("open chrome" ... "and the news" ... "lock") without
-# saying "sg cube" each time.
-#
-# A SEPARATE, higher threshold is used for follow-up triggering — the main
-# _VAD_RMS_THRESHOLD is for "is this chunk speech vs silence" inside an
-# already-triggered capture, where false positives just extend the window.
-# Follow-up triggering is upstream: a false positive here STARTS a whole
-# capture+STT+TTS round on ambient noise. Worth being conservative.
+# Follow-up mode is currently DISABLED (set to 0.0) so that the UI only
+# pops up when the wake word "onyx" is heard.
 _FOLLOWUP_TRIGGER_RMS = 1000
-_FOLLOWUP_WINDOW_S = 8.0
-_FOLLOWUP_MAX_EMPTY = 2  # close follow-up after this many empty captures in a row
+_FOLLOWUP_WINDOW_S = 0.0
+_FOLLOWUP_MAX_EMPTY = 2  # unused when window is 0
+
 
 
 class WakeWordListener:
@@ -55,7 +48,7 @@ class WakeWordListener:
         self,
         on_wake: Callable[[bytes], Any],
         on_wake_detected: Optional[Callable[[], None]] = None,
-        wake_phrase: str = "sg cube",
+        wake_phrase: str = "onyx",
         capture_seconds: float = 2.5,  # legacy arg, ignored by VAD path
         sample_rate: int = 16000,
         device: Optional[int] = None,
@@ -186,29 +179,34 @@ class WakeWordListener:
                 trigger_label = ""
 
                 # Path A: standard wake-word detection via Vosk partial result.
-                # PartialResult fires the moment the phrase appears in the
-                # in-progress recognition, NOT only at end-of-utterance — so
-                # latency drops from ~1-2s to ~125-300ms.
-                self.recognizer.AcceptWaveform(data)
-                partial = (json.loads(self.recognizer.PartialResult()).get("partial") or "").lower()
-                if self.wake_phrase in partial:
-                    trigger = True
-                    trigger_label = f"wake: {partial!r}"
-                    self.recognizer.Reset()
-                    empty_in_a_row = 0
-                # Path B: follow-up mode — any speech triggers a capture, no
-                # wake word required. The chunk that triggered IS the start
-                # of the user's command, so we feed it into the capture buffer.
-                # Uses a HIGHER threshold than the in-capture VAD so ambient
-                # noise / TTS bleed don't start phantom rounds.
+                # Added RMS check: don't even look at Vosk if the chunk is
+                # near-silent. Prevents "ghost" hits in quiet rooms.
+                arr = np.frombuffer(data, dtype=np.int16)
+                rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) if arr.size else 0
+                
+                if rms > _VAD_RMS_THRESHOLD:
+                    self.recognizer.AcceptWaveform(data)
+                    partial_json = json.loads(self.recognizer.PartialResult())
+                    partial = (partial_json.get("partial") or "").lower()
+                    
+                    # Stricter check: ensure it's a standalone word or at the 
+                    # start/end of the partial to avoid sub-word triggers.
+                    is_match = False
+                    if self.wake_phrase in partial.split():
+                        is_match = True
+                    
+                    if is_match:
+                        trigger = True
+                        trigger_label = f"wake: {partial!r} (rms={rms:.0f})"
+                        self.recognizer.Reset()
+                        empty_in_a_row = 0
+                
+                # Path B: follow-up mode — any speech triggers a capture...
                 elif in_followup:
-                    arr = np.frombuffer(data, dtype=np.int16)
-                    if arr.size:
-                        rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
-                        if rms > _FOLLOWUP_TRIGGER_RMS:
-                            trigger = True
-                            trigger_label = f"followup-speech (rms={rms:.0f})"
-                            initial_audio = [data]
+                    if rms > _FOLLOWUP_TRIGGER_RMS:
+                        trigger = True
+                        trigger_label = f"followup-speech (rms={rms:.0f})"
+                        initial_audio = [data]
 
                 if not trigger:
                     continue
