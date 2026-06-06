@@ -31,6 +31,8 @@ class Executed:
     message: str | None
     reason: str | None
     latency_ms: int
+    confidence: float = 100.0
+    confidence_reason: list[str] = None
 
 
 @dataclass
@@ -77,6 +79,7 @@ class ConfidenceScore:
 class ConfidenceEvent:
     request_id: str
     score: ConfidenceScore
+    details: dict = None
 
 
 @dataclass

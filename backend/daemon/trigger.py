@@ -209,6 +209,8 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
             message=result.message,
             reason=result.reason,
             latency_ms=result.latency_ms,
+            confidence=result.confidence,
+            confidence_reason=result.confidence_reason
         )
         bus.publish(exec_event)
         _emit(emit, exec_event)

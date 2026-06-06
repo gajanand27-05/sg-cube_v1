@@ -6,7 +6,7 @@
 """
 import httpx
 
-from backend.core.tools.registry import tool
+from backend.core.tools.registry import ToolResult, tool
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
@@ -84,7 +84,7 @@ _LOCATION_DEFAULT_ALIASES = {"", "current", "current location", "my location", "
 
 
 @tool
-def get_weather(location: str = "") -> dict:
+def get_weather(location: str = "") -> ToolResult:
     """Get current weather for `location` (a city name). If `location` is
     empty, omitted, or "current"/"here", infers from your IP. Returns
     temperature in °C and a description."""
@@ -93,10 +93,10 @@ def get_weather(location: str = "") -> dict:
     return _fetch_current(location)
 
 
-def _fetch_current(location: str) -> dict:
+def _fetch_current(location: str) -> ToolResult:
     geo = _geocode(location)
     if not geo:
-        return {"status": "blocked", "reason": f"could not find location {location!r}"}
+        return ToolResult.blocked(f"could not find location {location!r}")
 
     try:
         with httpx.Client(timeout=10.0) as c:
@@ -109,10 +109,10 @@ def _fetch_current(location: str) -> dict:
                 },
             )
     except Exception as e:
-        return {"status": "error", "reason": f"weather API error: {e}"}
+        return ToolResult.error(f"weather API error: {e}")
 
     if r.status_code != 200:
-        return {"status": "error", "reason": f"weather API returned {r.status_code}"}
+        return ToolResult.error(f"weather API returned {r.status_code}")
 
     cw = r.json().get("current_weather", {})
     temp = cw.get("temperature")
@@ -123,20 +123,25 @@ def _fetch_current(location: str) -> dict:
     label = f"{place}, {country}".strip(", ")
 
     msg = f"{label}: {desc}, {temp:.0f}°C" if temp is not None else f"{label}: {desc}"
-    return {
-        "status": "success",
-        "message": msg,
-        "args": {
+    return ToolResult.success(
+        message=msg,
+        data={
             "location": label,
             "temperature_c": temp,
             "description": desc,
             "weathercode": code,
         },
-    }
+        confidence=98.0,
+        confidence_reason=[
+            f"Location {place!r} geocoded successfully",
+            "Real-time weather data retrieved",
+            "Open-Meteo API response valid"
+        ]
+    )
 
 
 @tool
-def get_weather_forecast(location: str = "", days: int = 3) -> dict:
+def get_weather_forecast(location: str = "", days: int = 3) -> ToolResult:
     """Get a daily forecast for the next `days` days (default 3, max 7).
     `location` is a city name; empty defaults to your IP-detected location."""
     days = max(1, min(7, int(days)))
@@ -145,7 +150,7 @@ def get_weather_forecast(location: str = "", days: int = 3) -> dict:
 
     geo = _geocode(location)
     if not geo:
-        return {"status": "blocked", "reason": f"could not find location {location!r}"}
+        return ToolResult.blocked(f"could not find location {location!r}")
 
     try:
         with httpx.Client(timeout=10.0) as c:
@@ -160,9 +165,9 @@ def get_weather_forecast(location: str = "", days: int = 3) -> dict:
                 },
             )
     except Exception as e:
-        return {"status": "error", "reason": f"weather API error: {e}"}
+        return ToolResult.error(f"weather API error: {e}")
     if r.status_code != 200:
-        return {"status": "error", "reason": f"weather API returned {r.status_code}"}
+        return ToolResult.error(f"weather API returned {r.status_code}")
 
     d = r.json().get("daily") or {}
     dates = d.get("time") or []
@@ -187,8 +192,13 @@ def get_weather_forecast(location: str = "", days: int = 3) -> dict:
         if r["high_c"] is not None
     )
     place = geo.get("name", location)
-    return {
-        "status": "success",
-        "message": f"{place} {days}-day forecast — {summary}",
-        "args": {"location": place, "days": rows},
-    }
+    return ToolResult.success(
+        message=f"{place} {days}-day forecast — {summary}",
+        data={"location": place, "days": rows},
+        confidence=95.0,
+        confidence_reason=[
+            f"Forecast for {days} days retrieved",
+            "Timezone handled correctly",
+            "Geocoding and API response successful"
+        ]
+    )

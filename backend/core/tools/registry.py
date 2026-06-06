@@ -46,18 +46,36 @@ class ToolResult(BaseModel):
     message: str | None = None
     reason: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
+    confidence: float = 100.0  # 0.0 - 100.0
+    confidence_reason: list[str] = Field(default_factory=list)
 
     @classmethod
-    def success(cls, message: str, data: dict[str, Any] | None = None) -> "ToolResult":
-        return cls(status=ToolStatus.SUCCESS, message=message, data=data or {})
+    def success(cls, message: str, data: dict[str, Any] | None = None, confidence: float = 100.0, confidence_reason: list[str] | None = None) -> "ToolResult":
+        return cls(
+            status=ToolStatus.SUCCESS, 
+            message=message, 
+            data=data or {},
+            confidence=confidence,
+            confidence_reason=confidence_reason or []
+        )
 
     @classmethod
-    def blocked(cls, reason: str) -> "ToolResult":
-        return cls(status=ToolStatus.BLOCKED, reason=reason)
+    def blocked(cls, reason: str, confidence: float = 0.0, confidence_reason: list[str] | None = None) -> "ToolResult":
+        return cls(
+            status=ToolStatus.BLOCKED, 
+            reason=reason,
+            confidence=confidence,
+            confidence_reason=confidence_reason or []
+        )
 
     @classmethod
-    def error(cls, reason: str) -> "ToolResult":
-        return cls(status=ToolStatus.ERROR, reason=reason)
+    def error(cls, reason: str, confidence: float = 0.0, confidence_reason: list[str] | None = None) -> "ToolResult":
+        return cls(
+            status=ToolStatus.ERROR, 
+            reason=reason,
+            confidence=confidence,
+            confidence_reason=confidence_reason or []
+        )
 
     @classmethod
     def pending(cls, confirmation_token: str, message: str) -> "ToolResult":
@@ -98,20 +116,17 @@ def _type_to_json(py_type: Any) -> str:
     return _PRIMITIVE_TYPES.get(py_type, "string")
 
 
-def tool(security_or_func: Any = SecurityLevel.TRUSTED) -> Any:
+def tool(security: Any = SecurityLevel.TRUSTED) -> Any:
     """Register a function as a tool. Supports:
       @tool
       @tool(security=SecurityLevel.CONFIRM_REQUIRED)
     """
-    security = SecurityLevel.TRUSTED
     func = None
 
-    if callable(security_or_func):
+    if callable(security):
         # Used as @tool
-        func = security_or_func
-    else:
-        # Used as @tool(security=...)
-        security = security_or_func
+        func = security
+        security = SecurityLevel.TRUSTED
 
     def decorator(f: Callable[..., dict]) -> Callable[..., dict]:
         name = f.__name__

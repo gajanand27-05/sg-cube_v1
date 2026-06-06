@@ -160,14 +160,15 @@ class SGCubeApp(App):
             Vertical(
                 Panel("ENGINES", engines_body, id="engines", body_id="engines-body"),
                 Panel("ROUTING (session)", self._routing_body(), id="routing", body_id="routing-body"),
-                Panel("RECENT", "— no commands yet —", id="recent", body_id="recent-body"),
+                Panel("PLAN", "— no active plan —", id="plan", body_id="plan-body"),
+                Panel("CONFIDENCE", self._confidence_body(), id="confidence", body_id="confidence-body"),
                 id="left-col",
             ),
             Vertical(
                 Panel("TRANSCRIPT", "> _", id="transcript", body_id="transcript-body"),
                 Panel("INTENT", "—", id="intent", body_id="intent-body"),
                 Panel("EXECUTION", "—", id="execution", body_id="execution-body"),
-                Panel("RELIABILITY", "—", id="reliability", body_id="reliability-body"),
+                Panel("RECENT", "— no commands yet —", id="recent", body_id="recent-body"),
                 id="right-col",
             ),
             id="main-row",
@@ -269,7 +270,7 @@ class SGCubeApp(App):
             self.query_one("#transcript-body", Static).update("> ...")
             self.query_one("#intent-body", Static).update("—")
             self.query_one("#execution-body", Static).update("—")
-            self.query_one("#reliability-body", Static).update("—")
+            self.query_one("#plan-body", Static).update("— no active plan —")
 
         elif isinstance(event, CommandTranscribed):
             text = event.text if event.text else "(no speech detected)"
@@ -303,26 +304,42 @@ class SGCubeApp(App):
             self._refresh_routing()
 
         elif isinstance(event, ConfidenceEvent):
-            s = event.score
-            parts = [
-                f"TOOL    {_bar(s.tool_quality, width=10)} {s.tool_quality:>3.0f}%",
-                f"AI      {_bar(s.ai_quality, width=10)} {s.ai_quality:>3.0f}%",
-                f"CONTEXT {_bar(s.context_quality, width=10)} {s.context_quality:>3.0f}%",
-                f"AGGREGATE: {s.aggregate:.1f}%"
-            ]
-            self.query_one("#reliability-body", Static).update("\n".join(parts))
+            # Map incoming data to our specific observability metrics
+            self._confidence_scores["Tool Route"] = event.score.tool_quality
+            self._confidence_scores["Memory Match"] = event.score.context_quality
+            self._confidence_scores["Final Answer"] = event.score.aggregate
+            self._refresh_confidence()
 
         elif isinstance(event, InternalAgentEvent):
             msg = f"{event.agent_name.upper()} · {event.action.upper()}"
             self.query_one("#status-right", Static).update(msg)
+            
+            # If the planner is emitting a plan, show it
+            if event.agent_name.lower() == "planner" and "plan" in event.action.lower():
+                try:
+                    steps = event.details.get("steps", [])
+                    if steps:
+                        plan_text = "\n".join([f"{i+1}. {step}" for i, step in enumerate(steps)])
+                        self.query_one("#plan-body", Static).update(plan_text)
+                except Exception:
+                    pass
 
         elif isinstance(event, TaskEvent):
             # Live execution logs
             status_icon = "⚡" if event.status == TaskStatus.RUNNING else "✓" if event.status == TaskStatus.COMPLETED else "✗"
             tool_name = event.data.get("tool", "task")
-            msg = f"{status_icon} {event.status.upper()} ({tool_name})"
-            if event.message:
-                msg += f": {event.message}"
+            
+            # Formatted display with confidence
+            conf = event.data.get("confidence", 100.0)
+            reason_list = event.data.get("confidence_reason", [])
+            
+            msg = f"{status_icon} {event.status.upper()} ({tool_name.replace('_', ' ').title()})\n"
+            msg += f"Confidence: {conf:.0f}%\n"
+            if reason_list:
+                msg += "\nReason:\n"
+                for r in reason_list:
+                    msg += f"- {r}\n"
+            
             self.query_one("#execution-body", Static).update(msg)
 
         elif isinstance(event, SelfHealingEvent):
@@ -332,20 +349,28 @@ class SGCubeApp(App):
 
         elif isinstance(event, Executed):
             mark = "✓" if event.status == "success" else "✗"
-            detail = event.message or event.reason or event.status
-            self._last_execution_summary = f"{mark} {detail}  ·  {event.latency_ms}ms"
+            
+            # Updated execution summary with full confidence breakdown
+            title = event.command.replace('_', ' ').title()
+            if len(title) > 25: title = title[:22] + "..."
+            
+            msg = f"{mark} {event.status.upper()} ({title})\n"
+            msg += f"Confidence: {event.confidence:.0f}%\n"
+            if event.confidence_reason:
+                msg += "\nReason:\n"
+                for r in event.confidence_reason:
+                    msg += f"- {r}\n"
+            
+            self._last_execution_summary = msg
             self.query_one("#execution-body", Static).update(self._last_execution_summary)
+            
             self._recent.appendleft(
                 (mark, event.command, self._last_source_layer, event.latency_ms)
             )
             self._refresh_recent()
 
         elif isinstance(event, SpokenResponse):
-            # collapse the execution summary into one line with the spoken text
-            base = getattr(self, "_last_execution_summary", "—")
-            self.query_one("#execution-body", Static).update(
-                f"{base}  →  \"{event.text}\""
-            )
+            # Display summary then schedule minimize
             self.query_one("#status-right", Static).update("STATUS · LISTENING")
             self._schedule_idle_minimize()
 
@@ -359,11 +384,6 @@ class SGCubeApp(App):
 
 def main() -> None:
     SGCubeApp().run()
-
-
-if __name__ == "__main__":
-    main()
-().run()
 
 
 if __name__ == "__main__":

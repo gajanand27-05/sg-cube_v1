@@ -82,6 +82,8 @@ class Runtime:
                     message=res.get("message"),
                     reason=res.get("reason"),
                     data=res.get("args") or res.get("data") or {},
+                    confidence=res.get("confidence", 100.0),
+                    confidence_reason=res.get("confidence_reason") or [],
                 )
             
             task.result = res
@@ -89,26 +91,26 @@ class Runtime:
             
             # ── Observability Integration ────────────────────────────
             from backend.core.observability import engine as obs_engine
-            quality = 100.0 if res.status == ToolStatus.SUCCESS else 0.0
-            obs_engine.report_tool_quality(rid, quality, f"Status: {res.status}")
+            # Use actual tool confidence if available
+            obs_engine.report_tool_quality(rid, res.confidence, f"Status: {res.status}")
             # ─────────────────────────────────────────────────────────
             
         except asyncio.TimeoutError:
             log.error(f"Task {name} ({task_id}) timed out after {timeout}s")
             task.status = TaskStatus.FAILED
-            task.result = ToolResult.error(f"Execution timed out after {timeout}s")
+            task.result = ToolResult.error(f"Execution timed out after {timeout}s", confidence=0.0, confidence_reason=["Timeout reached"])
             from backend.core.observability import engine as obs_engine
             obs_engine.report_tool_quality(task_id, 0.0, "Timeout")
             
         except asyncio.CancelledError:
             log.info(f"Task {name} ({task_id}) was cancelled")
             task.status = TaskStatus.CANCELLED
-            task.result = ToolResult.blocked("Task was cancelled")
+            task.result = ToolResult.blocked("Task was cancelled", confidence=0.0, confidence_reason=["User cancelled"])
             
         except Exception as e:
             log.exception(f"Task {name} ({task_id}) failed with error")
             task.status = TaskStatus.FAILED
-            task.result = ToolResult.error(str(e))
+            task.result = ToolResult.error(str(e), confidence=0.0, confidence_reason=["Internal crash"])
             
         finally:
             task.end_time = time.perf_counter()
@@ -118,7 +120,12 @@ class Runtime:
                 task_id, 
                 task.status, 
                 message=task.result.message or task.result.reason,
-                data={"latency_ms": latency, "tool": name}
+                data={
+                    "latency_ms": latency, 
+                    "tool": name,
+                    "confidence": task.result.confidence,
+                    "confidence_reason": task.result.confidence_reason
+                }
             ))
             
             # Clean up (optionally keep for history)

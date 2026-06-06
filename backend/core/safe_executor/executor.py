@@ -15,6 +15,8 @@ class ExecutionResult(BaseModel):
     message: str | None = None
     reason: str | None = None
     latency_ms: int
+    confidence: float = 100.0
+    confidence_reason: list[str] = []
 
 
 async def execute(intent: Intent) -> ExecutionResult:
@@ -26,6 +28,8 @@ async def execute(intent: Intent) -> ExecutionResult:
             intent=intent,
             reason=f"dangerous target rejected: {intent.target!r}",
             latency_ms=int((time.perf_counter() - t0) * 1000),
+            confidence=0.0,
+            confidence_reason=["Security policy violation"]
         )
 
     handler = HANDLERS.get(intent.action)
@@ -35,6 +39,8 @@ async def execute(intent: Intent) -> ExecutionResult:
             intent=intent,
             reason=f"unknown action: {intent.action!r}",
             latency_ms=int((time.perf_counter() - t0) * 1000),
+            confidence=0.0,
+            confidence_reason=["Tool not in whitelist"]
         )
 
     try:
@@ -49,6 +55,8 @@ async def execute(intent: Intent) -> ExecutionResult:
             intent=intent,
             reason=str(e),
             latency_ms=int((time.perf_counter() - t0) * 1000),
+            confidence=0.0,
+            confidence_reason=["Runtime exception"]
         )
 
     return ExecutionResult(
@@ -57,4 +65,6 @@ async def execute(intent: Intent) -> ExecutionResult:
         message=res.message,
         reason=res.reason,
         latency_ms=int((time.perf_counter() - t0) * 1000),
+        confidence=res.confidence,
+        confidence_reason=res.confidence_reason
     )
