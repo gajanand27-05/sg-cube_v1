@@ -89,10 +89,19 @@ class AnimatedCube(Static):
         yield Static(self.CUBE_ART, id="cube-art")
 
     def on_mount(self) -> None:
-        # Animate from below
-        cube = self.query_one("#cube-art")
-        cube.styles.offset = Offset(0, 30)
-        cube.styles.animate("offset", Offset(0, 0), duration=2.5, easing="out_cubic")
+        self.cube = self.query_one("#cube-art")
+        self.y_offset = 30
+        self.cube.styles.offset = Offset(0, self.y_offset)
+        self.anim_timer = self.set_interval(0.05, self.tick_anim)
+
+    def tick_anim(self) -> None:
+        # Simple linear animation for robust execution
+        self.y_offset -= 2
+        if self.y_offset <= 0:
+            self.cube.styles.offset = Offset(0, 0)
+            self.anim_timer.stop()
+        else:
+            self.cube.styles.offset = Offset(0, self.y_offset)
 
 
 class RotatingReactor(Static):
