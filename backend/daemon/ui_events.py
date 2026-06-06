@@ -105,3 +105,8 @@ class TokenStreamEvent:
 class AgentThinkingEvent:
     agent_name: str
     is_thinking: bool
+
+
+@dataclass
+class ProactiveEvent:
+    query: str

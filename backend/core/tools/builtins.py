@@ -43,6 +43,9 @@ from backend.core.tools import read_aloud as _read_aloud  # noqa: F401
 from backend.core.tools import summarize as _summarize  # noqa: F401
 from backend.core.tools import translate as _translate  # noqa: F401
 
+# Phase 14 — automation (background watcher agents)
+from backend.core.tools import automation as _automation  # noqa: F401
+
 
 @tool(security=SecurityLevel.SAFE)
 def open_app(name: str) -> ToolResult:

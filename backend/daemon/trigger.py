@@ -146,10 +146,79 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optio
     return asyncio.run(_handle_wake_async(audio_bytes, emit, device_id))
 
 
+async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
+    request_id = str(uuid.uuid4())[:8]
+    event = CommandTranscribed(text=command, peak=peak)
+    bus.publish(event)
+    _emit(emit, event)
+
+    if not command:
+        state_manager.transition_to(AssistantState.IDLE)
+        return False
+
+    try:
+        routed = await process_input(command, DAEMON_USER_ID)
+    except LLMResolveError as e:
+        state_manager.transition_to(AssistantState.ERROR)
+        err_event = TriggerError(detail=f"LLM unavailable: {e}")
+        bus.publish(err_event)
+        _emit(emit, err_event)
+        reply = "Sorry, my reasoning model is unavailable"
+        
+        state_manager.transition_to(AssistantState.SPEAKING)
+        await _speak_selective(reply, device_id)
+        spoken_event = SpokenResponse(text=reply)
+        bus.publish(spoken_event)
+        _emit(emit, spoken_event)
+        state_manager.transition_to(AssistantState.IDLE)
+        return False
+
+    intent_event = IntentResolved(
+        action=routed.intent.action,
+        target=routed.intent.target,
+        source_layer=routed.source_layer,
+    )
+    bus.publish(intent_event)
+    _emit(emit, intent_event)
+
+    state_manager.transition_to(AssistantState.EXECUTING)
+    result = await do_execute(routed.intent)
+    
+    # ── Observability Integration ────────────────────────────
+    from backend.core.observability import engine as obs_engine
+    total_latency = int((asyncio.get_event_loop().time() - t0) * 1000)
+    obs_engine.report_tool_quality(request_id, result.confidence, result.status)
+    obs_engine.report_latency(request_id, total_latency)
+    # ─────────────────────────────────────────────────────────
+
+    exec_event = Executed(
+        command=command,
+        status=result.status,
+        message=result.message,
+        reason=result.reason,
+        latency_ms=result.latency_ms,
+        confidence=result.confidence,
+        confidence_reason=result.confidence_reason
+    )
+    bus.publish(exec_event)
+    _emit(emit, exec_event)
+
+    reply = _spoken_response(routed.intent, result)
+    
+    state_manager.transition_to(AssistantState.SPEAKING)
+    await _speak_selective(reply, device_id)
+    
+    spoken_event = SpokenResponse(text=reply)
+    bus.publish(spoken_event)
+    _emit(emit, spoken_event)
+    
+    state_manager.transition_to(AssistantState.IDLE)
+    return True
+
+
 async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
     """Main daemon orchestration via async events."""
     t0 = asyncio.get_event_loop().time()
-    request_id = str(uuid.uuid4())[:8]
 
     state_manager.transition_to(AssistantState.THINKING)
     arr = np.frombuffer(audio_bytes, dtype=np.int16)
@@ -170,72 +239,7 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
         command = (stt.get("text") or "").strip()
         print(f"[command] {command!r}")
         
-        event = CommandTranscribed(text=command, peak=peak)
-        bus.publish(event)
-        _emit(emit, event)
-
-        if not command:
-            state_manager.transition_to(AssistantState.IDLE)
-            return False
-
-        try:
-            routed = await process_input(command, DAEMON_USER_ID)
-        except LLMResolveError as e:
-            state_manager.transition_to(AssistantState.ERROR)
-            err_event = TriggerError(detail=f"LLM unavailable: {e}")
-            bus.publish(err_event)
-            _emit(emit, err_event)
-            reply = "Sorry, my reasoning model is unavailable"
-            
-            state_manager.transition_to(AssistantState.SPEAKING)
-            await _speak_selective(reply, device_id)
-            spoken_event = SpokenResponse(text=reply)
-            bus.publish(spoken_event)
-            _emit(emit, spoken_event)
-            state_manager.transition_to(AssistantState.IDLE)
-            return False
-
-        intent_event = IntentResolved(
-            action=routed.intent.action,
-            target=routed.intent.target,
-            source_layer=routed.source_layer,
-        )
-        bus.publish(intent_event)
-        _emit(emit, intent_event)
-
-        state_manager.transition_to(AssistantState.EXECUTING)
-        result = await do_execute(routed.intent)
-        
-        # ── Observability Integration ────────────────────────────
-        from backend.core.observability import engine as obs_engine
-        total_latency = int((asyncio.get_event_loop().time() - t0) * 1000)
-        obs_engine.report_tool_quality(request_id, result.confidence, result.status)
-        obs_engine.report_latency(request_id, total_latency)
-        # ─────────────────────────────────────────────────────────
-
-        exec_event = Executed(
-            command=command,
-            status=result.status,
-            message=result.message,
-            reason=result.reason,
-            latency_ms=result.latency_ms,
-            confidence=result.confidence,
-            confidence_reason=result.confidence_reason
-        )
-        bus.publish(exec_event)
-        _emit(emit, exec_event)
-
-        reply = _spoken_response(routed.intent, result)
-        
-        state_manager.transition_to(AssistantState.SPEAKING)
-        await _speak_selective(reply, device_id)
-        
-        spoken_event = SpokenResponse(text=reply)
-        bus.publish(spoken_event)
-        _emit(emit, spoken_event)
-        
-        state_manager.transition_to(AssistantState.IDLE)
-        return True
+        return await _process_and_execute(command, peak, t0, emit, device_id)
     except Exception as e:
         state_manager.transition_to(AssistantState.ERROR)
         log.exception(f"trigger crash: {e}")
@@ -243,3 +247,36 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
         return False
     finally:
         wav_path.unlink(missing_ok=True)
+
+
+from backend.daemon.ui_events import ProactiveEvent
+import time
+
+def on_proactive_event(event: ProactiveEvent):
+    """Handle events fired by the Watcher Agent in the background."""
+    def _run():
+        # Wait if the assistant is busy (e.g., user is speaking or we are executing)
+        while state_manager.current_state != AssistantState.IDLE:
+            time.sleep(1)
+        
+        try:
+            # We must run this in a new event loop because bus handlers are sync 
+            # and we are inside a background thread (the Watcher loop thread).
+            asyncio.run(_handle_proactive_async(event.query))
+        except Exception as e:
+            log.error(f"Proactive trigger failed: {e}")
+
+    threading.Thread(target=_run, daemon=True, name="proactive-trigger").start()
+
+
+async def _handle_proactive_async(query: str):
+    t0 = asyncio.get_event_loop().time()
+    state_manager.transition_to(AssistantState.THINKING)
+    print(f"[proactive] {query!r}")
+    
+    # We prefix with [Proactive] so it's clear in logs and transcript
+    command = f"[Proactive] {query}"
+    await _process_and_execute(command, peak=0, t0=t0, emit=None, device_id=None)
+
+# Subscribe to ProactiveEvent
+bus.subscribe(ProactiveEvent, on_proactive_event)
