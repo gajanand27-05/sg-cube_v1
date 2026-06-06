@@ -58,8 +58,22 @@ class MemoryManager:
         # 5. Get recent Timeline events (Chronological Narrative)
         try:
             recent_events = self.timeline.get_recent_timeline(limit=5)
+            
+            # If the user asks about the past specifically, also perform semantic search
+            temporal_keywords = ["doing", "last", "ago", "was", "yesterday", "before", "history"]
+            if any(k in query.lower() for k in temporal_keywords):
+                past_events = self.timeline.search_timeline(query, limit=3)
+                # Merge and unique
+                seen = {e.content for e in recent_events}
+                for e in past_events:
+                    if e.content not in seen:
+                        recent_events.append(e)
+            
             timeline_lines = []
-            for e in recent_events:
+            # Sort again after merge
+            recent_events.sort(key=lambda x: x.timestamp, reverse=True)
+            
+            for e in recent_events[:8]: # Cap at 8 unique items
                 delta = datetime.now() - e.timestamp
                 if delta.total_seconds() < 60:
                     time_str = "Just now"
