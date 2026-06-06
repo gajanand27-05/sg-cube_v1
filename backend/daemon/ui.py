@@ -126,10 +126,11 @@ class SGCubeApp(App):
         self._recent: deque[tuple[str, str, str, int | None]] = deque(maxlen=5)
         self._last_source_layer: str = "—"
         self._last_execution_summary: str = "—"
-        self._confidence_scores: dict[str, float] = {
-            "Tool Route": 0.0,
-            "Memory Match": 0.0,
-            "Final Answer": 0.0
+        self._reliability: dict[str, str] = {
+            "Tool Success": "100.0%",
+            "Avg Response": "0.0s",
+            "Memory Recall": "100%",
+            "Hallucination": "0/0"
         }
         self._listener_stop = None  # set by main.py when wiring the listener thread
         self._console_hwnd = _console_hwnd()
@@ -137,8 +138,8 @@ class SGCubeApp(App):
 
     def _confidence_body(self) -> str:
         lines = []
-        for key, val in self._confidence_scores.items():
-            lines.append(f"{key:<14}: {val:>3.0f}%")
+        for key, val in self._reliability.items():
+            lines.append(f"{key:<14}: {val:>6}")
         return "\n".join(lines)
 
     def _refresh_confidence(self) -> None:
@@ -161,7 +162,7 @@ class SGCubeApp(App):
                 Panel("ENGINES", engines_body, id="engines", body_id="engines-body"),
                 Panel("ROUTING (session)", self._routing_body(), id="routing", body_id="routing-body"),
                 Panel("PLAN", "— no active plan —", id="plan", body_id="plan-body"),
-                Panel("CONFIDENCE", self._confidence_body(), id="confidence", body_id="confidence-body"),
+                Panel("RELIABILITY", self._confidence_body(), id="confidence", body_id="confidence-body"),
                 id="left-col",
             ),
             Vertical(
@@ -304,10 +305,12 @@ class SGCubeApp(App):
             self._refresh_routing()
 
         elif isinstance(event, ConfidenceEvent):
-            # Map incoming data to our specific observability metrics
-            self._confidence_scores["Tool Route"] = event.score.tool_quality
-            self._confidence_scores["Memory Match"] = event.score.context_quality
-            self._confidence_scores["Final Answer"] = event.score.aggregate
+            # Update engineering metrics
+            m = event.metrics
+            self._reliability["Tool Success"] = f"{m.tool_success_rate:.1f}%"
+            self._reliability["Avg Response"] = f"{m.avg_response_sec:.1f}s"
+            self._reliability["Memory Recall"] = f"{m.memory_recall_pct:.0f}%"
+            self._reliability["Hallucination"] = f"{m.hallucination_passed}/{m.hallucination_total}"
             self._refresh_confidence()
 
         elif isinstance(event, InternalAgentEvent):

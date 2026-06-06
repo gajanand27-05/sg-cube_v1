@@ -148,6 +148,9 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optio
 
 async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
     """Main daemon orchestration via async events."""
+    t0 = asyncio.get_event_loop().time()
+    request_id = str(uuid.uuid4())[:8]
+
     state_manager.transition_to(AssistantState.THINKING)
     arr = np.frombuffer(audio_bytes, dtype=np.int16)
     peak = int(np.max(np.abs(arr))) if arr.size else 0
@@ -203,6 +206,13 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
         state_manager.transition_to(AssistantState.EXECUTING)
         result = await do_execute(routed.intent)
         
+        # ── Observability Integration ────────────────────────────
+        from backend.core.observability import engine as obs_engine
+        total_latency = int((asyncio.get_event_loop().time() - t0) * 1000)
+        obs_engine.report_tool_quality(request_id, result.confidence, result.status)
+        obs_engine.report_latency(request_id, total_latency)
+        # ─────────────────────────────────────────────────────────
+
         exec_event = Executed(
             command=command,
             status=result.status,
