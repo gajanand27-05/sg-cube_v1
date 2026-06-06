@@ -60,7 +60,9 @@ class PlannerAgent(BaseInternalAgent):
             if not isinstance(calls, list):
                 calls = [parsed] if "name" in parsed else []
 
-            self._emit("plan_ready", tool_count=len(calls))
+            # Create readable steps for the UI Observability Dashboard
+            steps = [c.get("reasoning", c.get("name")) for c in calls]
+            self._emit("plan_ready", tool_count=len(calls), steps=steps)
             return calls
         except Exception as e:
             self._emit("error", detail=str(e))

@@ -126,9 +126,23 @@ class SGCubeApp(App):
         self._recent: deque[tuple[str, str, str, int | None]] = deque(maxlen=5)
         self._last_source_layer: str = "—"
         self._last_execution_summary: str = "—"
+        self._confidence_scores: dict[str, float] = {
+            "Tool Route": 0.0,
+            "Memory Match": 0.0,
+            "Final Answer": 0.0
+        }
         self._listener_stop = None  # set by main.py when wiring the listener thread
         self._console_hwnd = _console_hwnd()
         self._idle_minimize_timer = None
+
+    def _confidence_body(self) -> str:
+        lines = []
+        for key, val in self._confidence_scores.items():
+            lines.append(f"{key:<14}: {val:>3.0f}%")
+        return "\n".join(lines)
+
+    def _refresh_confidence(self) -> None:
+        self.query_one("#confidence-body", Static).update(self._confidence_body())
 
     def compose(self) -> ComposeResult:
         yield Container(Static(_wordmark(), id="wordmark"), id="wordmark-box")
@@ -345,6 +359,11 @@ class SGCubeApp(App):
 
 def main() -> None:
     SGCubeApp().run()
+
+
+if __name__ == "__main__":
+    main()
+().run()
 
 
 if __name__ == "__main__":
