@@ -24,7 +24,7 @@
 
 SG_CUBE features a custom-built **Sci-Fi Terminal Interface** (TUI) that feels like it's pulled straight from a hacker's workstation. 
 
-### 🟢 Aesthetic: High-Contrast Hacker Green (#00ff41)
+### 🔵 Aesthetic: Sci-Fi Cyan (#00d4ff)
 
 ```text
   ███████╗ ██████╗      ██████╗██╗   ██╗██████╗ ███████╗
