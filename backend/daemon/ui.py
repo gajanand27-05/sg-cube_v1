@@ -1,5 +1,4 @@
 import sys
-from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -7,6 +6,12 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Footer, Static
 from textual.reactive import reactive
+from textual.geometry import Offset
+
+from rich.table import Table
+from rich.text import Text
+from rich.console import Group
+
 from backend.core.events import bus
 from backend.core.runtime import TaskEvent, TaskStatus
 from backend.core.state import AssistantState, StateChangedEvent
@@ -36,57 +41,114 @@ except Exception:
 CSS_PATH = Path(__file__).resolve().parents[2] / "assets" / "sgcube.tcss"
 
 
+def build_neofetch():
+    t = Table.grid(padding=(0, 2))
+    t.add_row("[cyan]OS:[/]", "[white]SG Cube OS 2.0 x86_64[/]")
+    t.add_row("[cyan]Host:[/]", "[white]SG-CUBE v2[/]")
+    t.add_row("[cyan]Kernel:[/]", "[white]6.6.0-sgcube[/]")
+    t.add_row("[cyan]Uptime:[/]", "[white]2 hours, 47 mins[/]")
+    t.add_row("[cyan]Packages:[/]", "[white]1542 (sg-pkg)[/]")
+    t.add_row("[cyan]Shell:[/]", "[white]bash 5.2.21[/]")
+    t.add_row("[cyan]Resolution:[/]", "[white]1920x1080[/]")
+    t.add_row("[cyan]DE:[/]", "[white]SGCube Terminal[/]")
+    t.add_row("[cyan]CPU:[/]", "[white]Intel i7-12700K (20) @ 5.00GHz[/]")
+    t.add_row("[cyan]GPU:[/]", "[white]NVIDIA GeForce RTX 3080[/]")
+    t.add_row("[cyan]Memory:[/]", "[white]4.23GiB / 31.32GiB[/]")
+    return t
+
+def build_status():
+    t1 = Table.grid(padding=(0, 2))
+    t1.add_row("[cyan]ENVIRONMENT[/]", "[white]PRODUCTION[/]")
+    t1.add_row("[cyan]VERSION[/]", "[white]v2.0.0[/]")
+    t1.add_row("[cyan]UPTIME[/]", "[white]2h 47m 13s[/]")
+    t1.add_row("[cyan]LAST DEPLOY[/]", "[white]2024-05-23 14:35:10[/]")
+    
+    t2 = Table.grid(padding=(0, 4))
+    t2.add_row("[cyan]Database[/]", "[bold green][ OK ][/]")
+    t2.add_row("[cyan]API Gateway[/]", "[bold green][ OK ][/]")
+    t2.add_row("[cyan]Auth Service[/]", "[bold green][ OK ][/]")
+    t2.add_row("[cyan]Storage[/]", "[bold green][ OK ][/]")
+    t2.add_row("[cyan]Cache[/]", "[bold green][ OK ][/]")
+    
+    return Horizontal(Static(t1), Static(t2))
+
+def build_monitor():
+    t = Table.grid(padding=(0, 2))
+    t.add_row("[cyan]CPU USAGE[/]", "")
+    t.add_row("[bold cyan]42%[/]", "[cyan]▃▅▇█▆▄▃  ▃▅▇█▆▄▃[/]")
+    t.add_row("", "")
+    t.add_row("[cyan]MEMORY[/]", "[cyan]11.02 GiB / 31.32 GiB[/]")
+    t.add_row("[bold cyan]35%[/]", "[cyan]█████░░░░░░░░░░[/]")
+    t.add_row("", "")
+    t.add_row("[cyan]DISK[/]", "[cyan]178.6 GiB / 314.6 GiB[/]")
+    t.add_row("[bold cyan]57%[/]", "[cyan]████████░░░░░░░[/]")
+    t.add_row("", "")
+    t.add_row("[cyan]NETWORK[/]", "[cyan]↓ 3.42 MB/s  ↑ 1.21 MB/s[/]")
+    return t
+
+def build_services():
+    t = Table.grid(padding=(0, 4))
+    t.add_row("[cyan]SERVICE[/]", "[cyan]STATUS[/]")
+    t.add_row("[white]sgcube-api[/]", "[bold green]● RUNNING[/]")
+    t.add_row("[white]sgcube-worker[/]", "[bold green]● RUNNING[/]")
+    t.add_row("[white]sgcube-scheduler[/]", "[bold green]● RUNNING[/]")
+    t.add_row("[white]sgcube-notify[/]", "[bold yellow]● WARNING[/]")
+    t.add_row("[white]sgcube-analytics[/]", "[bold green]● RUNNING[/]")
+    return t
+
+
 class Panel(Container):
     def __init__(
         self,
         title: str,
-        body: str = "",
+        renderable,
         *,
         id: str | None = None,
         body_id: str | None = None,
     ) -> None:
         super().__init__(id=id)
         self._title = title
-        self._body = body
+        self._renderable = renderable
         self._body_id = body_id
 
     def compose(self) -> ComposeResult:
-        yield Static(self._body, id=self._body_id, classes="panel-body")
+        # If it's a Textual widget like Horizontal, yield it directly
+        if isinstance(self._renderable, (Static, Container, Horizontal, Vertical)):
+            yield self._renderable
+        else:
+            yield Static(self._renderable, id=self._body_id, classes="panel-body")
 
     def on_mount(self) -> None:
-        self.border_title = self._title
+        self.border_title = f"[bold cyan]{self._title}[/]"
 
 
 class Sidebar(Static):
     def compose(self) -> ComposeResult:
-        icons = ["⬢", "", "", "", "", "", "", ""]
+        icons = ["[cyan]◈[/]", "[cyan]💻[/]", "[cyan]📁[/]", "[cyan]🌐[/]", "[cyan]🗄️[/]", "[cyan]⚙[/]", "[cyan]⏻[/]"]
         yield Static("\n\n".join(icons), id="sidebar-icons")
 
 
 class Header(Horizontal):
     def compose(self) -> ComposeResult:
-        yield Static(" SG_CUBE TERMINAL v2.0", id="header-title")
-        yield Static("USER: devuser@sgcube ", id="header-user")
+        yield Static(Text.from_markup("[bold cyan] SG_CUBE TERMINAL v2.0[/]"), id="header-title")
+        yield Static(Text.from_markup("[cyan]USER: devuser@sgcube [/]"), id="header-user")
 
-
-from textual.geometry import Offset
 
 class AnimatedCube(Static):
     CUBE_ART = """\
-           +-----------+
-          /           /|
-         /           / |
-        /           /  |
-       +-----------+   |
-       |           |   +
-       |           |  /
-       |     SG    | / CUBE
-       |           |/
-       +-----------+
-"""
+[bold cyan]          .-----------.
+        .'          .'|
+      .'          .'  |
+    .'__________.'    |
+    |           |     |
+    |           |[/] [bold white]CUBE[/][bold cyan]|
+    |    [/][bold white]SG[/][bold cyan]     |    .'
+    |           |  .'
+    |           |.'
+    '-----------'[/]"""
+
     def compose(self) -> ComposeResult:
-        # Wrap it in a container for clipping
-        yield Static(self.CUBE_ART, id="cube-art")
+        yield Static(Text.from_markup(self.CUBE_ART), id="cube-art")
 
     def on_mount(self) -> None:
         self.cube = self.query_one("#cube-art")
@@ -95,7 +157,6 @@ class AnimatedCube(Static):
         self.anim_timer = self.set_interval(0.05, self.tick_anim)
 
     def tick_anim(self) -> None:
-        # Simple linear animation for robust execution
         self.y_offset -= 2
         if self.y_offset <= 0:
             self.cube.styles.offset = Offset(0, 0)
@@ -105,7 +166,7 @@ class AnimatedCube(Static):
 
 
 class RotatingReactor(Static):
-    frames = [" ◴ ", " ◷ ", " ◶ ", " ◵ "]
+    frames = ["[bold cyan] ◴ [/]", "[bold cyan] ◷ [/]", "[bold cyan] ◶ [/]", "[bold cyan] ◵ [/]"]
     frame_idx = reactive(0)
 
     def on_mount(self) -> None:
@@ -115,23 +176,23 @@ class RotatingReactor(Static):
         self.frame_idx = (self.frame_idx + 1) % len(self.frames)
 
     def render(self) -> str:
-        return self.frames[self.frame_idx]
+        return Text.from_markup(self.frames[self.frame_idx])
 
 
 class CustomFooter(Horizontal):
     def compose(self) -> ComposeResult:
-        yield Static(" SG CUBE v2.0\n BUILD 2024.05.23", id="footer-build")
-        yield Static("SYSTEM LOAD\n" + "▃▅▇█▆▄▃", id="footer-load")
+        yield Static(Text.from_markup("[bold cyan]SG CUBE v2.0\nBUILD 2024.05.23[/]"), id="footer-build")
+        yield Static(Text.from_markup("[cyan]SYSTEM LOAD\n[white]▃▅▇█▆▄▃[/]"), id="footer-load")
         yield RotatingReactor(id="footer-reactor")
-        yield Static("TEMP\n58°C", id="footer-temp")
-        yield Static("TIME\n--:--:--", id="footer-time")
+        yield Static(Text.from_markup("[cyan]TEMP\n[white]58°C[/]"), id="footer-temp")
+        yield Static(Text.from_markup("[cyan]TIME\n[white]--:--:--[/]"), id="footer-time")
 
     def on_mount(self) -> None:
         self.set_interval(1.0, self.tick_time)
 
     def tick_time(self) -> None:
         time_str = datetime.now().strftime("%H:%M:%S")
-        self.query_one("#footer-time", Static).update(f"TIME\n{time_str}")
+        self.query_one("#footer-time", Static).update(Text.from_markup(f"[cyan]TIME\n[white]{time_str}[/]"))
 
 
 class SGCubeApp(App):
@@ -155,27 +216,20 @@ class SGCubeApp(App):
             with Horizontal(id="grid-container"):
                 # Left Column
                 with Vertical(classes="grid-col"):
-                    neofetch_text = "OS: SG Cube OS 2.0\nKernel: 6.6.0-sgcube\nUptime: 2 hours\nShell: bash\nCPU: Intel i7\nMemory: 4GB/32GB"
-                    yield Panel("devuser@sgcube:~$ neofetch", neofetch_text, id="neofetch")
-                    
-                    status_text = "ENVIRONMENT: PRODUCTION\nVERSION: v2.0.0\n\nDatabase    [ OK ]\nAPI Gateway [ OK ]\nStorage     [ OK ]"
-                    yield Panel("SG CUBE STATUS", status_text, id="system-status")
+                    yield Panel("devuser@sgcube:~$ neofetch", build_neofetch(), id="neofetch")
+                    yield Panel("SG CUBE STATUS", build_status(), id="system-status")
 
                 # Center Column
                 with Vertical(classes="grid-col", id="center-col"):
                     yield AnimatedCube(id="cube-container")
-                    yield Panel("TRANSCRIPT", "> _", id="transcript", body_id="transcript-body")
-                    yield Panel("INTENT", "—", id="intent", body_id="intent-body")
+                    yield Panel("TRANSCRIPT", Text.from_markup("[white]> _[/]"), id="transcript", body_id="transcript-body")
+                    yield Panel("INTENT", Text.from_markup("[cyan]—[/]"), id="intent", body_id="intent-body")
 
                 # Right Column
                 with Vertical(classes="grid-col"):
-                    monitor_text = "CPU USAGE: 42%\nMEMORY: 35%\nDISK: 57%\nNETWORK: OK"
-                    yield Panel("SYSTEM MONITOR", monitor_text, id="monitor")
-                    
-                    services_text = "sgcube-api       [RUNNING]\nsgcube-worker    [RUNNING]\nsgcube-scheduler [RUNNING]\nsgcube-notify    [WARNING]"
-                    yield Panel("SG CUBE SERVICES", services_text, id="services")
-                    
-                    yield Panel("EXECUTION / ACTIVITY", "—", id="execution", body_id="execution-body")
+                    yield Panel("SYSTEM MONITOR", build_monitor(), id="monitor")
+                    yield Panel("SG CUBE SERVICES", build_services(), id="services")
+                    yield Panel("EXECUTION / ACTIVITY", Text.from_markup("[white]—[/]"), id="execution", body_id="execution-body")
 
             yield CustomFooter(id="app-footer")
 
@@ -191,33 +245,31 @@ class SGCubeApp(App):
 
     def handle_daemon_event(self, event) -> None:
         if isinstance(event, WakeHeard):
-            self.query_one("#transcript-body", Static).update("> ...")
-            self.query_one("#intent-body", Static).update("—")
-            self.query_one("#execution-body", Static).update("—")
+            self.query_one("#transcript-body", Static).update(Text.from_markup("[white]> ...[/]"))
+            self.query_one("#intent-body", Static).update(Text.from_markup("[cyan]—[/]"))
+            self.query_one("#execution-body", Static).update(Text.from_markup("[white]—[/]"))
 
         elif isinstance(event, CommandTranscribed):
             text = event.text if event.text else "(no speech detected)"
-            self.query_one("#transcript-body", Static).update(f"> {text}")
+            self.query_one("#transcript-body", Static).update(Text.from_markup(f"[white]> {text}[/]"))
 
         elif isinstance(event, TokenStreamEvent):
-            self.query_one("#transcript-body", Static).update(f"> {event.full_content} █")
+            self.query_one("#transcript-body", Static).update(Text.from_markup(f"[white]> {event.full_content} █[/]"))
 
         elif isinstance(event, IntentResolved):
             target = event.target or "—"
-            self.query_one("#intent-body", Static).update(
-                f"{event.action} / {target} ({event.source_layer})"
-            )
+            self.query_one("#intent-body", Static).update(Text.from_markup(f"[cyan]{event.action} / {target} ({event.source_layer})[/]"))
 
         elif isinstance(event, TaskEvent):
             status_icon = "⚡" if event.status == TaskStatus.RUNNING else "✓" if event.status == TaskStatus.COMPLETED else "✗"
             tool_name = event.data.get("tool", "task")
-            msg = f"{status_icon} {event.status.upper()} ({tool_name})\n"
-            self.query_one("#execution-body", Static).update(msg)
+            msg = f"[bold white]{status_icon} {event.status.upper()} ({tool_name})[/]\n"
+            self.query_one("#execution-body", Static).update(Text.from_markup(msg))
 
         elif isinstance(event, Executed):
             mark = "✓" if event.status == "success" else "✗"
-            msg = f"{mark} {event.status.upper()} ({event.command})\n"
-            self.query_one("#execution-body", Static).update(msg)
+            msg = f"[bold white]{mark} {event.status.upper()} ({event.command})[/]\n"
+            self.query_one("#execution-body", Static).update(Text.from_markup(msg))
 
 
 def main() -> None:
