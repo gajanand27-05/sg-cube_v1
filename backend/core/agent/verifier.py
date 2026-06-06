@@ -23,10 +23,12 @@ INJECTION_PATTERN = re.compile(r"[;&|`$<>\{\}\[\]\\]")
 
 
 class VerificationResult:
-    def __init__(self, is_valid: bool, error: str = "", reasoning: str = ""):
+    def __init__(self, is_valid: bool, error: str = "", reasoning: str = "", needs_confirmation: bool = False, is_critical: bool = False):
         self.is_valid = is_valid
         self.error = error
         self.reasoning = reasoning
+        self.needs_confirmation = needs_confirmation
+        self.is_critical = is_critical
 
 
 def _is_malicious(args: dict) -> str | None:
@@ -82,6 +84,7 @@ def verify(user_query: str, call: dict, is_multi_step: bool = False, request_id:
     1. Rule-based checks (Hallucination, Schema, Security, Injection)
     2. Confidence scoring (Routing Signal)
     3. Conditional verifier model (Only when needed)
+    4. Action Approval Levels (SAFE, CAUTION, CRITICAL)
     """
     from backend.core.observability import engine as obs_engine
     
@@ -105,7 +108,6 @@ def verify(user_query: str, call: dict, is_multi_step: bool = False, request_id:
     required = params.get("required", [])
     properties = params.get("properties", {})
 
-    schema_score = 100.0
     for req in required:
         if req not in args:
             obs_engine.report_context_quality(request_id, 0.0, f"Missing required arg: {req}")
@@ -133,11 +135,6 @@ def verify(user_query: str, call: dict, is_multi_step: bool = False, request_id:
         obs_engine.report_ai_quality(request_id, 0.0, f"Malicious input detected")
         return VerificationResult(False, error=malicious_reason)
 
-    # D. Security Check (DANGEROUS is a hard block)
-    if tool_obj.security == SecurityLevel.DANGEROUS:
-         obs_engine.report_ai_quality(request_id, 0.0, "Dangerous tool blocked")
-         return VerificationResult(False, error=f"Tool {resolved!r} is marked DANGEROUS and is blocked.")
-
     # ── 2. Confidence Scoring (Routing Signal) ───────────────────────
     
     try:
@@ -150,7 +147,7 @@ def verify(user_query: str, call: dict, is_multi_step: bool = False, request_id:
     # ── 3. Conditional Verifier Model ────────────────────────────────
     needs_deep_verification = (
         conf_score < 0.80 or 
-        tool_obj.security == SecurityLevel.CONFIRM_REQUIRED or
+        tool_obj.security in [SecurityLevel.CAUTION, SecurityLevel.CRITICAL] or
         is_multi_step
     )
     
@@ -163,5 +160,14 @@ def verify(user_query: str, call: dict, is_multi_step: bool = False, request_id:
                 error="Action rejected by secondary verifier: logic or relevance mismatch."
             )
         obs_engine.report_ai_quality(request_id, 100.0, "Secondary check passed")
+
+    # ── 4. Action Approval Levels ────────────────────────────────────
+    if tool_obj.security == SecurityLevel.CRITICAL:
+         obs_engine.report_ai_quality(request_id, 100.0, "Critical action detected")
+         return VerificationResult(True, reasoning=reasoning, needs_confirmation=True, is_critical=True)
+    
+    if tool_obj.security == SecurityLevel.CAUTION:
+         obs_engine.report_ai_quality(request_id, 100.0, "Caution action detected")
+         return VerificationResult(True, reasoning=reasoning, needs_confirmation=True)
 
     return VerificationResult(True, reasoning=reasoning)

@@ -69,7 +69,7 @@ class CommanderAgent:
                 return spoken, tool_records
 
             # C. Guardian Stage (Verification)
-            valid_calls, errors = self.guardian.verify_plan(text, calls, request_id)
+            valid_calls, pending_calls, errors = self.guardian.verify_plan(text, calls, request_id)
 
             if errors:
                 log.warning(f"Commander: Guardian rejected parts of the plan: {errors}")
@@ -81,6 +81,23 @@ class CommanderAgent:
                 history.append({"role": "assistant", "content": json.dumps({"tool_calls": calls})})
                 history.append({"role": "user", "content": f"Correction needed: {instruction}"})
                 continue
+
+            if pending_calls:
+                # Handle Action Approval Levels
+                first_pending = pending_calls[0]
+                tool_name = first_pending.get("name", "action").replace("_", " ")
+                is_critical = first_pending.get("is_critical", False)
+                
+                if is_critical:
+                    spoken = f"⚠️ CRITICAL ACTION: I need your explicit permission to {tool_name}. This is a high-risk operation. Should I proceed?"
+                else:
+                    spoken = f"I need your permission to {tool_name}. Should I proceed?"
+                
+                context.add_assistant(spoken)
+                # In a real implementation, we would store the pending plan 
+                # in session state to resume when the user says "yes".
+                # For now, we just inform the user.
+                return spoken, tool_records
 
             # D. Operator Stage (Execution)
             batch_results = await self.operator.execute_batch(valid_calls, request_id)

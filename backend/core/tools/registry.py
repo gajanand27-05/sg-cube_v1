@@ -35,9 +35,9 @@ class ToolStatus(str, Enum):
 
 
 class SecurityLevel(str, Enum):
-    TRUSTED = "trusted"              # Safe to run (e.g., get_weather)
-    CONFIRM_REQUIRED = "confirm"      # Needs user OK (e.g., delete_file)
-    DANGEROUS = "dangerous"          # Blocked by default (e.g., format C:)
+    SAFE = "safe"              # Trusted (e.g., read files, open apps)
+    CAUTION = "caution"        # Needs confirmation (e.g., delete files, send email)
+    CRITICAL = "critical"      # High risk, needs extra warning (e.g., shutdown, format)
 
 
 class ToolResult(BaseModel):
@@ -92,7 +92,7 @@ class Tool:
     description: str
     schema: dict[str, Any]
     func: Callable[..., dict | ToolResult]
-    security: SecurityLevel = SecurityLevel.TRUSTED
+    security: SecurityLevel = SecurityLevel.SAFE
 
     async def __call__(self, request_id: Optional[str] = None, **kwargs) -> ToolResult:
         from backend.core.runtime import runtime
@@ -116,17 +116,17 @@ def _type_to_json(py_type: Any) -> str:
     return _PRIMITIVE_TYPES.get(py_type, "string")
 
 
-def tool(security: Any = SecurityLevel.TRUSTED) -> Any:
+def tool(security: Any = SecurityLevel.SAFE) -> Any:
     """Register a function as a tool. Supports:
       @tool
-      @tool(security=SecurityLevel.CONFIRM_REQUIRED)
+      @tool(security=SecurityLevel.CAUTION)
     """
     func = None
 
     if callable(security):
         # Used as @tool
         func = security
-        security = SecurityLevel.TRUSTED
+        security = SecurityLevel.SAFE
 
     def decorator(f: Callable[..., dict]) -> Callable[..., dict]:
         name = f.__name__

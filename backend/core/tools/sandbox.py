@@ -30,10 +30,12 @@ class PermissionGuard:
         if not tool:
             return None
 
-        if tool.security == SecurityLevel.DANGEROUS:
-            return ToolResult.blocked(f"Tool {name!r} is marked DANGEROUS and is blocked for safety.")
+        if tool.security == SecurityLevel.CRITICAL:
+            # Critical actions are blocked at this level unless the Guardian
+            # or a specific confirmation flow handles them.
+            return ToolResult.blocked(f"Tool {name!r} is marked CRITICAL and requires manual approval via the Guardian Agent.")
 
-        if tool.security == SecurityLevel.CONFIRM_REQUIRED:
+        if tool.security == SecurityLevel.CAUTION:
             token = str(uuid.uuid4())[:8]
             self._pending[token] = (name, args)
             

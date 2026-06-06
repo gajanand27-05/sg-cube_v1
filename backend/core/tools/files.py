@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pyautogui
 
-from backend.core.tools.registry import SecurityLevel, tool
+from backend.core.tools.registry import SecurityLevel, ToolResult, tool
 
 # ... (rest of imports)
 
-@tool(security=SecurityLevel.CONFIRM_REQUIRED)
-def delete_file(file: str) -> dict:
+@tool(security=SecurityLevel.CAUTION)
+def delete_file(file: str) -> ToolResult:
     """Delete a file. `file` is a full path or a substring of a file name in
     your common user folders. REQUIRES CONFIRMATION."""
     # This logic matches summarize.py's _resolve_file
