@@ -69,6 +69,8 @@ class Header(Horizontal):
         yield Static("USER: devuser@sgcube ", id="header-user")
 
 
+from textual.geometry import Offset
+
 class AnimatedCube(Static):
     CUBE_ART = """\
            +-----------+
@@ -89,8 +91,8 @@ class AnimatedCube(Static):
     def on_mount(self) -> None:
         # Animate from below
         cube = self.query_one("#cube-art")
-        cube.styles.offset = (0, 30)
-        cube.styles.animate("offset", (0, 0), duration=2.5, easing="out_cubic")
+        cube.styles.offset = Offset(0, 30)
+        cube.styles.animate("offset", Offset(0, 0), duration=2.5, easing="out_cubic")
 
 
 class RotatingReactor(Static):
