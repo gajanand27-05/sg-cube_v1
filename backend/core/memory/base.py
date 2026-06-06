@@ -12,6 +12,8 @@ class MemoryType(str, Enum):
     OUTCOME = "outcome"     # Result of an action (success/fail)
     VISUAL = "visual"       # Screen context observations
     EPISODIC = "episodic"   # Narrative interaction history
+    EVENT = "event"         # Discrete timestamped action (opened file, ran tool)
+    ACTIVITY = "activity"   # Prolonged user state (working on X)
 
 
 @dataclass

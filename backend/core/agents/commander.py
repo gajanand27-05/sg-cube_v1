@@ -11,6 +11,7 @@ from backend.core.agents.planner import PlannerAgent
 from backend.core.healing import healer as self_healer
 from backend.core.memory.episodic import summarizer as episodic_summarizer
 from backend.core.memory.manager import memory as memory_manager
+from backend.core.memory.timeline import timeline
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +46,9 @@ class CommanderAgent:
         request_id = str(uuid.uuid4())[:8]
         context.add_user(text)
         history = context.render()
+        
+        # Record user query in timeline
+        timeline.record_event(content=f"User asked: \"{text}\"", source="user_query")
         
         tool_records: list[dict] = []
 
@@ -103,13 +107,29 @@ class CommanderAgent:
             batch_results = await self.operator.execute_batch(valid_calls, request_id)
             tool_records.extend(batch_results)
 
+            # Record successful tool executions in timeline
+            for res_wrapper in batch_results:
+                res = res_wrapper.get("result")
+                # ToolResult or legacy dict
+                status = getattr(res, "status", res.get("status") if isinstance(res, dict) else "error")
+                if status == "success":
+                    tool_name = res_wrapper.get("tool", "unknown tool").replace("_", " ")
+                    msg = getattr(res, "message", res.get("message") if isinstance(res, dict) else "success")
+                    timeline.record_event(
+                        content=f"Executed {tool_name}: {msg}",
+                        source="execution"
+                    )
+
             # E. Assessment Stage
             # (Composition for final answer if needed)
             # This follows the previous logic: if one tool succeeded, speak its result.
             if len(batch_results) == 1:
                 res = batch_results[0]["result"]
-                if res.get("status") == "success" and res.get("message"):
-                    spoken = res["message"]
+                status = getattr(res, "status", res.get("status") if isinstance(res, dict) else "error")
+                msg = getattr(res, "message", res.get("message") if isinstance(res, dict) else None)
+                
+                if status == "success" and msg:
+                    spoken = msg
                     context.add_assistant(spoken)
                     asyncio.create_task(episodic_summarizer.summarize_and_store(text, tool_records))
                     return spoken, tool_records

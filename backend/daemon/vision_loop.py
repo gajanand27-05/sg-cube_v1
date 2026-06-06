@@ -7,6 +7,7 @@ from typing import Optional
 from backend.core.vision.capture import capture_screen
 from backend.core.vision.vlm import analyze_screenshot
 from backend.core.memory.screen_memory import screen_memory
+from backend.core.memory.timeline import timeline
 
 log = logging.getLogger(__name__)
 
@@ -74,10 +75,20 @@ class VisionLoop:
         if not observation:
             return
             
-        # 4. Store (Semantic Memory)
+        # 4. Store (Semantic Memory + Timeline)
         self._last_img_hash = current_hash
         screen_memory.store_observation(observation)
-        log.info(f"Vision loop: captured state in {observation.get('app')}")
+        
+        # Record activity in timeline
+        app = observation.get("app", "Unknown")
+        summary = observation.get("summary", "")
+        timeline.record_event(
+            content=f"Working in {app}: {summary}",
+            source="vision",
+            app=app
+        )
+        
+        log.info(f"Vision loop: captured state in {app}")
 
 # Global instance
 vision_loop = VisionLoop()
