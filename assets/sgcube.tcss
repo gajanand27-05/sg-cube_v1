@@ -1,126 +1,130 @@
-/* SG_CUBE Terminal UI — sci-fi cyan on black */
+/* SG_CUBE Terminal UI — hacker green on black */
 
 Screen {
     background: #000000;
-    color: #00d4ff;
-    layout: horizontal;
+    color: #00ff41;
 }
 
-/* ── Sidebar ─────────────────────────────────────────── */
+/* ── Wordmark ────────────────────────────────────────── */
 
-#app-sidebar {
-    width: 5;
-    height: 100%;
-    border-right: solid #005f8c;
-    content-align: center middle;
-    color: #00d4ff;
-    background: #00050a;
+#wordmark-box {
+    height: 7;
+    align: center middle;
+    padding: 0;
+    background: #000000;
 }
 
-#sidebar-icons {
-    height: 100%;
-    content-align: center middle;
-}
-
-/* ── Main App Container ──────────────────────────────── */
-
-#app-main {
-    width: 1fr;
-    height: 100%;
-}
-
-/* ── Header ──────────────────────────────────────────── */
-
-#app-header {
-    height: 3;
-    border-bottom: solid #005f8c;
-    background: #00050a;
-}
-
-#header-title {
-    width: 1fr;
-    content-align: left middle;
-    color: #00d4ff;
+#wordmark {
+    color: #00ff41;
     text-style: bold;
+    content-align: center middle;
+    width: auto;
+    height: 7;
 }
 
-#header-user {
+/* ── Status bar ──────────────────────────────────────── */
+
+#status-bar {
+    layout: horizontal;
+    height: 3;
+    border: solid #00ff41;
+    padding: 0 2;
+    margin: 1 2 0 2;
+    background: #000000;
+}
+
+#status-left {
     width: 1fr;
-    content-align: right middle;
-    color: #99eeff;
-}
-
-/* ── Grid ────────────────────────────────────────────── */
-
-#grid-container {
+    color: #00ff41;
+    content-align: left middle;
     height: 1fr;
-    margin: 1 2;
 }
 
-.grid-col {
+#status-clock {
+    width: auto;
+    color: #7fff90;
+    text-style: bold;
+    content-align: center middle;
+    height: 1fr;
+}
+
+#status-right {
+    width: 1fr;
+    color: #00ff41;
+    content-align: right middle;
+    height: 1fr;
+}
+
+/* ── Main two-column row ─────────────────────────────── */
+
+#main-row {
+    height: 1fr;
+    margin: 0 2;
+}
+
+#left-col, #right-col {
     width: 1fr;
     height: 100%;
-    margin: 0 1;
 }
-
-/* ── Panels ──────────────────────────────────────────── */
 
 Panel {
-    border: round #005f8c;
+    border: round #007f30;
     height: 1fr;
     min-height: 4;
-    margin: 0 0 1 0;
+    margin: 1 0 0 0;
     padding: 0 1;
-    background: #000306;
+    background: #000000;
 }
 
 Panel > .panel-body {
-    color: #00d4ff;
+    color: #00ff41;
+    padding: 0 1;
     height: 1fr;
 }
 
 Panel:focus-within {
-    border: round #00d4ff;
+    border: round #00ff41;
 }
 
-/* ── Center Column & Animated Cube ───────────────────── */
+/* ── Live mic strip ──────────────────────────────────── */
 
-#center-col {
-    overflow: hidden;
-}
-
-#cube-container {
-    height: 14;
-    content-align: center middle;
-    color: #00d4ff;
-    text-style: bold;
-    margin-bottom: 1;
-    overflow: hidden;
-}
-
-#cube-art {
-    content-align: center middle;
-}
-
-/* ── Custom Footer ───────────────────────────────────── */
-
-#app-footer {
-    height: 5;
-    border-top: solid #00d4ff;
-    background: #000814;
-    padding: 1 2;
-}
-
-#footer-build, #footer-load, #footer-temp, #footer-time {
-    width: 1fr;
-    content-align: center middle;
-    color: #00d4ff;
-}
-
-#footer-reactor {
-    width: auto;
-    content-align: center middle;
-    color: #99eeff;
-    text-style: bold;
+#mic-strip {
+    layout: horizontal;
+    height: 3;
+    border: solid #00ff41;
     padding: 0 2;
+    margin: 1 2 0 2;
+    background: #000000;
+}
+
+#mic-label {
+    width: auto;
+    color: #007f30;
+    text-style: bold;
+    content-align: left middle;
+    height: 1fr;
+    padding: 0 2 0 0;
+}
+
+#mic-bars {
+    width: 1fr;
+    color: #7fff90;
+    content-align: left middle;
+    height: 1fr;
+}
+
+/* ── Footer ──────────────────────────────────────────── */
+
+Footer {
+    background: #001100;
+    color: #00cc33;
+}
+
+Footer > .footer--description {
+    color: #00ff41;
+}
+
+Footer > .footer--key {
+    background: #002a00;
+    color: #7fff90;
 }
