@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from backend.core.auth.auth_service import login as svc_login
 from backend.core.auth.auth_service import register as svc_register
-from backend.core.auth.deps import get_current_user
+from backend.core.auth.deps import get_any_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -33,5 +33,5 @@ def login(body: LoginRequest):
 
 
 @router.get("/whoami")
-def whoami(user: Annotated[dict, Depends(get_current_user)]):
+def whoami(user: Annotated[dict, Depends(get_any_user)]):
     return user["profile"]

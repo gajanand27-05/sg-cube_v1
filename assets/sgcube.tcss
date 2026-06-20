@@ -1,8 +1,8 @@
-/* SG_CUBE Terminal UI — hacker green on black */
+/* SG_CUBE Terminal UI — neon blue on black */
 
 Screen {
     background: #000000;
-    color: #00ff41;
+    color: #00d8ff;
 }
 
 /* ── Wordmark ────────────────────────────────────────── */
@@ -15,7 +15,7 @@ Screen {
 }
 
 #wordmark {
-    color: #00ff41;
+    color: #00d8ff;
     text-style: bold;
     content-align: center middle;
     width: auto;
@@ -27,7 +27,7 @@ Screen {
 #status-bar {
     layout: horizontal;
     height: 3;
-    border: solid #00ff41;
+    border: solid #00d8ff;
     padding: 0 2;
     margin: 1 2 0 2;
     background: #000000;
@@ -35,14 +35,14 @@ Screen {
 
 #status-left {
     width: 1fr;
-    color: #00ff41;
+    color: #00d8ff;
     content-align: left middle;
     height: 1fr;
 }
 
 #status-clock {
     width: auto;
-    color: #7fff90;
+    color: #ffffff;
     text-style: bold;
     content-align: center middle;
     height: 1fr;
@@ -50,7 +50,7 @@ Screen {
 
 #status-right {
     width: 1fr;
-    color: #00ff41;
+    color: #00d8ff;
     content-align: right middle;
     height: 1fr;
 }
@@ -68,7 +68,7 @@ Screen {
 }
 
 Panel {
-    border: round #007f30;
+    border: round #005577;
     height: 1fr;
     min-height: 4;
     margin: 1 0 0 0;
@@ -77,13 +77,13 @@ Panel {
 }
 
 Panel > .panel-body {
-    color: #00ff41;
+    color: #00d8ff;
     padding: 0 1;
     height: 1fr;
 }
 
 Panel:focus-within {
-    border: round #00ff41;
+    border: round #00d8ff;
 }
 
 /* ── Live mic strip ──────────────────────────────────── */
@@ -91,7 +91,7 @@ Panel:focus-within {
 #mic-strip {
     layout: horizontal;
     height: 3;
-    border: solid #00ff41;
+    border: solid #00d8ff;
     padding: 0 2;
     margin: 1 2 0 2;
     background: #000000;
@@ -99,7 +99,7 @@ Panel:focus-within {
 
 #mic-label {
     width: auto;
-    color: #007f30;
+    color: #005577;
     text-style: bold;
     content-align: left middle;
     height: 1fr;
@@ -108,7 +108,7 @@ Panel:focus-within {
 
 #mic-bars {
     width: 1fr;
-    color: #7fff90;
+    color: #ffffff;
     content-align: left middle;
     height: 1fr;
 }
@@ -116,15 +116,15 @@ Panel:focus-within {
 /* ── Footer ──────────────────────────────────────────── */
 
 Footer {
-    background: #001100;
-    color: #00cc33;
+    background: #000811;
+    color: #00aadd;
 }
 
 Footer > .footer--description {
-    color: #00ff41;
+    color: #00d8ff;
 }
 
 Footer > .footer--key {
-    background: #002a00;
-    color: #7fff90;
+    background: #00152a;
+    color: #ffffff;
 }

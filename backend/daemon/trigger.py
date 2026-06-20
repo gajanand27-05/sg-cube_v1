@@ -1,6 +1,8 @@
 import asyncio
+import logging
 import tempfile
 import threading
+import uuid
 import wave
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -25,6 +27,8 @@ from backend.daemon.ui_events import (
     TriggerError,
     WakeHeard,
 )
+
+log = logging.getLogger(__name__)
 
 EmitFn = Callable[[Any], None]
 

@@ -1,4 +1,5 @@
 import argparse
+import logging
 import sys
 import threading
 
@@ -9,89 +10,23 @@ try:
 except Exception:
     pass
 
+import uvicorn
+
 from backend.daemon.trigger import handle_wake, on_wake_detected
 from backend.daemon.wake_word import WakeWordListener
 from backend.daemon.clipboard_watcher import watcher as cb_watcher
 from backend.daemon.vision_loop import vision_loop
 from backend.core.agents.watcher import watcher as watcher_agent
+from backend.server.config import settings
 
-
-def _run_terminal(args) -> None:
-    from backend.daemon.ui import SGCubeApp
-
-    app = SGCubeApp()
-    cb_watcher.start()
-    vision_loop.start()
-    watcher_agent.start()
-
-    def emit(event):
-        try:
-            app.call_from_thread(app.handle_daemon_event, event)
-        except Exception as e:
-            print(f"[main] failed to push UI event: {e}")
-
-    def on_wake(audio: bytes) -> None:
-        handle_wake(audio, emit=emit)
-
-    def on_detected() -> None:
-        on_wake_detected(emit=emit)
-
-    listener = WakeWordListener(
-        on_wake=on_wake,
-        on_wake_detected=on_detected,
-        wake_phrase=args.wake_phrase,
-        capture_seconds=args.capture_seconds,
-        device=args.device,
-    )
-    app._listener_stop = listener.stop
-
-    listener_thread = threading.Thread(
-        target=listener.listen, name="wake-listener", daemon=True
-    )
-    listener_thread.start()
-
-    try:
-        app.run()
-    finally:
-        watcher_agent.stop()
-        vision_loop.stop()
-        cb_watcher.stop()
-        listener.stop()
-        listener_thread.join(timeout=2.0)
-
-
-def _run_tray(args) -> None:
-    from backend.daemon.tray import TrayController
-
-    cb_watcher.start()
-    vision_loop.start()
-    watcher_agent.start()
-    listener = WakeWordListener(
-        on_wake=handle_wake,
-        on_wake_detected=lambda: on_wake_detected(emit=None),
-        wake_phrase=args.wake_phrase,
-        capture_seconds=args.capture_seconds,
-        device=args.device,
-    )
-    tray = TrayController(on_quit=listener.stop)
-    listener_thread = threading.Thread(
-        target=listener.listen, name="wake-listener", daemon=True
-    )
-    listener_thread.start()
-    try:
-        tray.run()
-    finally:
-        watcher_agent.stop()
-        vision_loop.stop()
-        cb_watcher.stop()
-        listener.stop()
-        listener_thread.join(timeout=2.0)
+log = logging.getLogger(__name__)
 
 
 def _run_headless(args) -> None:
     cb_watcher.start()
     vision_loop.start()
     watcher_agent.start()
+
     listener = WakeWordListener(
         on_wake=handle_wake,
         on_wake_detected=lambda: on_wake_detected(emit=None),
@@ -99,40 +34,45 @@ def _run_headless(args) -> None:
         capture_seconds=args.capture_seconds,
         device=args.device,
     )
+    listener_thread = threading.Thread(
+        target=listener.listen, name="wake-listener", daemon=True
+    )
+    listener_thread.start()
+
+    # Start the FastAPI web server
+    host = args.host or settings.app_host
+    port = args.port or settings.app_port
+    log.info(f"Starting SG_CUBE web server on http://{host}:{port}")
+
     try:
-        listener.listen()
+        uvicorn.run(
+            "backend.server.main:app",
+            host=host,
+            port=port,
+            reload=args.reload,
+            log_level="info",
+        )
     except KeyboardInterrupt:
         print("\n[daemon] stopping...")
+    finally:
         watcher_agent.stop()
         vision_loop.stop()
         cb_watcher.stop()
         listener.stop()
+        listener_thread.join(timeout=2.0)
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="SG_CUBE always-on wake-word daemon")
+    ap = argparse.ArgumentParser(description="SG_CUBE daemon — web server + background services")
     ap.add_argument("--wake-phrase", default="onyx")
     ap.add_argument("--device", type=int, default=None)
     ap.add_argument("--capture-seconds", type=float, default=2.5)
-    ap.add_argument(
-        "--ui",
-        choices=["terminal", "tray", "none"],
-        default="terminal",
-        help="UI mode: terminal (default, sci-fi Textual), tray (legacy Phase 9b), or none (autostart/headless).",
-    )
-    ap.add_argument("--no-tray", action="store_true",
-                    help="Legacy alias for --ui none.")
+    ap.add_argument("--host", default=None, help="Web server host (default: from .env or 127.0.0.1)")
+    ap.add_argument("--port", type=int, default=None, help="Web server port (default: from .env or 8000)")
+    ap.add_argument("--reload", action="store_true", help="Enable uvicorn auto-reload for development")
     args = ap.parse_args()
 
-    if args.no_tray:
-        args.ui = "none"
-
-    if args.ui == "terminal":
-        _run_terminal(args)
-    elif args.ui == "tray":
-        _run_tray(args)
-    else:
-        _run_headless(args)
+    _run_headless(args)
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "phi3"  # fast intent classifier (cache/rule-miss path)
-    agent_model: str = "gemma4:e4b-it-q8_0"  # heavier tool-calling agent
+    agent_model: str = "gemma4:12b"  # heavier tool-calling agent
     embedding_model: str = "nomic-embed-text"
     vlm_model: str = "qwen2.5vl:3b"
     whisper_model: str = "small"  # ~half the WER of "base" with VAD/greedy keeping latency ~1s

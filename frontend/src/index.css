@@ -1,0 +1,56 @@
+:root {
+  --bg-primary: #000000;
+  --bg-panel: #02060a;
+  --bg-hover: #040c14;
+  --bg-active: #06121e;
+  --text-primary: #00d8ff;
+  --text-secondary: #0088aa;
+  --text-dim: #004466;
+  --text-bright: #ffffff;
+  --border: #004466;
+  --border-bright: #00d8ff;
+  --accent-teal: #005577;
+  --accent-teal-bright: #0088aa;
+  --danger: #ff3333;
+  --warn: #ff9100;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--text-dim);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+::selection {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}

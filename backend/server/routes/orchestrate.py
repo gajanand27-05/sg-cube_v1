@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.core.auth.deps import get_current_user
+from backend.core.auth.deps import get_any_user
 from backend.core.orchestrator.llm_layer import LLMResolveError
 from backend.core.orchestrator.router import process_input
 
@@ -17,7 +17,7 @@ class ProcessRequest(BaseModel):
 @router.post("/process")
 def process(
     body: ProcessRequest,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[dict, Depends(get_any_user)],
 ):
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="text must not be empty")

@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from backend.ai_modules.speech.stt_whisper import transcribe
 from backend.ai_modules.speech.tts_piper import speak
-from backend.core.auth.deps import get_current_user
+from backend.core.auth.deps import get_any_user
 from backend.core.orchestrator.llm_layer import Intent, LLMResolveError
 from backend.core.orchestrator.router import process_input
 from backend.core.safe_executor.executor import ExecutionResult
@@ -26,7 +26,7 @@ class SayRequest(BaseModel):
 @router.post("/transcribe")
 async def transcribe_endpoint(
     audio: Annotated[UploadFile, File()],
-    _user: Annotated[dict, Depends(get_current_user)],
+    _user: Annotated[dict, Depends(get_any_user)],
 ):
     if not audio.filename:
         raise HTTPException(status_code=400, detail="audio file required")
@@ -58,7 +58,7 @@ async def transcribe_endpoint(
 @router.post("/say")
 def say_endpoint(
     body: SayRequest,
-    _user: Annotated[dict, Depends(get_current_user)],
+    _user: Annotated[dict, Depends(get_any_user)],
 ):
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="text must not be empty")
@@ -90,7 +90,7 @@ def _build_spoken_response(intent: Intent, exec_result: ExecutionResult) -> str:
 @router.post("/process")
 async def process_endpoint(
     audio: Annotated[UploadFile, File()],
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[dict, Depends(get_any_user)],
 ):
     """End-to-end voice loop: audio → STT → orchestrate → execute → TTS reply."""
     if not audio.filename:
