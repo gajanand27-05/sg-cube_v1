@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Search } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 interface MemoryEntry {
   content: string
@@ -42,48 +45,72 @@ export function Memory() {
   const displayEntries = tab === 'recent' ? recent : results
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <h1>Memory</h1>
-        <span className="page-subtitle">Semantic Long-Term Memory</span>
+    <div className="h-full flex flex-col p-4">
+      <div className="flex items-baseline gap-3 mb-4 shrink-0">
+        <h1 className="font-sans font-bold text-2xl tracking-[2px] text-sgc-primary m-0">Memory</h1>
+        <span className="font-mono text-[11px] text-sgc-dim tracking-wider">Semantic Long-Term Memory</span>
       </div>
-      <div className="memory-tabs">
-        <button className={`memory-tab ${tab === 'recent' ? 'active' : ''}`} onClick={() => setTab('recent')}>
+
+      <div className="flex gap-0 mb-3 border-b border-sgc-border shrink-0">
+        <button
+          className={`font-sans text-sm font-semibold tracking-wider px-4 py-2 border-b-2 bg-transparent ${
+            tab === 'recent' ? 'text-sgc-border-bright border-sgc-border-bright' : 'text-sgc-dim border-transparent hover:text-sgc-secondary'
+          }`}
+          onClick={() => setTab('recent')}
+        >
           Recent
         </button>
-        <button className={`memory-tab ${tab === 'search' ? 'active' : ''}`} onClick={() => setTab('search')}>
+        <button
+          className={`font-sans text-sm font-semibold tracking-wider px-4 py-2 border-b-2 bg-transparent ${
+            tab === 'search' ? 'text-sgc-border-bright border-sgc-border-bright' : 'text-sgc-dim border-transparent hover:text-sgc-secondary'
+          }`}
+          onClick={() => setTab('search')}
+        >
           Search
         </button>
       </div>
-      <div className="memory-search-bar">
+
+      <div className="flex gap-2 mb-4 shrink-0">
         <input
-          className="memory-input"
+          className="flex-1 bg-[rgba(0,243,255,0.05)] border border-sgc-border text-sgc-primary font-mono text-sm px-3.5 py-2.5 outline-none focus:border-sgc-border-bright"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && search()}
           placeholder="Search memories..."
         />
-        <button className="memory-search-btn" onClick={search} disabled={searching}>
-          {searching ? 'Searching...' : 'Search'}
-        </button>
+        <Button size="sm" onClick={search} disabled={searching}>
+          <Search size={14} className="mr-1" /> {searching ? 'Searching...' : 'Search'}
+        </Button>
       </div>
-      <div className="memory-results">
-        {displayEntries.length === 0 && (
-          <div className="text-secondary" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
-            {tab === 'recent' ? 'No recent memories' : 'No results — try a search'}
-          </div>
-        )}
-        {displayEntries.map((r, i) => (
-          <div key={i} className="memory-card">
-            {r.content}
-            {r.timestamp && (
-              <div className="memory-meta">
-                {r.source && <span className="memory-source">{r.source}</span>}
-                <span className="memory-time">{new Date(r.timestamp).toLocaleString()}</span>
-              </div>
-            )}
-          </div>
-        ))}
+
+      <div className="flex-1 overflow-y-auto flex flex-col gap-2">
+        <AnimatePresence>
+          {displayEntries.length === 0 && (
+            <div className="font-mono text-xs text-sgc-dim">
+              {tab === 'recent' ? 'No recent memories' : 'No results — try a search'}
+            </div>
+          )}
+          {displayEntries.map((r, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`font-mono text-xs px-3 py-2.5 border ${
+                i === 0 && tab === 'search'
+                  ? 'border-sgc-border-bright text-sgc-bright'
+                  : 'border-sgc-border text-sgc-secondary bg-[rgba(0,243,255,0.03)]'
+              }`}
+            >
+              {r.content}
+              {r.timestamp && (
+                <div className="flex gap-3 mt-1.5 text-[10px] text-sgc-dim">
+                  {r.source && <span className="text-sgc-secondary">{r.source}</span>}
+                  <span>{new Date(r.timestamp).toLocaleString()}</span>
+                </div>
+              )}
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
     </div>
   )

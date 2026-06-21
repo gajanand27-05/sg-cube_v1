@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react'
+import { motion } from 'framer-motion'
+import { RefreshCw } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 export function Vision() {
   const [screenshot, setScreenshot] = useState<string | null>(null)
@@ -21,21 +24,29 @@ export function Vision() {
   }, [])
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <h1>Vision</h1>
-        <span className="page-subtitle">Screen Awareness</span>
+    <div className="h-full flex flex-col p-4">
+      <div className="flex items-baseline gap-3 mb-4 shrink-0">
+        <h1 className="font-sans font-bold text-2xl tracking-[2px] text-sgc-primary m-0">Vision</h1>
+        <span className="font-mono text-[11px] text-sgc-dim tracking-wider">Screen Awareness</span>
+        <Button variant="ghost" size="sm" onClick={refreshScreenshot} className="ml-auto">
+          <RefreshCw size={14} className="mr-1" /> Refresh
+        </Button>
       </div>
-      <div className="vision-container">
+      <motion.div
+        className="flex-1 flex flex-col items-center gap-3"
+        key={screenshot}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+      >
         {screenshot ? (
-          <img src={screenshot} alt="Current screen" className="vision-image" />
+          <img src={screenshot} alt="Current screen" className="max-w-full max-h-[calc(100vh-200px)] border border-sgc-border shadow-[0_0_20px_rgba(0,243,255,0.1)]" />
         ) : (
-          <div className="vision-placeholder">No screenshot available</div>
+          <div className="flex-1 flex items-center justify-center font-mono text-sm text-sgc-dim">No screenshot available</div>
         )}
         {lastUpdate && (
-          <div className="vision-timestamp">Last capture: {lastUpdate}</div>
+          <div className="font-mono text-[10px] text-sgc-dim">Last capture: {lastUpdate}</div>
         )}
-      </div>
+      </motion.div>
     </div>
   )
 }

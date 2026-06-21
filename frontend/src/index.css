@@ -1,56 +1,51 @@
-:root {
-  --bg-primary: #000000;
-  --bg-panel: rgba(0, 5, 10, 0.85);
-  --bg-hover: #040c14;
-  --bg-active: #06121e;
-  --text-primary: #00f3ff;
-  --text-secondary: #00aaff;
-  --text-dim: #005577;
-  --text-bright: #ffffff;
-  --border: #005577;
-  --border-bright: #00f3ff;
-  --accent-teal: #007799;
-  --accent-teal-bright: #00aaff;
-  --danger: #ff003c;
-  --warn: #ffb700;
-  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
-  --font-sans: 'Rajdhani', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-}
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Rajdhani:wght@500;600;700&display=swap');
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-html, body, #root {
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-}
+@layer base {
+  :root {
+    --background: 0 0% 0%;
+    --foreground: 186 100% 50%;
+    --card: 0 0% 2%;
+    --card-foreground: 186 100% 50%;
+    --popover: 0 0% 2%;
+    --popover-foreground: 186 100% 50%;
+    --primary: 186 100% 50%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 196 100% 50%;
+    --secondary-foreground: 0 0% 0%;
+    --muted: 200 50% 15%;
+    --muted-foreground: 200 30% 50%;
+    --accent: 186 100% 50%;
+    --accent-foreground: 0 0% 0%;
+    --destructive: 350 100% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 200 50% 20%;
+    --input: 200 50% 20%;
+    --ring: 186 100% 50%;
+    --radius: 0.25rem;
+  }
 
-body {
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-}
+  * {
+    @apply border-sgc-border;
+  }
 
-::-webkit-scrollbar {
-  width: 6px;
-}
-::-webkit-scrollbar-track {
-  background: var(--bg-primary);
-}
-::-webkit-scrollbar-thumb {
-  background: var(--text-dim);
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--text-secondary);
-}
+  html, body, #root {
+    @apply h-full w-full overflow-hidden;
+  }
 
-::selection {
-  background: var(--text-primary);
-  color: var(--bg-primary);
+  body {
+    @apply bg-sgc-bg text-sgc-primary font-sans antialiased;
+  }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { @apply bg-sgc-bg; }
+  ::-webkit-scrollbar-thumb { @apply bg-sgc-dim rounded; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-sgc-secondary; }
+
+  ::selection {
+    @apply bg-sgc-primary text-sgc-bg;
+  }
 }

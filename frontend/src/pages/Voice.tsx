@@ -1,5 +1,7 @@
 import { useState, useRef } from 'react'
-import type { AssistantStatus } from '../hooks/useWebSocket'
+import { motion } from 'framer-motion'
+import { Mic, Square } from 'lucide-react'
+import type { AssistantStatus } from '@/hooks/useWebSocket'
 
 interface Props {
   status: AssistantStatus
@@ -54,31 +56,41 @@ export function Voice({ status }: Props) {
   }
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <h1>Voice</h1>
-        <span className="page-subtitle">Voice Input & Output</span>
+    <div className="h-full flex flex-col p-4">
+      <div className="flex items-baseline gap-3 mb-4 shrink-0">
+        <h1 className="font-sans font-bold text-2xl tracking-[2px] text-sgc-primary m-0">Voice</h1>
+        <span className="font-mono text-[11px] text-sgc-dim tracking-wider">Voice Input & Output</span>
       </div>
-      <div className="voice-container">
-        <button
-          className={`voice-btn ${recording ? 'voice-btn-recording' : ''}`}
+      <div className="flex-1 flex flex-col items-center justify-center gap-6">
+        <motion.button
+          className={`w-40 h-40 rounded-full border-2 flex items-center justify-center font-sans text-sm font-semibold cursor-pointer transition-all ${
+            recording
+              ? 'border-sgc-danger text-sgc-danger shadow-[0_0_30px_rgba(255,0,60,0.3)]'
+              : 'border-sgc-border text-sgc-primary hover:border-sgc-border-bright hover:shadow-[0_0_20px_rgba(0,243,255,0.2)]'
+          }`}
           onClick={recording ? stopRecording : startRecording}
+          animate={recording ? { scale: [1, 1.05, 1] } : {}}
+          transition={{ duration: 1.5, repeat: Infinity }}
         >
-          {recording ? '⏹ Stop Recording' : '🎤 Start Recording'}
-        </button>
+          {recording ? <Square size={24} /> : <Mic size={24} />}
+        </motion.button>
         {status.listening && (
-          <div className="voice-listening">Wake word detected — listening...</div>
+          <div className="font-mono text-sm text-sgc-warn animate-blink">Wake word detected — listening...</div>
         )}
         {transcript && (
-          <div className="voice-result">
-            <div className="voice-result-label">Transcript</div>
-            <div className="voice-result-text">{transcript}</div>
+          <div className="w-full max-w-lg">
+            <div className="font-mono text-[10px] text-sgc-dim tracking-wider mb-1">Transcript</div>
+            <div className="font-mono text-sm text-sgc-bright px-3.5 py-2.5 border border-sgc-border bg-[rgba(0,243,255,0.05)]">
+              {transcript}
+            </div>
           </div>
         )}
         {response && (
-          <div className="voice-result">
-            <div className="voice-result-label">Response</div>
-            <div className="voice-result-text">{response}</div>
+          <div className="w-full max-w-lg">
+            <div className="font-mono text-[10px] text-sgc-dim tracking-wider mb-1">Response</div>
+            <div className="font-mono text-sm text-sgc-bright px-3.5 py-2.5 border border-sgc-border bg-[rgba(0,243,255,0.05)]">
+              {response}
+            </div>
           </div>
         )}
       </div>
