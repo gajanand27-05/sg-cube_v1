@@ -1,7 +1,8 @@
 import logging
+import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, UploadFile
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/files", tags=["files"])
@@ -38,3 +39,19 @@ def list_files(path: str = Query(".", description="Directory path")):
     except Exception as e:
         log.warning(f"File listing failed: {e}")
         return {"error": str(e), "entries": []}
+
+
+@router.post("/upload")
+async def upload_file(file: UploadFile, dest: str = Query(".", description="Destination directory")):
+    try:
+        dest_path = Path(dest).resolve()
+        dest_path.mkdir(parents=True, exist_ok=True)
+        save_path = dest_path / file.filename
+
+        with open(save_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        return {"status": "ok", "path": str(save_path), "size": save_path.stat().st_size}
+    except Exception as e:
+        log.warning(f"File upload failed: {e}")
+        return {"status": "error", "error": str(e)}

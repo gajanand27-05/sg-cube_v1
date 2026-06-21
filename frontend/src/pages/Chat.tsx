@@ -40,7 +40,7 @@ export function Chat({ status }: Props) {
       { role: 'user', content: text, timestamp: Date.now() },
     ])
     try {
-      const res = await fetch('/orchestrate/process', {
+      const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -48,9 +48,7 @@ export function Chat({ status }: Props) {
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      const reply = data.intent?.action
-        ? `Executing: ${data.intent.action} ${data.intent.target}`
-        : data.message || 'Done'
+      const reply = data.response || 'Done'
       setMessages((prev) => [
         ...prev,
         { role: 'assistant', content: reply, timestamp: Date.now() },

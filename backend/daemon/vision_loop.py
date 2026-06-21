@@ -92,9 +92,14 @@ class VisionLoop:
         
         log.info(f"Vision loop: captured state in {app}")
         try:
+            global latest_observation
+            latest_observation = {"app": app, "summary": summary, "timestamp": time.time()}
             bus.publish(VisionUpdateEvent(description=summary, windows=[app]))
         except Exception:
             pass
 
 # Global instance
 vision_loop = VisionLoop()
+
+# Cached latest observation for GET /vision/latest
+latest_observation: dict | None = None
