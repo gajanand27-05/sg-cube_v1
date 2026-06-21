@@ -52,6 +52,30 @@ class ScreenMemory:
         except Exception as e:
             log.error(f"Failed to store visual memory: {e}")
 
+    def get_recent_observations(self, limit: int = 10) -> list[dict]:
+        """Return recent observations sorted by time descending."""
+        try:
+            results = self.collection.get(
+                limit=limit * 2,
+                include=["documents", "metadatas"]
+            )
+            entries = []
+            if results["documents"]:
+                for i in range(len(results["documents"])):
+                    m = results["metadatas"][i]
+                    entries.append({
+                        "content": results["documents"][i],
+                        "app": m.get("app", "Unknown"),
+                        "keywords": m.get("keywords", ""),
+                        "created_at": m.get("created_at", ""),
+                    })
+                entries.sort(key=lambda x: x["created_at"], reverse=True)
+                return entries[:limit]
+            return []
+        except Exception as e:
+            log.error(f"Failed to get recent observations: {e}")
+            return []
+
     def get_latest_observation(self) -> Optional[str]:
         """Return the most recent visual summary stored."""
         try:
