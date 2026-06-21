@@ -8,6 +8,7 @@ from typing import Any, Callable, Coroutine, Optional
 
 from backend.core.events import bus
 from backend.core.tools.registry import ToolResult, ToolStatus
+from backend.daemon.ui_events import ToolFinishedEvent, ToolStartedEvent
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ class Runtime:
         task.status = TaskStatus.RUNNING
         task.start_time = time.perf_counter()
         bus.publish(TaskEvent(task_id, task.status, message=f"Starting tool {name}"))
+        bus.publish(ToolStartedEvent(tool_name=name, args=args))
 
         try:
             # Execute with timeout
@@ -115,6 +117,13 @@ class Runtime:
         finally:
             task.end_time = time.perf_counter()
             latency = int((task.end_time - task.start_time) * 1000)
+            bus.publish(ToolFinishedEvent(
+                tool_name=name,
+                status=task.result.status.value if task.result else "error",
+                result=task.result.message if task.result else None,
+                error=task.result.reason if task.result and task.result.status != ToolStatus.SUCCESS else None,
+                latency_ms=latency,
+            ))
             
             bus.publish(TaskEvent(
                 task_id, 

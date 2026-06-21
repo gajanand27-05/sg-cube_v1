@@ -124,3 +124,31 @@ class SystemStatsEvent:
     net_down_bps: float
     net_up_bps: float
     temp_c: float | None = None
+
+
+@dataclass
+class ToolStartedEvent:
+    tool_name: str
+    args: dict
+
+
+@dataclass
+class ToolFinishedEvent:
+    tool_name: str
+    status: str
+    result: str | None = None
+    error: str | None = None
+    latency_ms: int = 0
+
+
+@dataclass
+class MemoryHitEvent:
+    query: str
+    source: str
+    results_count: int
+
+
+@dataclass
+class VisionUpdateEvent:
+    description: str
+    windows: list | None = None

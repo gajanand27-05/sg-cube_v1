@@ -2,7 +2,9 @@ import logging
 
 from fastapi import APIRouter, Query
 
+from backend.core.events import bus
 from backend.core.memory.manager import memory as memory_manager
+from backend.daemon.ui_events import MemoryHitEvent
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -14,6 +16,7 @@ def search_memory(q: str = Query("", description="Search query")):
         return {"results": []}
     try:
         entries = memory_manager.ltm.search(q, limit=10)
+        bus.publish(MemoryHitEvent(query=q, source="semantic", results_count=len(entries)))
         return {
             "results": [
                 {

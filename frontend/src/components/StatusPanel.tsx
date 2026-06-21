@@ -47,7 +47,7 @@ export function StatusPanel({ status, systemStats, events = [] }: Props) {
           </div>
           <div className="sp-monitor-item">
             <div className="sp-label">MEMORY HITS</div>
-            <div className="status-value">{events.filter(e => e.type === 'StateChangedEvent').length}</div>
+            <div className="status-value">{events.filter(e => e.type === 'state_changed').length}</div>
           </div>
         </div>
       </div>

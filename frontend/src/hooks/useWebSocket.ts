@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 export interface WsEvent {
   type: string
+  timestamp: string
   payload: Record<string, unknown>
 }
 
@@ -14,6 +15,8 @@ export interface AssistantStatus {
   lastResponse: string
   confidence: number
   currentAgent: string
+  lastTool: string
+  lastMemoryHit: string
 }
 
 const INITIAL_STATUS: AssistantStatus = {
@@ -25,6 +28,8 @@ const INITIAL_STATUS: AssistantStatus = {
   lastResponse: '',
   confidence: 100,
   currentAgent: '',
+  lastTool: '',
+  lastMemoryHit: '',
 }
 
 export interface SystemStats {
@@ -55,7 +60,7 @@ const INITIAL_STATS: SystemStats = {
 
 function reduceStatus(s: AssistantStatus, data: WsEvent): AssistantStatus {
   switch (data.type) {
-    case 'StateChangedEvent': {
+    case 'state_changed': {
       const newState = data.payload.new_state as string
       return {
         ...s,
@@ -65,17 +70,22 @@ function reduceStatus(s: AssistantStatus, data: WsEvent): AssistantStatus {
         speaking: newState === 'SPEAKING',
       }
     }
-    case 'CommandTranscribed':
+    case 'command_transcribed':
       return { ...s, lastCommand: data.payload.text as string }
-    case 'SpokenResponse':
+    case 'spoken_response':
       return { ...s, lastResponse: data.payload.text as string }
-    case 'Executed':
+    case 'tool_finished':
       return {
         ...s,
         confidence: (data.payload.confidence as number) ?? s.confidence,
+        lastTool: data.payload.tool_name as string || data.payload.command as string || '',
       }
-    case 'InternalAgentEvent':
+    case 'tool_started':
+      return { ...s, lastTool: data.payload.tool_name as string }
+    case 'agent_status':
       return { ...s, currentAgent: data.payload.agent_name as string }
+    case 'memory_hit':
+      return { ...s, lastMemoryHit: data.payload.query as string }
     default:
       return s
   }
@@ -86,7 +96,7 @@ export function useWebSocket() {
   const [systemStats, setSystemStats] = useState<SystemStats>(INITIAL_STATS)
   const [events, setEvents] = useState<WsEvent[]>([])
   const wsRef = useRef<WebSocket | null>(null)
-  const maxEvents = 200
+  const maxEvents = 500
 
   const connect = useCallback(() => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -108,8 +118,8 @@ export function useWebSocket() {
         const data: WsEvent = JSON.parse(msg.data)
         setEvents((prev) => [...prev.slice(-maxEvents + 1), data])
         setStatus((s) => reduceStatus(s, data))
-        
-        if (data.type === 'SystemStatsEvent') {
+
+        if (data.type === 'system_stats') {
           setSystemStats(data.payload as unknown as SystemStats)
         }
       } catch {

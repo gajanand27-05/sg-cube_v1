@@ -4,10 +4,12 @@ import threading
 import time
 from typing import Optional
 
+from backend.core.events import bus
 from backend.core.vision.capture import capture_screen
 from backend.core.vision.vlm import analyze_screenshot
 from backend.core.memory.screen_memory import screen_memory
 from backend.core.memory.timeline import timeline
+from backend.daemon.ui_events import VisionUpdateEvent
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +91,10 @@ class VisionLoop:
         )
         
         log.info(f"Vision loop: captured state in {app}")
+        try:
+            bus.publish(VisionUpdateEvent(description=summary, windows=[app]))
+        except Exception:
+            pass
 
 # Global instance
 vision_loop = VisionLoop()
