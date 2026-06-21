@@ -21,6 +21,7 @@ from backend.daemon.ui_events import (
     SpokenResponse,
     TokenStreamEvent,
     WakeHeard,
+    SystemStatsEvent,
 )
 
 log = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ EVENT_TYPES = [
     ClipboardChangedEvent,
     HandoverEvent,
     ProactiveEvent,
+    SystemStatsEvent,
 ]
 
 

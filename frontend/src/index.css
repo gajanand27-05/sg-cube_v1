@@ -1,20 +1,20 @@
 :root {
   --bg-primary: #000000;
-  --bg-panel: #02060a;
+  --bg-panel: rgba(0, 5, 10, 0.85);
   --bg-hover: #040c14;
   --bg-active: #06121e;
-  --text-primary: #00d8ff;
-  --text-secondary: #0088aa;
-  --text-dim: #004466;
+  --text-primary: #00f3ff;
+  --text-secondary: #00aaff;
+  --text-dim: #005577;
   --text-bright: #ffffff;
-  --border: #004466;
-  --border-bright: #00d8ff;
-  --accent-teal: #005577;
-  --accent-teal-bright: #0088aa;
-  --danger: #ff3333;
-  --warn: #ff9100;
+  --border: #005577;
+  --border-bright: #00f3ff;
+  --accent-teal: #007799;
+  --accent-teal-bright: #00aaff;
+  --danger: #ff003c;
+  --warn: #ffb700;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: 'Rajdhani', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 * {

@@ -15,7 +15,7 @@ import { Settings } from './pages/Settings'
 import './App.css'
 
 function App() {
-  const { status } = useWebSocket()
+  const { status, systemStats, events } = useWebSocket()
 
   return (
     <div className="app-shell">
@@ -25,7 +25,7 @@ function App() {
           <Sidebar />
           <main className="main-content">
             <Routes>
-              <Route path="/" element={<Dashboard status={status} />} />
+              <Route path="/" element={<Dashboard status={status} systemStats={systemStats} />} />
               <Route path="/chat" element={<Chat status={status} />} />
               <Route path="/voice" element={<Voice status={status} />} />
               <Route path="/vision" element={<Vision />} />
@@ -35,9 +35,9 @@ function App() {
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </main>
-          <StatusPanel status={status} />
+          <StatusPanel status={status} systemStats={systemStats} events={events} />
         </div>
-        <Footer />
+        <Footer systemStats={systemStats} />
         <div className="frame-corner top-left"></div>
         <div className="frame-corner top-right"></div>
         <div className="frame-corner bottom-left"></div>

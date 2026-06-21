@@ -110,3 +110,17 @@ class AgentThinkingEvent:
 @dataclass
 class ProactiveEvent:
     query: str
+
+
+@dataclass
+class SystemStatsEvent:
+    cpu_percent: float
+    memory_percent: float
+    memory_used_gb: float
+    memory_total_gb: float
+    disk_percent: float
+    disk_used_gb: float
+    disk_total_gb: float
+    net_down_bps: float
+    net_up_bps: float
+    temp_c: float | None = None

@@ -1,5 +1,3 @@
-import React from 'react';
-
 export function Header() {
   return (
     <header className="app-header">
@@ -12,11 +10,13 @@ export function Header() {
           </div>
         </div>
         <div className="header-title">
-          <span className="title-text">SG_CUBE TERMINAL v2.0</span>
+          <span className="title-text">SG_CUBE v2.0</span>
+          <span className="title-sub">AI Operating System</span>
         </div>
       </div>
       <div className="header-right">
-        <span className="user-info">USER: <span className="highlight">devuser@sgcube</span></span>
+        <div className="header-status-dot" />
+        <span className="header-status-text">ONYX ONLINE</span>
       </div>
     </header>
   );

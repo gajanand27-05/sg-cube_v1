@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.server.config import settings
-from backend.server.routes import admin, auth, execute, memory, orchestrate, remote, ui, vision, voice
+from backend.server.routes import admin, agents, auth, execute, files, memory, orchestrate, remote, system, ui, vision, voice
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +33,9 @@ app.include_router(remote.router)
 app.include_router(ui.router)
 app.include_router(vision.router)
 app.include_router(memory.router)
+app.include_router(agents.router)
+app.include_router(system.router)
+app.include_router(files.router)
 
 
 @app.get("/health")

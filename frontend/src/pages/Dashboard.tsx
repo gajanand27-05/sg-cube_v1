@@ -1,11 +1,12 @@
 import React from 'react'
-import type { AssistantStatus } from '../hooks/useWebSocket'
+import type { AssistantStatus, SystemStats } from '../hooks/useWebSocket'
 
 interface Props {
   status: AssistantStatus
+  systemStats?: SystemStats
 }
 
-export function Dashboard({ status }: Props) {
+export function Dashboard({ status, systemStats }: Props) {
   return (
     <div className="dashboard-content">
       <div className="terminal-column">
@@ -49,7 +50,7 @@ export function Dashboard({ status }: Props) {
               <div className="sys-line"><span className="sys-key">Terminal:</span> sgcube-terminal</div>
               <div className="sys-line"><span className="sys-key">CPU:</span> Intel i7-12700K (20) @ 5.00GHz</div>
               <div className="sys-line"><span className="sys-key">GPU:</span> NVIDIA GeForce RTX 3080</div>
-              <div className="sys-line"><span className="sys-key">Memory:</span> 4.23GiB / 31.32GiB</div>
+              <div className="sys-line"><span className="sys-key">Memory:</span> {systemStats?.memory_used_gb || '0'}GiB / {systemStats?.memory_total_gb || '0'}GiB</div>
               <div className="color-blocks">
                 <span className="cb cb-black"></span>
                 <span className="cb cb-red"></span>
@@ -97,7 +98,7 @@ export function Dashboard({ status }: Props) {
 
       <div className="center-cube-illustration">
          <div className="hud-rings">
-            <svg viewBox="0 0 500 500" width="500" height="500">
+            <svg viewBox="0 0 500 500" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
                {/* Outer target ring */}
                <circle cx="250" cy="250" r="230" fill="none" stroke="var(--text-dim)" strokeWidth="1" opacity="0.3" strokeDasharray="1 10" className="spin-slow" />
                <circle cx="250" cy="250" r="220" fill="none" stroke="var(--border-bright)" strokeWidth="1" opacity="0.2" strokeDasharray="5 15" />
@@ -132,9 +133,9 @@ export function Dashboard({ status }: Props) {
          <div className="cube-container">
             <div className="cube">
                <div className="face front">SG</div>
-               <div className="face back"></div>
+               <div className="face back">SG</div>
                <div className="face right">CUBE</div>
-               <div className="face left"></div>
+               <div className="face left">CUBE</div>
                <div className="face top"></div>
                <div className="face bottom"></div>
             </div>
