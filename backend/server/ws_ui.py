@@ -9,7 +9,10 @@ from fastapi import WebSocket
 from backend.core.events import bus
 from backend.core.state import StateChangedEvent
 from backend.daemon.ui_events import (
+    AgentCompletedEvent,
+    AgentReasoningEvent,
     AgentThinkingEvent,
+    AgentToolCallEvent,
     ClipboardChangedEvent,
     CommandTranscribed,
     ConfidenceEvent,
@@ -44,6 +47,9 @@ TYPE_MAP: dict[type, str] = {
     SelfHealingEvent: "self_healing",
     InternalAgentEvent: "agent_status",
     AgentThinkingEvent: "agent_thinking",
+    AgentReasoningEvent: "agent_reasoning",
+    AgentToolCallEvent: "agent_tool_call",
+    AgentCompletedEvent: "agent_completed",
     ClipboardChangedEvent: "clipboard_changed",
     HandoverEvent: "handover",
     ProactiveEvent: "proactive",

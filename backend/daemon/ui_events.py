@@ -108,6 +108,30 @@ class AgentThinkingEvent:
 
 
 @dataclass
+class AgentReasoningEvent:
+    agent_name: str
+    reasoning: str
+
+
+@dataclass
+class AgentToolCallEvent:
+    agent_name: str
+    tool: str
+    args: dict | None = None
+    result: str | None = None
+    latency_ms: int = 0
+
+
+@dataclass
+class AgentCompletedEvent:
+    agent_name: str
+    status: str          # "completed" | "failed" | "verified"
+    confidence: float = 100.0
+    latency_ms: int = 0
+    summary: str | None = None
+
+
+@dataclass
 class ProactiveEvent:
     query: str
 

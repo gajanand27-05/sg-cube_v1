@@ -53,9 +53,6 @@ beautifulsoup4==4.12.3
 pytesseract==0.3.13
 pyperclip==1.9.0
 
-# ── Phase 9d: Textual sci-fi terminal UI ──
-textual==0.86.0
-pyfiglet==1.0.2
 
 # ── Phase 12: Semantic Memory (ChromaDB) ──
 chromadb==1.5.9

@@ -35,7 +35,7 @@ function App() {
               <Route path="/voice" element={<Voice status={status} />} />
               <Route path="/vision" element={<Vision />} />
               <Route path="/memory" element={<Memory />} />
-              <Route path="/agents" element={<Agents status={status} />} />
+              <Route path="/agents" element={<Agents />} />
               <Route path="/files" element={<Files />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
