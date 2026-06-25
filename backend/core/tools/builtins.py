@@ -19,33 +19,6 @@ def respond(text: str) -> ToolResult:
     directly. The agent treats calls to this tool as the terminating step."""
     return ToolResult.success(text)
 
-# Phase 11b: importing these modules registers their @tool functions.
-from backend.core.tools import audio as _audio  # noqa: F401
-from backend.core.tools import display as _display  # noqa: F401
-from backend.core.tools import files as _files  # noqa: F401
-from backend.core.tools import system_info as _system_info  # noqa: F401
-from backend.core.tools import windowing as _windowing  # noqa: F401
-
-# Phase 11c — productivity (notes, reminders, clipboard, messaging)
-from backend.core.tools import comms as _comms  # noqa: F401
-from backend.core.tools import memory as _memory  # noqa: F401
-from backend.core.tools import notes as _notes  # noqa: F401
-from backend.core.tools import reminders as _reminders  # noqa: F401
-
-# Phase 11d — information feeds (weather, stocks, crypto, news, trending, briefing)
-from backend.core.tools import finance as _finance  # noqa: F401
-from backend.core.tools import news as _news  # noqa: F401
-from backend.core.tools import weather as _weather  # noqa: F401
-
-# Phase 11e — content analysis (PDF/web summarize, translate, read-aloud, explain code, OCR)
-from backend.core.tools import ocr as _ocr  # noqa: F401
-from backend.core.tools import read_aloud as _read_aloud  # noqa: F401
-from backend.core.tools import summarize as _summarize  # noqa: F401
-from backend.core.tools import translate as _translate  # noqa: F401
-
-# Phase 14 — automation (background watcher agents)
-from backend.core.tools import automation as _automation  # noqa: F401
-
 
 @tool(security=SecurityLevel.SAFE)
 def open_app(name: str) -> ToolResult:
