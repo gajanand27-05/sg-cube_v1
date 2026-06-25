@@ -55,7 +55,7 @@ async def process_input(text: str, user_id: str) -> RouterResult:
             status="error",
         )
 
-    cached = cache_layer.get(norm)
+    cached = cache_layer.get_fuzzy(norm)
     if cached is not None:
         latency = int((time.perf_counter() - t0) * 1000)
         _log_to_db(user_id, text, cached, "cache", "success", latency)
