@@ -37,6 +37,17 @@ app.include_router(agents.router)
 app.include_router(system.router)
 app.include_router(files.router)
 
+# Phase E: Optionally mount MCP server at /mcp
+try:
+    from backend.core.mcp_server import mcp_app
+    if mcp_app is not None:
+        app.mount("/mcp", mcp_app)
+        log.info("MCP server mounted at /mcp")
+    else:
+        log.debug("MCP server not mounted: fastmcp not installed")
+except Exception as e:
+    log.debug("MCP server not mounted: %s", e)
+
 
 @app.get("/health")
 def health():

@@ -52,6 +52,9 @@ pyautogui==0.9.54
 # ── Phase 11d: information feeds (RSS only — stocks/crypto/weather hit JSON APIs directly) ──
 feedparser==6.0.11
 
+# ── Phase E: MCP protocol (model-context-protocol server) ──
+fastmcp>=0.5.0
+
 # ── Phase 11e: content analysis (PDF/web summarize, OCR, translate, read-aloud, explain code) ──
 # pytesseract also needs the Tesseract binary on PATH — install separately:
 #   https://github.com/UB-Mannheim/tesseract/wiki
