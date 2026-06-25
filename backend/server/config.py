@@ -27,5 +27,11 @@ class Settings(BaseSettings):
     vlm_model: str = "qwen2.5vl:3b"
     whisper_model: str = "small"  # ~half the WER of "base" with VAD/greedy keeping latency ~1s
 
+    # ── Phase C3: LiveKit optional voice pipeline ──
+    voice_pipeline: str = "local"  # "local" | "livekit"
+    livekit_url: str = ""
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
+
 
 settings = Settings()

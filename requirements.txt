@@ -21,6 +21,10 @@ requests==2.32.3
 # ── Phase C1: silero-vad for accurate streaming VAD ──
 silero-vad>=4.0.0
 
+# ── Phase C3: LiveKit optional voice pipeline ──
+# Install separately if using LiveKit:
+#   pip install livekit livekit-agents livekit-plugins-deepgram livekit-plugins-openai livekit-plugins-silero
+
 # ── Phase 7: Text-to-Speech (Piper — offline neural TTS) ──
 # Voice models live in backend/ai_modules/speech/piper_voices/ (gitignored).
 # Fetch with: python tools/download_piper_voice.py [voice-name]
