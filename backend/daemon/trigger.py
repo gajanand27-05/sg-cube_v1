@@ -10,8 +10,8 @@ from typing import Any, Callable, Optional
 import numpy as np
 import sounddevice as sd
 
-from backend.ai_modules.speech.stt_whisper import transcribe
-from backend.ai_modules.speech.tts_piper import speak
+from backend.ai_modules.speech.stt_whisper import transcribe_array
+from backend.ai_modules.speech.tts_piper import speak, stop_speech
 from backend.core.agents.commander import commander
 from backend.core.orchestrator.llm_layer import Intent, LLMResolveError
 from backend.core.orchestrator.router import process_input
@@ -32,8 +32,6 @@ log = logging.getLogger(__name__)
 
 EmitFn = Callable[[Any], None]
 
-# TODO replace with a service-account UUID after a daemon-auth design exists.
-# For now: reuse the Phase 2 test user so command_logs writes still satisfy the FK.
 DAEMON_USER_ID = "21c19bf1-b73f-4001-80de-789b93c8d703"
 
 SAMPLE_RATE = 16000
@@ -41,9 +39,7 @@ ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
 
 
 def _play_chime() -> None:
-    """Play assets/chime.wav if present; fall back to a generated sine tone
-    routed through the user's default audio output (winsound.Beep is
-    unreliable on Windows 11)."""
+    """Play assets/chime.wav if present; fall back to a generated sine tone."""
     chime = ASSETS_DIR / "chime.wav"
     if chime.exists():
         try:
@@ -69,23 +65,10 @@ def _play_chime() -> None:
     sd.wait()
 
 
-def _save_wav(audio_bytes: bytes) -> Path:
-    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    tmp.close()
-    path = Path(tmp.name)
-    with wave.open(str(path), "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(SAMPLE_RATE)
-        w.writeframes(audio_bytes)
-    return path
-
-
 def _spoken_response(intent: Intent, result: ExecutionResult) -> str:
     status = result.status
     action = intent.action
     target = intent.target
-    # Phase 11a: agent already wrote the spoken response.
     if action == "agent_complete":
         return (intent.args or {}).get("spoken") or result.message or "Done."
     if status == "success":
@@ -103,6 +86,24 @@ def _spoken_response(intent: Intent, result: ExecutionResult) -> str:
             return f"Searching YouTube for {target}"
         if action == "open_url":
             return f"Opening {target}"
+        if action == "set_volume":
+            return f"Setting volume to {intent.args.get('level', '')}"
+        if action == "volume_up":
+            return "Volume up"
+        if action == "volume_down":
+            return "Volume down"
+        if action == "mute":
+            return "Muted"
+        if action == "unmute":
+            return "Unmuted"
+        if action in ("shutdown_pc", "restart_pc", "sleep_pc"):
+            return result.message or "Done"
+        if action == "lock_screen":
+            return "Locking screen"
+        if action == "take_note":
+            return "Note saved"
+        if action == "set_reminder":
+            return "Reminder set"
         return "Done"
     if status == "blocked":
         if action == "unknown":
@@ -122,9 +123,10 @@ def _emit(emit: EmitFn | None, event: Any) -> None:
 
 def on_wake_detected(emit: EmitFn | None = None) -> None:
     """Fires the instant the wake phrase is recognised."""
-    # Interrupt any current reasoning/execution
+    # Phase C2: Interrupt any in-progress speech immediately
+    stop_speech()
     commander.interrupt()
-    
+
     state_manager.transition_to(AssistantState.LISTENING)
     event = WakeHeard(peak=0)
     bus.publish(event)
@@ -133,7 +135,7 @@ def on_wake_detected(emit: EmitFn | None = None) -> None:
 
 
 async def _speak_selective(text: str, device_id: Optional[str] = None):
-    """Speak locally or push audio to a remote device."""
+    """Speak locally (non-blocking) or push audio to a remote device."""
     if device_id:
         from backend.ai_modules.speech.tts_piper import generate_audio
         from backend.server.routes.remote import manager as remote_manager
@@ -168,7 +170,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         bus.publish(err_event)
         _emit(emit, err_event)
         reply = "Sorry, my reasoning model is unavailable"
-        
+
         state_manager.transition_to(AssistantState.SPEAKING)
         await _speak_selective(reply, device_id)
         spoken_event = SpokenResponse(text=reply)
@@ -187,13 +189,11 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
 
     state_manager.transition_to(AssistantState.EXECUTING)
     result = await do_execute(routed.intent)
-    
-    # ── Observability Integration ────────────────────────────
+
     from backend.core.observability import engine as obs_engine
     total_latency = int((asyncio.get_event_loop().time() - t0) * 1000)
     obs_engine.report_tool_quality(request_id, result.confidence, result.status)
     obs_engine.report_latency(request_id, total_latency)
-    # ─────────────────────────────────────────────────────────
 
     exec_event = Executed(
         command=command,
@@ -208,20 +208,24 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
     _emit(emit, exec_event)
 
     reply = _spoken_response(routed.intent, result)
-    
+
     state_manager.transition_to(AssistantState.SPEAKING)
     await _speak_selective(reply, device_id)
-    
+
     spoken_event = SpokenResponse(text=reply)
     bus.publish(spoken_event)
     _emit(emit, spoken_event)
-    
+
     state_manager.transition_to(AssistantState.IDLE)
     return True
 
 
 async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
-    """Main daemon orchestration via async events."""
+    """Main daemon orchestration via async events.
+
+    Phase C1: Uses `transcribe_array` instead of saving audio to a temp WAV file.
+    Phase C2: TTS is non-blocking — returns to IDLE immediately after dispatching speech.
+    """
     t0 = asyncio.get_event_loop().time()
 
     state_manager.transition_to(AssistantState.THINKING)
@@ -229,28 +233,22 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
     peak = int(np.max(np.abs(arr))) if arr.size else 0
     rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) if arr.size else 0
 
-    # Safety check: if the captured audio is exceptionally quiet, it was
-    # likely a false trigger or background noise Vosk misidentified.
-    # rms < 200 is effectively a silent room.
     if rms < 200:
         print(f"[trigger] skipping whisper: capture too quiet (rms={rms:.0f})")
         state_manager.transition_to(AssistantState.IDLE)
         return False
-    
-    wav_path = _save_wav(audio_bytes)
+
     try:
-        stt = transcribe(str(wav_path))
+        stt = transcribe_array(arr, SAMPLE_RATE)
         command = (stt.get("text") or "").strip()
         print(f"[command] {command!r}")
-        
+
         return await _process_and_execute(command, peak, t0, emit, device_id)
     except Exception as e:
         state_manager.transition_to(AssistantState.ERROR)
         log.exception(f"trigger crash: {e}")
         state_manager.transition_to(AssistantState.IDLE)
         return False
-    finally:
-        wav_path.unlink(missing_ok=True)
 
 
 from backend.daemon.ui_events import ProactiveEvent
@@ -259,13 +257,10 @@ import time
 def on_proactive_event(event: ProactiveEvent):
     """Handle events fired by the Watcher Agent in the background."""
     def _run():
-        # Wait if the assistant is busy (e.g., user is speaking or we are executing)
         while state_manager.current_state != AssistantState.IDLE:
             time.sleep(1)
-        
+
         try:
-            # We must run this in a new event loop because bus handlers are sync 
-            # and we are inside a background thread (the Watcher loop thread).
             asyncio.run(_handle_proactive_async(event.query))
         except Exception as e:
             log.error(f"Proactive trigger failed: {e}")
@@ -277,10 +272,8 @@ async def _handle_proactive_async(query: str):
     t0 = asyncio.get_event_loop().time()
     state_manager.transition_to(AssistantState.THINKING)
     print(f"[proactive] {query!r}")
-    
-    # We prefix with [Proactive] so it's clear in logs and transcript
+
     command = f"[Proactive] {query}"
     await _process_and_execute(command, peak=0, t0=t0, emit=None, device_id=None)
 
-# Subscribe to ProactiveEvent
 bus.subscribe(ProactiveEvent, on_proactive_event)

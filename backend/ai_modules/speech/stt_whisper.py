@@ -1,6 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Generator
 
+import numpy as np
 from faster_whisper import WhisperModel
 
 from backend.server.config import settings
@@ -37,20 +39,86 @@ _COMMAND_PROMPT = (
     "discord, telegram, calculator, explorer, and other apps."
 )
 
+# ── Phase C1: silero-vad integration ──
+_SILERO_VAD = None
+
+
+def _get_silero_vad():
+    global _SILERO_VAD
+    if _SILERO_VAD is None:
+        import torch
+        _SILERO_VAD, _ = torch.hub.load(
+            repo_or_dir="snakers4/silero-vad",
+            model="silero_vad",
+            force_reload=False,
+            onnx=True,
+        )
+    return _SILERO_VAD
+
+
+def vad_speech_prob(chunk: np.ndarray, sample_rate: int = 16000) -> float:
+    """Return speech probability (0.0–1.0) for a single audio chunk via silero-vad."""
+    import torch
+    model = _get_silero_vad()
+    return float(model(torch.from_numpy(chunk), sample_rate).item())
+
+
+# ── Phase C1: Streaming VAD iterator ──
+SILERO_VAD_THRESHOLD = 0.5
+VAD_TRAILING_SILENCE_MS = 600
+VAD_MIN_SPEECH_MS = 100
+
+
+def _filter_speech_chunks(
+    chunk_iterable: Generator[bytes, None, None],
+    sample_rate: int = 16000,
+) -> Generator[np.ndarray, None, None]:
+    """Yield numpy arrays of speech-only audio chunks using silero-vad.
+
+    Drops non-speech chunks before and after speech. Handles trailing
+    silence detection so the caller gets a clean utterance.
+    """
+    bytes_per_ms = sample_rate * 2 // 1000
+    trailing_bytes = VAD_TRAILING_SILENCE_MS * bytes_per_ms
+    min_speech_bytes = VAD_MIN_SPEECH_MS * bytes_per_ms
+
+    speech_seen = False
+    speech_buffer: list[np.ndarray] = []
+    trailing_silence_bytes = 0
+
+    for chunk_bytes in chunk_iterable:
+        arr = np.frombuffer(chunk_bytes, dtype=np.int16).astype(np.float32)
+        if arr.size == 0:
+            continue
+        prob = vad_speech_prob(arr, sample_rate)
+        if prob > SILERO_VAD_THRESHOLD:
+            speech_seen = True
+            trailing_silence_bytes = 0
+            speech_buffer.append(arr)
+        elif speech_seen:
+            trailing_silence_bytes += len(chunk_bytes)
+            speech_buffer.append(arr)
+            if trailing_silence_bytes >= trailing_bytes:
+                break
+
+    if not speech_seen:
+        return
+
+    total_speech = np.concatenate(speech_buffer)
+    if len(total_speech) < min_speech_bytes:
+        return
+    yield total_speech
+
 
 def transcribe(audio_path: str | Path) -> dict:
-    """Transcribe a short voice-command clip.
+    """Transcribe a short voice-command clip from a WAV file.
 
     Tuned for ~2s English command audio:
       - language="en" — skip Whisper's language-detect pass (~200ms saved,
         avoids occasional misidentification on noisy short clips).
-      - beam_size=1 — greedy decoding. Beam search helps with long-form
-        audio; for 1-3 word commands it's strictly slower with no gain.
-      - vad_filter=True — drop silence/noise around the spoken bit so the
-        decoder only sees the audio that matters. Big speedup when the user
-        speaks for <1s inside a 2.5s capture window.
-      - initial_prompt — biases decoding toward command vocabulary so
-        "lock" doesn't come through as "luck" / "next" as "neck", etc.
+      - beam_size=1 — greedy decoding.
+      - vad_filter=True — drop silence/noise around the spoken bit.
+      - initial_prompt — biases decoding toward command vocabulary.
     """
     model = get_model()
     segments, info = model.transcribe(
@@ -62,18 +130,45 @@ def transcribe(audio_path: str | Path) -> dict:
         initial_prompt=_COMMAND_PROMPT,
     )
 
+    return _collect_segments(segments, info)
+
+
+def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:
+    """Transcribe a numpy audio array directly — no temp file needed."""
+    model = get_model()
+    segments, info = model.transcribe(
+        audio,
+        language="en",
+        beam_size=1,
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 300},
+        initial_prompt=_COMMAND_PROMPT,
+    )
+    return _collect_segments(segments, info)
+
+
+def transcribe_stream(
+    chunk_iterable: Generator[bytes, None, None],
+    sample_rate: int = 16000,
+) -> dict:
+    """Transcribe streaming audio chunks directly — no temp file, no pre-capture.
+
+    Uses silero-vad for accurate endpointing, then passes the clean
+    speech segment to faster-whisper for transcription.
+    """
+    for speech_arr in _filter_speech_chunks(chunk_iterable, sample_rate):
+        return transcribe_array(speech_arr, sample_rate)
+    return {"text": "", "language": "en", "language_probability": 1.0, "duration_sec": 0.0}
+
+
+def _collect_segments(segments, info) -> dict:
+    """Filter and collect Whisper segments into a result dict."""
     valid_segments = []
     for seg in segments:
-        # Filter out segments that are likely noise or hallucinations.
-        # avg_logprob: higher is better (0 is perfect, -1 is okay, -3 is bad).
-        # no_speech_prob: lower is better (0 is speech, 1 is noise).
         if seg.no_speech_prob > 0.6 or seg.avg_logprob < -1.5:
             continue
-            
+
         cleaned = seg.text.strip()
-        # Whisper often hallucinations "Thank you." or "you" when it hears
-        # static/noise. If the segment is extremely short and low confidence,
-        # drop it.
         if cleaned.lower() in ["thank you.", "you", "thanks.", "bye."]:
             if seg.avg_logprob < -0.5:
                 continue

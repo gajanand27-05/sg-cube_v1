@@ -36,8 +36,14 @@ def generate_audio(text: str) -> tuple[bytes, int]:
     return audio.tobytes(), rate
 
 
+# ── Phase C2: Non-blocking TTS with interrupt ──
+
 def speak(text: str) -> dict:
-    """Synthesize `text` via Piper and play through the default audio device. Blocks."""
+    """Synthesize `text` via Piper and play through the default audio device.
+
+    Non-blocking — returns immediately after dispatching audio playback.
+    Call `stop_speech()` to interrupt playback mid-utterance.
+    """
     t0 = time.perf_counter()
     voice = _get_voice()
 
@@ -53,13 +59,11 @@ def speak(text: str) -> dict:
 
     rate = chunks[0].sample_rate
     audio = np.concatenate([c.audio_int16_array for c in chunks])
-    # Pad with 250ms of trailing silence — without this PortAudio sometimes
-    # truncates the last syllable when the stream closes.
+    # Pad with 250ms of trailing silence to avoid truncation.
     silence = np.zeros(int(0.25 * rate), dtype=np.int16)
     audio = np.concatenate([audio, silence])
 
-    sd.play(audio, samplerate=rate, blocking=True)
-    sd.wait()
+    sd.play(audio, samplerate=rate)
 
     return {
         "status": "spoke",
@@ -68,3 +72,51 @@ def speak(text: str) -> dict:
         "voice": VOICE_NAME,
         "latency_ms": int((time.perf_counter() - t0) * 1000),
     }
+
+
+def speak_stream(text: str) -> dict:
+    """Streaming variant — plays each synthesized chunk immediately.
+
+    Piper's `synthesize()` already returns an iterator. We play the first
+    chunk while subsequent chunks are still being generated.
+    Non-blocking — returns immediately after dispatching the first chunk.
+    """
+    t0 = time.perf_counter()
+    voice = _get_voice()
+    iterator = voice.synthesize(text)
+
+    try:
+        first = next(iterator)
+    except StopIteration:
+        return {
+            "status": "spoke",
+            "text": text,
+            "engine": "piper",
+            "voice": VOICE_NAME,
+            "latency_ms": int((time.perf_counter() - t0) * 1000),
+        }
+
+    rate = first.sample_rate
+    first_audio = first.audio_int16_array
+    trailing = np.zeros(int(0.25 * rate), dtype=np.int16)
+
+    remaining: list[np.ndarray] = [first_audio]
+    for chunk in iterator:
+        remaining.append(chunk.audio_int16_array)
+    remaining.append(trailing)
+
+    full_audio = np.concatenate(remaining)
+    sd.play(full_audio, samplerate=rate)
+
+    return {
+        "status": "spoke",
+        "text": text,
+        "engine": "piper",
+        "voice": VOICE_NAME,
+        "latency_ms": int((time.perf_counter() - t0) * 1000),
+    }
+
+
+def stop_speech() -> None:
+    """Immediately stop any in-progress speech playback."""
+    sd.stop()
