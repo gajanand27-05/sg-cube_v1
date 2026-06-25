@@ -284,7 +284,16 @@ def _read_notes(_m: re.Match) -> Intent:
 
 
 def _set_reminder(m: re.Match) -> Intent:
-    text = m.group("text") or m.group("what") or ""
+    text = ""
+    try:
+        text = m.group("text") or ""
+    except IndexError:
+        pass
+    if not text:
+        try:
+            text = m.group("what") or ""
+        except IndexError:
+            pass
     return Intent(action="set_reminder", target=text.strip())
 
 
@@ -364,6 +373,10 @@ RULES: list[RuleEntry] = [
     (re.compile(r"^search\s+(?:for\s+)?(?P<query>.+)$"), _search_google),
     (re.compile(r"^play\s+(?P<query>.+)$"), _play_youtube),
 
+    # ── URL (before app management so "open github.com" doesn't match open_app) ──
+    (re.compile(r"^(?:open|go\s+to)\s+(?P<url>(?:https?://)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?::\d{1,5})?(?:/[^\s]*)?)$"), _open_url),
+    (re.compile(r"^(?P<url>(?:https?://)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?::\d{1,5})?(?:/[^\s]*)?)$"), _open_url),
+
     # ── App management ──
     (re.compile(r"^(?:open|launch|start)\s+(?P<app>.+?)$"), _open_app),
     (re.compile(r"^(?:close|quit|exit|kill)\s+(?P<app>.+?)$"), _close_app),
@@ -391,7 +404,7 @@ RULES: list[RuleEntry] = [
     (re.compile(r"^(?:what(?:'s| is)?\s+(?:the\s+)?forecast(?:\s+(?:in|for|at)\s+(?P<location>.+?))?|forecast\s+(?:in|for|at)\s+(?P<location2>.+?))$"), _get_weather_forecast),
 
     # ── News ──
-    (re.compile(r"^(?:what(?:'s| is)?\s+(?:the\s+)?(?:news|headlines)(?:\s+(?:about|on|for)\s+(?P<topic>.+?))?|(?:get|show)\s+(?:me\s+)?(?:the\s+)?(?:news|headlines)(?:\s+(?:about|on|for)\s+(?P<topic2>.+?))?)$"), _get_news),
+    (re.compile(r"^(?:what(?:'s| is)?\s+(?:the\s+)?(?:news|headlines)(?:\s+(?:about|on|for)\s+(?P<topic>.+?))?|(?:get|show)\s+(?:me\s+)?(?:the\s+)?(?:news|headlines)(?:\s+(?:about|on|for)\s+(?P<topic2>.+?))?|(?:news|headlines)\s+(?:about|on|for)\s+(?P<topic3>.+?))$"), _get_news),
 
     # ── System power ──
     (re.compile(r"^(?:shutdown|shut\s+down|power\s+off|turn\s+off)\s*(?:the\s+)?(?:computer|pc)?$"), _shutdown),
@@ -408,8 +421,8 @@ RULES: list[RuleEntry] = [
     (re.compile(r"^(?:take\s+a\s+)?screenshot(?:\s+of\s+(?P<region>screen|window|area))?$"), _screenshot),
 
     # ── Notes ──
-    (re.compile(r"^(?:take\s+a\s+)?note\s+(?P<note>.+)$"), _take_note),
-    (re.compile(r"^(?:take\s+a\s+)?note$"), _read_notes),
+    (re.compile(r"^(?:take\s+(?:a\s+)?)?note\s+(?P<note>.+)$"), _take_note),
+    (re.compile(r"^(?:take\s+(?:a\s+)?)?note$"), _read_notes),
     (re.compile(r"^(?:read|show|get)\s+(?:my\s+)?notes$"), _read_notes),
     (re.compile(r"^open\s+(?:my\s+)?notes$"), _read_notes),
 
