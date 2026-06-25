@@ -1,0 +1,6 @@
+{
+  "plugin": [
+    "@dietrichgebert/ponytail",
+    "./.opencode/plugins/ponytail.mjs"
+  ]
+}
