@@ -238,8 +238,11 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
         state_manager.transition_to(AssistantState.IDLE)
         return False
 
+    # Normalize int16 → float32 for Whisper
+    audio_float = arr.astype(np.float32) / 32768.0
+
     try:
-        stt = transcribe_array(arr, SAMPLE_RATE)
+        stt = transcribe_array(audio_float, SAMPLE_RATE)
         command = (stt.get("text") or "").strip()
         print(f"[command] {command!r}")
 

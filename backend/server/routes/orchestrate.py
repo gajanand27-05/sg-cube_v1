@@ -16,7 +16,7 @@ class ProcessRequest(BaseModel):
 
 
 @router.post("/orchestrate/process")
-def process(
+async def process(
     body: ProcessRequest,
     user: Annotated[dict, Depends(get_any_user)],
 ):
@@ -24,7 +24,7 @@ def process(
         raise HTTPException(status_code=400, detail="text must not be empty")
 
     try:
-        result = process_input(body.text, user["profile"]["id"])
+        result = await process_input(body.text, user["profile"]["id"])
     except LLMResolveError as e:
         raise HTTPException(status_code=502, detail=f"LLM unavailable: {e}")
 
@@ -32,7 +32,7 @@ def process(
 
 
 @router.post("/chat")
-def chat(
+async def chat(
     body: ProcessRequest,
     user: Annotated[dict, Depends(get_any_user)],
 ):
@@ -40,7 +40,7 @@ def chat(
         raise HTTPException(status_code=400, detail="text must not be empty")
 
     try:
-        result = process_input(body.text, user["profile"]["id"])
+        result = await process_input(body.text, user["profile"]["id"])
     except LLMResolveError as e:
         return {"response": f"LLM unavailable: {e}", "status": "error"}
 

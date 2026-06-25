@@ -16,7 +16,7 @@ DEFAULT_MODEL = "vosk-model-small-en-us-0.15"
 # VAD tuning for command capture. RMS values are int16-amplitude scaled
 # (full-scale = 32768). 400 is well above mic noise floor on consumer
 # laptops but below normal speech (~1500-3000).
-_VAD_RMS_THRESHOLD = 400
+_VAD_RMS_THRESHOLD = 50  # ponytail: lowered from 400 for quieter mics
 _VAD_TRAILING_SILENCE_MS = 800  # stop after this much silence post-speech
 _VAD_MAX_CAPTURE_S = 10.0  # hard cap so a stuck mic doesn't hang forever
 _VAD_INITIAL_WAIT_S = 3.0  # how long to wait for the user to start speaking
