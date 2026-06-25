@@ -137,6 +137,14 @@ class Runtime:
                 }
             ))
             
+            # Phase G2: Track tool usage for diagnostics heatmap
+            try:
+                from backend.server.routes.diagnostics import record_tool_usage
+                success = task.result is not None and task.result.status == ToolStatus.SUCCESS
+                record_tool_usage(name, success, latency)
+            except Exception:
+                pass
+
             # Clean up (optionally keep for history)
             # del self._tasks[task_id]
             
