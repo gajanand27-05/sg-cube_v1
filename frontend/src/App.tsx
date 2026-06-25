@@ -6,7 +6,6 @@ import { Header } from '@/components/Header'
 import { Footer } from '@/components/Footer'
 import { Dashboard } from '@/pages/Dashboard'
 import { Chat } from '@/pages/Chat'
-import { Voice } from '@/pages/Voice'
 import { Vision } from '@/pages/Vision'
 import { Memory } from '@/pages/Memory'
 import { Agents } from '@/pages/Agents'
@@ -32,7 +31,6 @@ function App() {
             <Routes>
               <Route path="/" element={<Dashboard status={status} systemStats={systemStats} />} />
               <Route path="/chat" element={<Chat status={status} />} />
-              <Route path="/voice" element={<Voice status={status} />} />
               <Route path="/vision" element={<Vision />} />
               <Route path="/memory" element={<Memory />} />
               <Route path="/agents" element={<Agents />} />
