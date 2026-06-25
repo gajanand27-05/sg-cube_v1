@@ -26,6 +26,22 @@
     --input: 200 50% 20%;
     --ring: 186 100% 50%;
     --radius: 0.25rem;
+
+    /* SG CUBE raw color variables for SVGs and App.css */
+    --sgc-bg: #000000;
+    --sgc-panel: rgba(0,5,10,0.85);
+    --sgc-primary: #00f3ff;
+    --sgc-secondary: #00aaff;
+    --sgc-dim: #005577;
+    --sgc-bright: #ffffff;
+    --sgc-border: #005577;
+    --sgc-border-bright: #00f3ff;
+    --border-bright: #00f3ff; /* Alias for older styles */
+    --text-dim: #005577; /* Alias for older styles */
+    --text-primary: #00f3ff; /* Alias for older styles */
+    --text-bright: #ffffff; /* Alias for older styles */
+    --text-secondary: #00aaff; /* Alias for older styles */
+    --warn: #ffb700;
   }
 
   * {

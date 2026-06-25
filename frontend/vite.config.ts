@@ -22,10 +22,10 @@ export default defineConfig({
       '/files': 'http://127.0.0.1:8001',
       '/agents': 'http://127.0.0.1:8001',
       '/system': 'http://127.0.0.1:8001',
-      '/ws': {
-        target: 'ws://127.0.0.1:8001',
-        ws: true,
-      },
+    '/ws': {
+      target: 'http://127.0.0.1:8001',
+      ws: true,
+    },
     },
   },
 })

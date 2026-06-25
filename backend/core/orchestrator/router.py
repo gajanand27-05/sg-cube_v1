@@ -3,7 +3,7 @@ import time
 
 from pydantic import BaseModel
 
-from backend.core.agent import agent as agent_module
+from backend.core.agents.commander import commander as agent_module
 from backend.core.agent.context import get_context
 from backend.core.orchestrator import cache_layer, rule_engine
 from backend.core.orchestrator.llm_layer import Intent, LLMResolveError

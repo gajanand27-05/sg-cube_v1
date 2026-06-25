@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion'
 import type { AssistantStatus, SystemStats } from '@/hooks/useWebSocket'
 
 interface Props {
@@ -93,15 +92,15 @@ export function Dashboard({ systemStats }: Props) {
       {/* Right: HUD rings + cube */}
       <div className="w-[400px] flex items-center justify-center relative overflow-hidden">
         <svg viewBox="0 0 500 500" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
-          <circle cx="250" cy="250" r="230" fill="none" stroke="var(--sgc-dim)" strokeWidth="1" opacity="0.3" strokeDasharray="1 10" className="animate-spin-slow" />
+          <circle cx="250" cy="250" r="230" fill="none" stroke="var(--sgc-dim)" strokeWidth="1" opacity="0.3" strokeDasharray="1 10" className="animate-spin-slow origin-center" />
           <circle cx="250" cy="250" r="220" fill="none" stroke="var(--sgc-border-bright)" strokeWidth="1" opacity="0.2" strokeDasharray="5 15" />
-          <circle cx="250" cy="250" r="200" fill="none" stroke="var(--sgc-border-bright)" strokeWidth="4" opacity="0.4" strokeDasharray="2 6" className="animate-spin-slow" style={{ animationDirection: 'reverse' }} />
+          <circle cx="250" cy="250" r="200" fill="none" stroke="var(--sgc-border-bright)" strokeWidth="4" opacity="0.4" strokeDasharray="2 6" className="animate-spin-slow origin-center" style={{ animationDirection: 'reverse' }} />
           <circle cx="250" cy="250" r="200" fill="none" stroke="var(--sgc-border-bright)" strokeWidth="1" opacity="0.3" />
           <circle cx="250" cy="250" r="180" fill="none" stroke="var(--sgc-border-bright)" strokeWidth="2" opacity="0.1" />
-          <circle cx="250" cy="250" r="175" fill="none" stroke="var(--sgc-bright)" strokeWidth="1" opacity="0.3" strokeDasharray="20 40" className="animate-spin-slow" />
-          <circle cx="250" cy="250" r="150" fill="none" stroke="var(--sgc-border-bright)" strokeWidth="3" opacity="0.8" strokeDasharray="80 20 10 20 40 20" className="animate-spin-slow" />
+          <circle cx="250" cy="250" r="175" fill="none" stroke="var(--sgc-bright)" strokeWidth="1" opacity="0.3" strokeDasharray="20 40" className="animate-spin-slow origin-center" />
+          <circle cx="250" cy="250" r="150" fill="none" stroke="var(--sgc-border-bright)" strokeWidth="3" opacity="0.8" strokeDasharray="80 20 10 20 40 20" className="animate-spin-slow origin-center" />
           <circle cx="250" cy="250" r="145" fill="none" stroke="var(--sgc-border-bright)" strokeWidth="1" opacity="0.5" />
-          <circle cx="250" cy="250" r="120" fill="none" stroke="var(--sgc-primary)" strokeWidth="1" opacity="0.6" strokeDasharray="10 5" className="animate-spin-slow" style={{ animationDirection: 'reverse' }} />
+          <circle cx="250" cy="250" r="120" fill="none" stroke="var(--sgc-primary)" strokeWidth="1" opacity="0.6" strokeDasharray="10 5" className="animate-spin-slow origin-center" style={{ animationDirection: 'reverse' }} />
           <line x1="250" y1="0" x2="250" y2="30" stroke="var(--sgc-border-bright)" strokeWidth="2" opacity="0.8" />
           <line x1="250" y1="470" x2="250" y2="500" stroke="var(--sgc-border-bright)" strokeWidth="2" opacity="0.8" />
           <line x1="0" y1="250" x2="30" y2="250" stroke="var(--sgc-border-bright)" strokeWidth="2" opacity="0.8" />
@@ -111,33 +110,17 @@ export function Dashboard({ systemStats }: Props) {
           <path d="M 100 400 L 120 400 M 100 400 L 100 380" fill="none" stroke="var(--sgc-border-bright)" strokeWidth="2" opacity="0.6" />
           <path d="M 400 400 L 380 400 M 400 400 L 400 380" fill="none" stroke="var(--sgc-border-bright)" strokeWidth="2" opacity="0.6" />
         </svg>
-        <div className="absolute" style={{ perspective: '400px' }}>
-          <motion.div
-            className="relative w-24 h-24"
-            style={{ transformStyle: 'preserve-3d' }}
-            animate={{ rotateX: -20, rotateY: [0, -360] }}
-            transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
-          >
-            {['front', 'back', 'right', 'left', 'top', 'bottom'].map((face) => {
-              const transforms: Record<string, string> = {
-                front: 'translateZ(48px)',
-                back: 'rotateY(180deg) translateZ(48px)',
-                right: 'rotateY(90deg) translateZ(48px)',
-                left: 'rotateY(-90deg) translateZ(48px)',
-                top: 'rotateX(90deg) translateZ(48px)',
-                bottom: 'rotateX(-90deg) translateZ(48px)',
-              };
-              return (
-                <div
-                  key={face}
-                  className="absolute inset-0 border border-sgc-border-bright bg-[rgba(0,243,255,0.05)] flex items-center justify-center font-sans font-bold text-sm tracking-[3px]"
-                  style={{ transform: transforms[face], backfaceVisibility: 'hidden' }}
-                >
-                  {face === 'front' || face === 'back' ? 'SG' : face === 'right' || face === 'left' ? 'CUBE' : ''}
-                </div>
-              );
-            })}
-          </motion.div>
+        <div className="absolute" style={{ perspective: '1200px' }}>
+          <div className="cube-container">
+            <div className="cube">
+               <div className="face front">SG</div>
+               <div className="face back">SG</div>
+               <div className="face right">CUBE</div>
+               <div className="face left">CUBE</div>
+               <div className="face top"></div>
+               <div className="face bottom"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
