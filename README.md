@@ -1,7 +1,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12+-blue?style=for-the-badge&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/platform-windows-lightgrey?style=for-the-badge&logo=windows&logoColor=white" />
-  <img src="https://img.shields.io/badge/LLM-Ollama-orange?style=for-the-badge&logo=ollama&logoColor=white" />
+  <img src="https://img.shields.io/badge/LLM-OpenRouter-FF6600?style=for-the-badge&logo=openai&logoColor=white" />
+  <img src="https://img.shields.io/badge/local--phi3-777?style=for-the-badge" />
   <img src="https://img.shields.io/badge/STT-faster--whisper-9cf?style=for-the-badge" />
   <img src="https://img.shields.io/badge/TTS-Piper-ff69b4?style=for-the-badge" />
   <img src="https://img.shields.io/badge/frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=white" />
@@ -19,7 +20,7 @@
 </h3>
 
 <p align="center">
-  <b>Your AI assistant that sees your screen, hears your voice, remembers everything — and never touches the cloud.</b>
+  <b>Your AI assistant that sees your screen, hears your voice, remembers everything — cloud-powered agent, local privacy for voice &amp; vision.</b>
 </p>
 
 <br/>
@@ -207,7 +208,7 @@ backend/
 │   ├── orchestrator/ # Cache → Rules → LLM router
 │   ├── mcp_server.py # MCP protocol (SSE + client)
 │   └── plugins/      # User-plugins (auto-discovered)
-├── ai_modules/       # LLM client, STT, TTS, LiveKit worker
+├── ai_modules/       # LLM (OpenRouter client + Ollama), STT, TTS, LiveKit worker
 └── database/         # ChromaDB + Supabase + migrations
 frontend/
 ├── src/
@@ -244,5 +245,5 @@ All phases A–G covered (35 tests passing).
 ---
 
 <p align="center">
-  <sub>built with ⚡ — entirely offline, entirely yours</sub>
+  <sub>agent model via OpenRouter — voice, vision &amp; memory stay local</sub>
 </p>
