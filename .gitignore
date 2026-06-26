@@ -52,6 +52,9 @@ Thumbs.db
 .claude/
 GEMINI.md
 
+# opencode local config — not for the repo
+.opencode/
+
 # Build / dist
 build/
 dist/
