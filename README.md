@@ -31,99 +31,31 @@
 ## ▸ System Architecture
 
 ```mermaid
-graph TB
-    subgraph User["👤 User"]
-        V[🎤 Voice]
-        T[⌨️ Text]
+flowchart TB
+    V["🎤 Voice"] --> WW["Wake Word\nWhisper/Vosk"]
+    WW --> STT["STT\nfaster-whisper"]
+    STT --> ROUTER
+
+    T["⌨️ Text"] --> UI["Web Dashboard\nReact + Tailwind"]
+    UI -->|WS| API["FastAPI\n:8001"]
+    UI -.->|REST| API
+    API --> ROUTER
+
+    subgraph ROUTER["🔀 3-Tier Router"]
+        direction LR
+        CACHE[Cache] --> RULE[Rules] --> LLM[LLM]
     end
-
-    subgraph Frontend["🌐 Web Dashboard"]
-        REACT[React 19 + TS 6]
-        TW[Tailwind + shadcn/ui]
-        ZS[Zustand Store]
-        FM[Framer Motion]
-        WS[WebSocket Client]
-    end
-
-    subgraph Backend["⚡ FastAPI Server :8001"]
-        R[Routes / REST]
-        WSE[WebSocket /ws/ui]
-        AUTH[Supabase JWT]
-    end
-
-    subgraph Daemon["🧠 Daemon Services"]
-        WW[Wake Word<br/>Whisper/Vosk]
-        STT[faster-whisper<br/>+ silero-VAD]
-        TTS[Piper TTS]
-        VISION[Vision Loop<br/>screen cap + VLM]
-        CB[Clipboard Watcher]
-        TEL[Telemetry]
-    end
-
-    subgraph Router["🔀 3-Tier Router"]
-        CACHE[Cache Layer<br/>fuzzy match]
-        RULE[Rule Engine<br/>40+ patterns]
-        LLM[LLM Agent<br/>gemma4:12b]
-    end
-
-    subgraph Agent["🤖 Agent Pipeline"]
-        SCH[Scholar<br/>context injection]
-        PLA[Planner<br/>multi-step plan]
-        GUA[Guardian<br/>safety check]
-        OPR[Operator<br/>tool execution]
-        HLR[Healer<br/>error recovery]
-    end
-
-    subgraph Tools["🔧 Tool System"]
-        SYS[System · Volume<br/>Brightness · Power]
-        FILE[File Ops · Search<br/>Read · Write]
-        WEB[Weather · News<br/>Stocks · Wikipedia]
-        MEDIA[YouTube · Email<br/>Reminders · Notes]
-        AI[OCR · Summarize<br/>Translate · Read Aloud]
-        FUN[Games · Jokes<br/>Dice · Trivia]
-    end
-
-    subgraph Memory["💾 Memory Layer"]
-        LT[ChromaDB<br/>Long-term]
-        EP[Episodic<br/>Summaries]
-        ST[Short-term]
-        SCR[Screen Memory]
-        TIM[Timeline]
-    end
-
-    subgraph MCP["🔌 MCP Protocol"]
-        SRV[MCP SSE Server]
-        CLI[MCP Client]
-    end
-
-    V --> WW
-    T --> Frontend
-    Frontend --> WS
-    WS --> WSE
-    Frontend -.-> R
-    R --> AUTH
-    WSE --> TEL
-
-    WW --> STT
-    STT --> Router
-    R --> Router
-
-    CACHE --> RULE --> LLM
 
     LLM --> SCH --> PLA --> GUA --> OPR --> HLR
     HLR -.->|retry| PLA
 
-    OPR --> Tools
-    OPR --> MCP
-    SRV --> Tools
-    MCP --> CLI
+    OPR --> TOOLS["🔧 70+ Tools\nsys · files · web · media · AI · games"]
+    OPR --> MCP["🔌 MCP\nSSE + Client"]
+    TOOLS --> TTS["Piper TTS"] -.-> V
 
-    SCH -.-> Memory
-    VISION -.-> SCR
-    CB -.-> ST
-
-    Tools --> TTS
-    TTS -.-> V
+    SCH -.-> MEM["💾 Memory\nChromaDB + in-memory"]
+    VL["👁️ Vision Loop"] -.-> MEM
+    CLIP["📋 Clipboard"] -.-> MEM
 ```
 
 ---
@@ -132,38 +64,13 @@ graph TB
 
 ```mermaid
 flowchart LR
-    subgraph Input["🎤 Audio In"]
-        direction LR
-        MIC[Microphone] --> VAD[Voice Activity<br/>Detection]
-    end
-
-    subgraph Processing["⚙️ Processing"]
-        direction LR
-        VAD --> WW[Wake Word<br/>Whisper/Vosk]
-        WW --> STT[Speech-to-Text<br/>faster-whisper]
-    end
-
-    subgraph Routing["🧭 Intent Resolution"]
-        direction TB
-        STT --> CACHE[(Cache<br/>fuzzy match)]
-        CACHE -->|miss| RULE[Rule Engine<br/>regex patterns]
-        RULE -->|fallthrough| LLM[LLM Agent<br/>gemma4:12b]
-    end
-
-    subgraph Output["🔊 Audio Out"]
-        direction LR
-        TTS[Piper TTS] --> SPEAKER[Speaker]
-    end
-
-    MIC --> VAD
-    LLM --> TTS
-    RULE --> TTS
+    MIC[🎤 Mic] --> VAD[VAD] --> WW[Wake Word] --> STT[Whisper]
+    STT --> CACHE{Match?}
+    CACHE -->|miss| RULE[Rules] --> LLM[LLM]
     CACHE -->|hit| TTS
-
-    style Input fill:#1a1a2e,stroke:#e94560,stroke-width:2px
-    style Processing fill:#16213e,stroke:#0f3460,stroke-width:2px
-    style Routing fill:#0f3460,stroke:#533483,stroke-width:2px
-    style Output fill:#1a1a2e,stroke:#e94560,stroke-width:2px
+    RULE --> TTS
+    LLM --> TTS
+    TTS[Piper TTS] --> SP[🔊 Speaker]
 ```
 
 ---
@@ -172,27 +79,13 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    START([Request]) --> SCH[Scholar]
-    SCH -->|"injects memory + context"| PLA[Planner]
-
-    PLA -->|"generates tool plan"| GUA{Guardian}
-
-    GUA -->|"❌ unsafe"| PLA
-    GUA -->|"✅ safe"| OPR[Operator]
-
-    OPR -->|"execute tool"| TOOL{System Tool}
-    TOOL -->|"⚠️ error"| HLR[Healer]
-    TOOL -->|"✅ success"| RESP[Response]
-
-    HLR -->|"analyzes failure"| PLA
-
-    RESP --> DONE([Spoken + Dashboard])
-
-    style SCH fill:#2d3436,stroke:#636e72,color:#fff
-    style PLA fill:#2d3436,stroke:#0984e3,color:#fff
-    style GUA fill:#2d3436,stroke:#fdcb6e,color:#fff
-    style OPR fill:#2d3436,stroke:#00b894,color:#fff
-    style HLR fill:#2d3436,stroke:#e17055,color:#fff
+    REQ[Request] --> SCH[Scholar] -->|inject context| PLA[Planner]
+    PLA --> GUA{Guardian}
+    GUA -->|unsafe| PLA
+    GUA -->|safe| OPR[Operator]
+    OPR -->|execute| RES{Result}
+    RES -->|error| HLR[Healer] --> PLA
+    RES -->|ok| DONE[Done]
 ```
 
 ---
