@@ -43,7 +43,7 @@ flowchart TB
 
     subgraph ROUTER["🔀 3-Tier Router"]
         direction LR
-        CACHE[Cache] --> RULE[Rules] --> LLM[LLM]
+        CACHE[Cache] --> RULE[Rules] -->         LLM[OpenRouter Cloud]
     end
 
     LLM --> SCH --> PLA --> GUA --> OPR --> HLR
@@ -99,7 +99,8 @@ flowchart TB
 | **Text-to-Speech** | Piper neural TTS | ✅ |
 | **Voice Pipeline** | Local (default) or LiveKit streaming | ✅ |
 | **Intent Routing** | 3-tier: Cache → Regex Rules (~40) → LLM | ✅ |
-| **LLM Backend** | Ollama — gemma4:12b / phi3 | ✅ |
+| **Agent LLM** | OpenRouter — Qwen3 Coder 480B (cloud) | ✅ |
+| **Intent Classifier** | Ollama — phi3 (local, lightweight) | ✅ |
 | **Vision** | Periodic screen capture + Qwen2.5-VL | ✅ |
 | **Memory** | ChromaDB (long-term/episodic) + in-memory (short-term/timeline/screen) | ✅ |
 | **Agent Pipeline** | Scholar → Planner → Guardian → Operator → Healer | ✅ |
@@ -128,10 +129,9 @@ flowchart TB
 ### Setup
 
 ```bash
-# 1. Pull LLM models
-ollama pull gemma2:2b       # tool-calling agent
-ollama pull qwen2.5-vl      # vision model
-ollama pull nomic-embed-text # embedding model
+# 1. Pull local models (intent classifier + embeddings)
+ollama pull phi3
+ollama pull nomic-embed-text
 
 # 2. Python environment
 python -m venv .venv
@@ -144,6 +144,7 @@ python tools/download_piper_voice.py
 
 # 4. Configure
 copy .env.example .env
+# Set OPENROUTER_API_KEY in .env (get one at https://openrouter.ai/keys)
 ```
 
 ### Run
@@ -174,8 +175,9 @@ python -m backend.daemon.main   # FastAPI auto-serves built frontend
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `APP_HOST` / `APP_PORT` | `127.0.0.1` / `8000` | Web server bind address |
-| `OLLAMA_MODEL` | `phi3` | Fast intent classifier model |
-| `AGENT_MODEL` | `gemma4:12b` | Tool-calling agent model |
+| `OPENROUTER_API_KEY` | — | Cloud LLM key (get at openrouter.ai/keys) |
+| `OPENROUTER_MODEL` | `qwen/qwen3-coder-480b-a35b` | Agent model |
+| `OLLAMA_MODEL` | `phi3` | Local intent classifier (lightweight) |
 | `WHISPER_MODEL` | `base` | STT model size (tiny/base/small) |
 | `VOICE_PIPELINE` | `local` | `local` or `livekit` |
 

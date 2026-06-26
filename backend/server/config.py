@@ -25,7 +25,12 @@ class Settings(BaseSettings):
     agent_model: str = "gemma4:12b"  # heavier tool-calling agent
     embedding_model: str = "nomic-embed-text"
     vlm_model: str = "qwen2.5vl:3b"
-    whisper_model: str = "small"  # ~half the WER of "base" with VAD/greedy keeping latency ~1s
+    whisper_model: str = "small"
+
+    # ── OpenRouter (cloud LLM) ──
+    openrouter_api_key: str = ""
+    openrouter_model: str = "qwen/qwen3-coder-480b-a35b"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     # ── Phase C3: LiveKit optional voice pipeline ──
     voice_pipeline: str = "local"  # "local" | "livekit"

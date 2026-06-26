@@ -1,14 +1,10 @@
-import asyncio
 import json
-from typing import Any, List
 
-import httpx
-
+from backend.ai_modules.llm import openrouter_client
 from backend.core.agents.base import BaseInternalAgent, TokenStreamEvent
 from backend.core.events import bus
 from backend.core.tools.registry import schemas_prompt
 from backend.daemon.ui_events import AgentThinkingEvent
-from backend.server.config import settings
 
 
 class PlannerAgent(BaseInternalAgent):
@@ -24,43 +20,22 @@ class PlannerAgent(BaseInternalAgent):
         prompt = self._build_prompt(memory_context)
         messages = [{"role": "system", "content": prompt}, *history]
 
-        url = f"{settings.ollama_url.rstrip('/')}/api/chat"
-        payload = {
-            "model": settings.agent_model,
-            "messages": messages,
-            "stream": True,  # Enable streaming
-            "format": "json",
-            "options": {"temperature": 0.2},
-        }
-
         full_content = ""
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                async with client.stream("POST", url, json=payload) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if not line: continue
-                        body = json.loads(line)
-                        token = body.get("message", {}).get("content", "")
-                        full_content += token
-                        
-                        # Emit streaming event
-                        bus.publish(TokenStreamEvent(self.name, token, full_content))
-                        
-                        if body.get("done"): break
+            async for chunk in openrouter_client.chat_stream(messages, json_mode=True, temperature=0.2):
+                token = chunk["token"]
+                full_content += token
+                bus.publish(TokenStreamEvent(self.name, token, full_content))
 
             parsed = json.loads(full_content)
-            
-            # If it's a final response, return the whole dict for Commander to handle
+
             if "final_response" in parsed:
                 return parsed
 
-            # Basic normalization for tool calls
             calls = parsed.get("tool_calls") or parsed.get("toolCalls") or []
             if not isinstance(calls, list):
                 calls = [parsed] if "name" in parsed else []
 
-            # Create readable steps for the UI Observability Dashboard
             steps = [c.get("reasoning", c.get("name")) for c in calls]
             self._emit("plan_ready", tool_count=len(calls), steps=steps)
             return calls
