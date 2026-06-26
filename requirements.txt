@@ -2,8 +2,8 @@
 # Phase 3 (Whisper STT), Phase 4 (Ollama HTTP), Phase 7 (pyttsx3) added later.
 
 # ── Phase 1: server core ──
-fastapi==0.115.5
-uvicorn[standard]==0.32.1
+fastapi==0.138.1
+uvicorn[standard]==0.49.0
 pydantic==2.10.3
 pydantic-settings==2.7.0
 python-dotenv==1.0.1

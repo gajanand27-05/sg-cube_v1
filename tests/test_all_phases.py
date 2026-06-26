@@ -278,9 +278,10 @@ def test_phase_e_mcp_server_creation():
 def test_phase_e_mcp_app_mounted():
     """MCP app should be mountable in FastAPI."""
     from backend.server.main import app
-    # Check if /mcp route is mounted
-    routes = [r.path for r in app.routes]
-    has_mcp = any("/mcp" in r for r in routes)
+    has_mcp = any(
+        "/mcp" in (getattr(r, "path", "") or getattr(r, "prefix", ""))
+        for r in app.routes
+    )
     if has_mcp:
         print("  [PASS] Phase E: MCP mounted in FastAPI")
     else:

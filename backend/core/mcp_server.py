@@ -31,15 +31,10 @@ def get_mcp_server():
     try:
         from fastmcp import FastMCP
 
-        server = FastMCP("SG_CUBE", description="Local-first AI Operating System tools")
+        server = FastMCP("SG_CUBE")
 
         for name, tool_obj in REGISTRY.items():
-            server.add_tool(
-                fn=tool_obj.func,
-                name=name,
-                description=tool_obj.description,
-                parameters=tool_obj.schema.get("parameters", {}),
-            )
+            server.add_tool(tool_obj.func)
 
         _mcp_server = server
         log.info("MCP server created with %d tools", len(REGISTRY))
@@ -57,7 +52,7 @@ def get_mcp_app():
     server = get_mcp_server()
     if server is None:
         return None
-    return server.sse_app()
+    return server.http_app()
 
 
 mcp_app = get_mcp_app()
@@ -112,6 +107,6 @@ if __name__ == "__main__":
     server = get_mcp_server()
     if server:
         log.info("Starting SG_CUBE MCP server on http://0.0.0.0:8002/mcp")
-        server.run(host="0.0.0.0", port=8002, transport="sse")
+        server.run(transport="sse", host="0.0.0.0", port=8002)
     else:
         log.error("Cannot start MCP server: fastmcp not installed")
