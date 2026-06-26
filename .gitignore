@@ -54,6 +54,7 @@ GEMINI.md
 
 # opencode local config — not for the repo
 .opencode/
+AGENTS.md
 
 # Build / dist
 build/
