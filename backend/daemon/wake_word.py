@@ -178,43 +178,34 @@ class WakeWordListener:
                 initial_audio: list[bytes] = []
                 trigger_label = ""
 
-                # Path A: standard wake-word detection via Vosk partial result.
-                # Added RMS check: don't even look at Vosk if the chunk is
-                # near-silent. Prevents "ghost" hits in quiet rooms.
                 arr = np.frombuffer(data, dtype=np.int16)
                 rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) if arr.size else 0
-                
-                if rms > _VAD_RMS_THRESHOLD:
-                    self.recognizer.AcceptWaveform(data)
-                    partial_json = json.loads(self.recognizer.PartialResult())
-                    partial = (partial_json.get("partial") or "").lower()
-                    
-                    # Stricter check: ensure it's a standalone word or at the 
-                    # start/end of the partial to avoid sub-word triggers.
-                    is_match = False
-                    if self.wake_phrase in partial.split():
-                        is_match = True
-                    
-                    if is_match:
-                        trigger = True
-                        trigger_label = f"wake: {partial!r} (rms={rms:.0f})"
-                        self.recognizer.Reset()
-                        empty_in_a_row = 0
-                
-                # Path B: follow-up mode — any speech triggers a capture...
-                elif in_followup:
-                    if rms > _FOLLOWUP_TRIGGER_RMS:
-                        trigger = True
-                        trigger_label = f"followup-speech (rms={rms:.0f})"
-                        initial_audio = [data]
+
+                try:
+                    if rms > _VAD_RMS_THRESHOLD:
+                        self.recognizer.AcceptWaveform(data)
+                        partial_json = json.loads(self.recognizer.PartialResult())
+                        partial = (partial_json.get("partial") or "").lower()
+
+                        if self.wake_phrase in partial.split():
+                            trigger = True
+                            trigger_label = f"wake: {partial!r} (rms={rms:.0f})"
+                            self.recognizer.Reset()
+                            empty_in_a_row = 0
+
+                    elif in_followup:
+                        if rms > _FOLLOWUP_TRIGGER_RMS:
+                            trigger = True
+                            trigger_label = f"followup-speech (rms={rms:.0f})"
+                            initial_audio = [data]
+                except Exception:
+                    continue
 
                 if not trigger:
                     continue
 
                 print(f"[wake] heard {trigger_label}")
                 self._capturing = True
-                # Fire the immediate-feedback callback BEFORE any capture so
-                # the UI lights up the moment we triggered.
                 if self.on_wake_detected is not None:
                     try:
                         self.on_wake_detected()
@@ -223,22 +214,18 @@ class WakeWordListener:
 
                 command_handled = False
                 try:
-                    # Do NOT drain — if the user said wake+command in one
-                    # breath ("onyx open notepad"), the command audio is
-                    # sitting in the queue. _capture will read it first.
                     audio = self._capture(initial=initial_audio)
                     result = self.on_wake(audio)
-                    # on_wake can return True (real command) / False (empty
-                    # or error). Old handlers returning None are treated as
-                    # successful so wake-only mode behaves as before.
                     command_handled = result is None or bool(result)
                 except Exception as e:
                     print(f"[wake] on_wake handler raised: {e}")
                 finally:
-                    self.recognizer.Reset()
+                    try:
+                        self.recognizer.Reset()
+                    except Exception:
+                        pass
                     self._drain()
                     self._capturing = False
-                    # Update follow-up window based on what just happened.
                     if command_handled:
                         empty_in_a_row = 0
                         followup_until = time.monotonic() + _FOLLOWUP_WINDOW_S
@@ -250,8 +237,6 @@ class WakeWordListener:
                             empty_in_a_row = 0
                             print(f"[wake] follow-up closed after {_FOLLOWUP_MAX_EMPTY} empty captures; say {self.wake_phrase!r} again")
                         else:
-                            # Single empty capture — keep the window open but
-                            # don't extend it.
                             print(f"[wake] empty capture ({empty_in_a_row}/{_FOLLOWUP_MAX_EMPTY}); follow-up still open")
 
     def stop(self) -> None:

@@ -320,15 +320,22 @@ def handle_open_app(intent: Intent) -> dict:
 
     # ── Chrome profile branch ──────────────────────────────────────────
     profile_arg = (intent.args or {}).get("profile", "")
-    if profile_arg and ("chrome" in target or "google chrome" in target):
+    if "chrome" in target and profile_arg:
         profiles = _get_chrome_profiles()
         if not profiles:
             return {"status": "error", "reason": "no Chrome profiles found"}
         match = profile_arg.lower()
         dir_name = profiles.get(match)
         if not dir_name:
-            close = ", ".join(sorted(profiles))
-            return {"status": "error", "reason": f"no Chrome profile named '{profile_arg}'. Available: {close}"}
+            # ponytail: auto-resolve generic references to first non-Default profile
+            non_default = {k: v for k, v in profiles.items() if k != "default"}
+            if non_default:
+                best = next(iter(non_default.items()))
+                dir_name = best[1]
+                profile_arg = best[0]
+            else:
+                dir_name = next(iter(profiles.values()))
+                profile_arg = list(profiles.keys())[0]
         try:
             subprocess.Popen(["chrome.exe", f"--profile-directory={dir_name}"])
         except FileNotFoundError:

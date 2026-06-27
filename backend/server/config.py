@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     openrouter_model: str = "qwen/qwen3-coder-480b-a35b"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
+    # ── Gemini (Google AI SDK) ──
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
+
     # ── Phase C3: LiveKit optional voice pipeline ──
     voice_pipeline: str = "local"  # "local" | "livekit"
     livekit_url: str = ""

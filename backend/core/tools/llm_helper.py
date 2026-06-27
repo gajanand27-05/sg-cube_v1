@@ -1,8 +1,8 @@
 """Shared LLM helper for content tools (summarize / translate / explain_code).
 
-Uses OpenRouter cloud model for faster, higher-quality freeform prose.
+Uses Gemini cloud model.
 """
-from backend.ai_modules.llm import openrouter_client
+from backend.ai_modules.llm import gemini_client
 
 
 def llm_generate(prompt: str, *, system: str = "", temperature: float = 0.3, timeout: float = 120.0) -> str:
@@ -10,4 +10,4 @@ def llm_generate(prompt: str, *, system: str = "", temperature: float = 0.3, tim
 
     Returns empty string on error (caller decides how to surface that).
     """
-    return openrouter_client.generate(prompt, system=system, temperature=temperature, timeout=timeout)
+    return gemini_client.generate(prompt, system=system, temperature=temperature)

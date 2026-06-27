@@ -170,6 +170,8 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         bus.publish(err_event)
         _emit(emit, err_event)
         reply = "Sorry, my reasoning model is unavailable"
+        print(f"[ai] LLM unavailable: {e}")
+        print(f"[ai] → {reply}")
 
         state_manager.transition_to(AssistantState.SPEAKING)
         await _speak_selective(reply, device_id)
@@ -179,6 +181,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         state_manager.transition_to(AssistantState.IDLE)
         return False
 
+    print(f"[ai] intent: {routed.intent.action} → {routed.intent.target} ({routed.source_layer})")
     intent_event = IntentResolved(
         action=routed.intent.action,
         target=routed.intent.target,
@@ -195,6 +198,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
     obs_engine.report_tool_quality(request_id, result.confidence, result.status)
     obs_engine.report_latency(request_id, total_latency)
 
+    print(f"[ai] result: {result.status} — {result.message or result.reason or 'ok'}")
     exec_event = Executed(
         command=command,
         status=result.status,

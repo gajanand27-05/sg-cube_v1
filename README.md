@@ -162,6 +162,8 @@ npm run dev
 
 Open **http://localhost:5173** — API at `http://127.0.0.1:8001`.
 
+> **PowerShell users:** type `.\sg_cube` instead of `sg_cube`.
+
 ### Production Build
 
 ```bash

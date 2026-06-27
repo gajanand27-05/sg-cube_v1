@@ -1,6 +1,6 @@
 import json
 
-from backend.ai_modules.llm import openrouter_client
+from backend.ai_modules.llm import gemini_client
 from backend.core.agents.base import BaseInternalAgent, TokenStreamEvent
 from backend.core.events import bus
 from backend.core.tools.registry import schemas_prompt
@@ -22,7 +22,7 @@ class PlannerAgent(BaseInternalAgent):
 
         full_content = ""
         try:
-            async for chunk in openrouter_client.chat_stream(messages, json_mode=True, temperature=0.2):
+            async for chunk in gemini_client.chat_stream(messages, temperature=0.2):
                 token = chunk["token"]
                 full_content += token
                 bus.publish(TokenStreamEvent(self.name, token, full_content))
@@ -46,10 +46,17 @@ class PlannerAgent(BaseInternalAgent):
             bus.publish(AgentThinkingEvent(self.name, False))
 
     def _build_prompt(self, memory_context: str) -> str:
+        from backend.core.safe_executor.command_whitelist import _get_chrome_profiles
+        profiles = _get_chrome_profiles()
+        profile_hint = ""
+        if profiles:
+            names = ", ".join(sorted(profiles))
+            profile_hint = f"\nChrome profiles available: {names}\nIf the user asks about 'my account' or a Chrome profile, use the matching profile name from this list.\n"
+
         return f"""You are the PLANNER Agent for SG_CUBE.
 Available tools:
 {schemas_prompt()}
-
+{profile_hint}
 {memory_context}
 
 Output ONLY a JSON object with:

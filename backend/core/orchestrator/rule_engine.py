@@ -164,7 +164,18 @@ APP_ALIASES = {
 
 def _canonical_app(name: str) -> str:
     name = name.strip().lower()
-    return APP_ALIASES.get(name, name)
+    if name in APP_ALIASES:
+        return APP_ALIASES[name]
+    # Strip trailing qualifiers like "with my account", "for me", "please"
+    # and retry. ponytail: cheap heuristic — if it's not an alias, strip
+    # trailing prepositional phrases to find the real app name.
+    for sep in (" with ", " for ", " in ", " please", " thanks"):
+        idx = name.rfind(sep)
+        if idx > 0:
+            candidate = name[:idx]
+            if candidate in APP_ALIASES:
+                return APP_ALIASES[candidate]
+    return name
 
 
 # ── Handler factories ──────────────────────────────────────────────────
@@ -378,8 +389,10 @@ RULES: list[RuleEntry] = [
     (re.compile(r"^(?P<url>(?:https?://)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?::\d{1,5})?(?:/[^\s]*)?)$"), _open_url),
 
     # ── App management ──
-    (re.compile(r"^(?:open|launch|start)\s+(?P<app>.+?)$"), _open_app),
-    (re.compile(r"^(?:close|quit|exit|kill)\s+(?P<app>.+?)$"), _close_app),
+    # Negative lookahead excludes "with"/"for"/"in" qualifiers so those
+    # commands fall through to the LLM agent (which handles profiles).
+    (re.compile(r"^(?:open|launch|start)\s+(?P<app>(?!.*\s+(?:with|for|in)\s).+?)$"), _open_app),
+    (re.compile(r"^(?:close|quit|exit|kill)\s+(?P<app>(?!.*\s+(?:with|for|in)\s).+?)$"), _close_app),
 
     # ── Volume ──
     (re.compile(r"^(?:set|change)\s+volume\s+to\s+(?P<level>\d{1,3})\s*(?:percent)?$"), _set_volume),
