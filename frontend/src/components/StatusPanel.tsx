@@ -21,7 +21,7 @@ export function StatusPanel({ status, systemStats, events = [] }: Props) {
   } = systemStats || {};
 
   const stateColor: Record<string, string> = {
-    IDLE: 'text-sgc-dim',
+    IDLE: 'text-sgc-secondary',
     LISTENING: 'text-sgc-warn',
     THINKING: 'text-sgc-border-bright',
     SPEAKING: 'text-[#00ff41]',
@@ -33,13 +33,13 @@ export function StatusPanel({ status, systemStats, events = [] }: Props) {
     <aside className="w-[260px] border-l border-sgc-border-bright flex flex-col overflow-y-auto bg-[rgba(0,229,255,0.02)]">
       {/* Assistant Status */}
       <div className="border-b border-sgc-border p-3">
-        <h3 className="font-mono text-[10px] text-sgc-dim tracking-wider mb-3">ASSISTANT STATUS</h3>
+        <h3 className="font-mono text-[10px] text-sgc-secondary tracking-wider mb-3">ASSISTANT STATUS</h3>
         <div className="space-y-2">
           <div className="flex justify-between items-center">
-            <span className="font-mono text-[9px] text-sgc-dim tracking-wider">STATE</span>
+            <span className="font-mono text-[9px] text-sgc-secondary tracking-wider">STATE</span>
             <motion.span
               key={status.state}
-              className={`font-mono text-sm ${stateColor[status.state] || 'text-sgc-dim'}`}
+              className={`font-mono text-sm ${stateColor[status.state] || 'text-sgc-secondary'}`}
               initial={{ opacity: 0, y: -5 }}
               animate={{ opacity: 1, y: 0 }}
             >
@@ -47,15 +47,15 @@ export function StatusPanel({ status, systemStats, events = [] }: Props) {
             </motion.span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="font-mono text-[9px] text-sgc-dim tracking-wider">AGENT</span>
+            <span className="font-mono text-[9px] text-sgc-secondary tracking-wider">AGENT</span>
             <span className="font-mono text-sm text-sgc-bright">{status.currentAgent || '\u2014'}</span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="font-mono text-[9px] text-sgc-dim tracking-wider">CONFIDENCE</span>
+            <span className="font-mono text-[9px] text-sgc-secondary tracking-wider">CONFIDENCE</span>
             <span className="font-mono text-sm text-sgc-bright">{status.confidence?.toFixed(0) || '\u2014'}%</span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="font-mono text-[9px] text-sgc-dim tracking-wider">MEMORY HITS</span>
+            <span className="font-mono text-[9px] text-sgc-secondary tracking-wider">MEMORY HITS</span>
             <span className="font-mono text-sm text-sgc-bright">{events.filter(e => e.type === 'state_changed').length}</span>
           </div>
         </div>
@@ -63,14 +63,14 @@ export function StatusPanel({ status, systemStats, events = [] }: Props) {
 
       {/* System Monitor */}
       <div className="border-b border-sgc-border p-3">
-        <h3 className="font-mono text-[10px] text-sgc-dim tracking-wider mb-3">SYSTEM MONITOR</h3>
+        <h3 className="font-mono text-[10px] text-sgc-secondary tracking-wider mb-3">SYSTEM MONITOR</h3>
         <div className="space-y-3">
           <Meter label="CPU" value={cpu_percent} />
           <Meter label="MEMORY" value={memory_percent} sub={`${memory_used_gb} / ${memory_total_gb} GiB`} />
           <Meter label="DISK" value={disk_percent} sub={`${disk_used_gb} / ${disk_total_gb} GiB`} />
           <div className="flex justify-between items-center">
-            <span className="font-mono text-[9px] text-sgc-dim tracking-wider">NETWORK</span>
-            <span className="font-mono text-[10px] text-sgc-dim">
+            <span className="font-mono text-[9px] text-sgc-secondary tracking-wider">NETWORK</span>
+            <span className="font-mono text-[10px] text-sgc-bright">
               <span className="text-sgc-secondary">↓</span> {net_down_bps.toFixed(1)} <span className="text-sgc-secondary">↑</span> {net_up_bps.toFixed(1)}
             </span>
           </div>
@@ -79,11 +79,11 @@ export function StatusPanel({ status, systemStats, events = [] }: Props) {
 
       {/* Live Events */}
       <div className="p-3 flex-1 min-h-0">
-        <h3 className="font-mono text-[10px] text-sgc-dim tracking-wider mb-3">LIVE EVENTS</h3>
+        <h3 className="font-mono text-[10px] text-sgc-secondary tracking-wider mb-3">LIVE EVENTS</h3>
         <div className="space-y-1 font-mono text-[10px]">
           <AnimatePresence>
             {recentEvents.length === 0 && (
-              <div className="text-sgc-dim">Waiting for events...</div>
+              <div className="text-sgc-secondary">Waiting for events...</div>
             )}
             {recentEvents.map((e, i) => (
               <motion.div
@@ -94,7 +94,7 @@ export function StatusPanel({ status, systemStats, events = [] }: Props) {
                 className="truncate"
               >
                 <span className="text-sgc-secondary">{e.type.replace(/_/g, ' ')}</span>
-                <span className="text-sgc-dim ml-1">
+                <span className="text-sgc-secondary ml-1">
                   {String(e.payload?.text || e.payload?.action || e.payload?.agent_name || '')}
                 </span>
               </motion.div>
@@ -110,10 +110,10 @@ function Meter({ label, value, sub }: { label: string; value: number; sub?: stri
   return (
     <div>
       <div className="flex justify-between items-center mb-1">
-        <span className="font-mono text-[9px] text-sgc-dim tracking-wider">{label}</span>
+        <span className="font-mono text-[9px] text-sgc-secondary tracking-wider">{label}</span>
         <span className="font-mono text-[10px] text-sgc-bright">{value}%</span>
       </div>
-      {sub && <div className="font-mono text-[9px] text-sgc-dim mb-1">{sub}</div>}
+      {sub && <div className="font-mono text-[9px] text-sgc-secondary mb-1">{sub}</div>}
       <div className="h-1.5 bg-sgc-border rounded-full overflow-hidden">
         <motion.div
           className="h-full bg-sgc-border-bright rounded-full shadow-[0_0_4px_#00f3ff]"
