@@ -1,7 +1,9 @@
 import json
 import logging
+import os
 import subprocess
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote_plus
 
 from backend.core.orchestrator.llm_layer import Intent
@@ -26,8 +28,44 @@ CLOSE_HINTS: dict[str, str] = {
     "files": "explorer",
     "file explorer": "explorer",
     "text editor": "notepad",
-    "code editor": "code",
 }
+
+# ── Chrome profile support ─────────────────────────────────────────
+# Reads Chrome's Local State to auto-discover named profiles so the
+# assistant can open Chrome with a specific account/profile.
+# Data format: %LOCALAPPDATA%\Google\Chrome\User Data\Local State
+#   → profile.info_cache."Profile 1".name = "Work"
+#   → profile.info_cache."Default".name = "Gajanand V"
+
+
+def _get_chrome_profiles() -> dict[str, str]:
+    """Return {display_name_lower: profile_directory} from Chrome Local State.
+
+    Returns empty dict if Chrome isn't installed or the file can't be read.
+    """
+    path = Path(os.environ.get("LOCALAPPDATA", "")) / "Google" / "Chrome" / "User Data" / "Local State"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        info = (data.get("profile") or {}).get("info_cache") or {}
+        return {v.get("name", k).lower(): k for k, v in info.items() if v.get("name")}
+    except Exception:
+        log.warning("Failed to read Chrome profiles from %s", path)
+        return {}
+
+
+def _resolve_chrome_path() -> Path:
+    """Find chrome.exe — tries common install paths."""
+    candidates = [
+        Path(os.environ.get("PROGRAMFILES", "C:\\Program Files")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+        Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    raise FileNotFoundError("chrome.exe not found in any standard location")
 
 # ── Safety filters ───────────────────────────────────────────────────────
 DANGEROUS_TARGETS = (
@@ -280,6 +318,27 @@ def handle_open_app(intent: Intent) -> dict:
     if is_target_dangerous(target):
         return {"status": "blocked", "reason": f"dangerous target rejected: {target_raw!r}"}
 
+    # ── Chrome profile branch ──────────────────────────────────────────
+    profile_arg = (intent.args or {}).get("profile", "")
+    if profile_arg and ("chrome" in target or "google chrome" in target):
+        profiles = _get_chrome_profiles()
+        if not profiles:
+            return {"status": "error", "reason": "no Chrome profiles found"}
+        match = profile_arg.lower()
+        dir_name = profiles.get(match)
+        if not dir_name:
+            close = ", ".join(sorted(profiles))
+            return {"status": "error", "reason": f"no Chrome profile named '{profile_arg}'. Available: {close}"}
+        try:
+            subprocess.Popen(["chrome.exe", f"--profile-directory={dir_name}"])
+        except FileNotFoundError:
+            try:
+                path = _resolve_chrome_path()
+                subprocess.Popen([str(path), f"--profile-directory={dir_name}"])
+            except Exception as e:
+                return {"status": "error", "reason": str(e)}
+        return {"status": "success", "message": f"opened Chrome ({profile_arg})"}
+
     # 3. Resolve via Get-StartApps. Apply OPEN_HINTS first for human-language
     #    phrases that won't naturally match a Start Menu name ("browser", "files").
     query = OPEN_HINTS.get(target, target_raw)
@@ -287,7 +346,6 @@ def handle_open_app(intent: Intent) -> dict:
     if resolved is not None:
         name, app_id = resolved
         try:
-            # explorer.exe shell:AppsFolder\<AppID> launches UWP and Win32 alike.
             subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{app_id}"])
         except Exception as e:
             return {"status": "error", "reason": str(e)}

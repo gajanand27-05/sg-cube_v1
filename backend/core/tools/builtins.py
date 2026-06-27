@@ -21,12 +21,17 @@ def respond(text: str) -> ToolResult:
 
 
 @tool(security=SecurityLevel.SAFE)
-def open_app(name: str) -> ToolResult:
+def open_app(name: str, profile: str = "") -> ToolResult:
     """Open a desktop application by name. ANY installed app works
     (notepad, chrome, firefox, spotify, discord, whatsapp, vscode, vlc, ...).
     System apps (regedit, task manager, powershell) trigger a Windows UAC
-    consent dialog before launching."""
-    res = cw.handle_open_app(Intent(action="open_app", target=name))
+    consent dialog before launching.
+
+    For Chrome you can optionally specify a `profile` (e.g. "Work", "Gajanand V")
+    to open that Chrome profile directly. Chrome reads the profile name from
+    its Local State — use whatever you named it in Chrome settings.
+    """
+    res = cw.handle_open_app(Intent(action="open_app", target=name, args={"profile": profile} if profile else {}))
     return ToolResult(
         status=res["status"],
         message=res.get("message"),
