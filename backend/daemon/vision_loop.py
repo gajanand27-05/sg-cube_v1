@@ -4,7 +4,7 @@ import threading
 import time
 from typing import Optional
 
-from backend.core.events import bus
+from backend.core.events import bus, Priority
 from backend.core.vision.capture import capture_screen
 from backend.core.vision.vlm import analyze_screenshot
 from backend.core.memory.screen_memory import screen_memory
@@ -94,7 +94,7 @@ class VisionLoop:
         try:
             global latest_observation
             latest_observation = {"app": app, "summary": summary, "timestamp": time.time()}
-            bus.publish(VisionUpdateEvent(description=summary, windows=[app]))
+            bus.publish(VisionUpdateEvent(description=summary, windows=[app]), priority=Priority.NORMAL)
         except Exception:
             pass
 

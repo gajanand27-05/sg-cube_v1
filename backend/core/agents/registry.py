@@ -2,7 +2,7 @@ import logging
 import threading
 from datetime import datetime
 
-from backend.core.events import bus
+from backend.core.events import get_bus
 from backend.daemon.ui_events import (
     InternalAgentEvent,
     AgentThinkingEvent,
@@ -20,14 +20,21 @@ class AgentRegistry:
     def __init__(self):
         self._lock = threading.Lock()
         self._agents: dict[str, dict] = {}
-        self._subscribe()
+        self._subscribed = False
 
     def _subscribe(self):
+        bus = get_bus()
         bus.subscribe(InternalAgentEvent, self._on_agent_event)
         bus.subscribe(AgentThinkingEvent, self._on_thinking_event)
         bus.subscribe(AgentReasoningEvent, self._on_reasoning_event)
         bus.subscribe(AgentToolCallEvent, self._on_tool_event)
         bus.subscribe(AgentCompletedEvent, self._on_completed_event)
+        self._subscribed = True
+        log.debug("AgentRegistry subscribed to event bus")
+
+    def _ensure_subscribed(self):
+        if not self._subscribed:
+            self._subscribe()
 
     def _ensure(self, agent_name: str) -> dict:
         return self._agents.setdefault(agent_name, {
@@ -44,6 +51,7 @@ class AgentRegistry:
         })
 
     def _on_agent_event(self, event: InternalAgentEvent):
+        self._ensure_subscribed()
         with self._lock:
             e = self._ensure(event.agent_name)
             e["current_action"] = event.action
@@ -51,6 +59,7 @@ class AgentRegistry:
             e["last_seen"] = datetime.now().isoformat()
 
     def _on_thinking_event(self, event: AgentThinkingEvent):
+        self._ensure_subscribed()
         with self._lock:
             e = self._ensure(event.agent_name)
             e["is_thinking"] = event.is_thinking
@@ -58,6 +67,7 @@ class AgentRegistry:
             e["last_seen"] = datetime.now().isoformat()
 
     def _on_reasoning_event(self, event: AgentReasoningEvent):
+        self._ensure_subscribed()
         with self._lock:
             e = self._ensure(event.agent_name)
             e["reasoning"] = event.reasoning
@@ -65,6 +75,7 @@ class AgentRegistry:
             e["last_seen"] = datetime.now().isoformat()
 
     def _on_tool_event(self, event: AgentToolCallEvent):
+        self._ensure_subscribed()
         with self._lock:
             e = self._ensure(event.agent_name)
             tool_entry = {
@@ -79,6 +90,7 @@ class AgentRegistry:
             e["last_seen"] = datetime.now().isoformat()
 
     def _on_completed_event(self, event: AgentCompletedEvent):
+        self._ensure_subscribed()
         with self._lock:
             e = self._ensure(event.agent_name)
             e["status"] = event.status
@@ -90,10 +102,12 @@ class AgentRegistry:
             e["last_seen"] = datetime.now().isoformat()
 
     def get_status(self) -> list[dict]:
+        self._ensure_subscribed()
         with self._lock:
             return list(self._agents.values())
 
     def get_active_agent(self) -> str | None:
+        self._ensure_subscribed()
         with self._lock:
             for name, info in self._agents.items():
                 if info.get("is_thinking"):
@@ -101,4 +115,11 @@ class AgentRegistry:
             return None
 
 
-registry = AgentRegistry()
+_registry = None
+
+
+def get_registry() -> AgentRegistry:
+    global _registry
+    if _registry is None:
+        _registry = AgentRegistry()
+    return _registry

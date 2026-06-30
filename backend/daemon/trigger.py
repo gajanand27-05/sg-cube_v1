@@ -17,7 +17,7 @@ from backend.core.orchestrator.llm_layer import Intent, LLMResolveError
 from backend.core.orchestrator.router import process_input
 from backend.core.safe_executor.executor import ExecutionResult
 from backend.core.safe_executor.executor import execute as do_execute
-from backend.core.events import bus
+from backend.core.events import get_bus, Priority
 from backend.core.state import AssistantState, manager as state_manager
 from backend.daemon.ui_events import (
     CommandTranscribed,
@@ -32,7 +32,8 @@ log = logging.getLogger(__name__)
 
 EmitFn = Callable[[Any], None]
 
-DAEMON_USER_ID = "21c19bf1-b73f-4001-80de-789b93c8d703"
+# Default daemon user ID — should be overridden per-session in production
+DEFAULT_DAEMON_USER_ID = "21c19bf1-b73f-4001-80de-789b93c8d703"
 
 SAMPLE_RATE = 16000
 ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
@@ -129,7 +130,7 @@ def on_wake_detected(emit: EmitFn | None = None) -> None:
 
     state_manager.transition_to(AssistantState.LISTENING)
     event = WakeHeard(peak=0)
-    bus.publish(event)
+    get_bus().publish(event, priority=Priority.HIGH)
     _emit(emit, event)
     threading.Thread(target=_play_chime, daemon=True).start()
 
@@ -155,7 +156,7 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optio
 async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
     request_id = str(uuid.uuid4())[:8]
     event = CommandTranscribed(text=command, peak=peak)
-    bus.publish(event)
+    get_bus().publish(event, priority=Priority.HIGH)
     _emit(emit, event)
 
     if not command:
@@ -163,11 +164,11 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         return False
 
     try:
-        routed = await process_input(command, DAEMON_USER_ID)
+        routed = await process_input(command, DEFAULT_DAEMON_USER_ID)
     except LLMResolveError as e:
         state_manager.transition_to(AssistantState.ERROR)
         err_event = TriggerError(detail=f"LLM unavailable: {e}")
-        bus.publish(err_event)
+        get_bus().publish(err_event, priority=Priority.NORMAL)
         _emit(emit, err_event)
         reply = "Sorry, my reasoning model is unavailable"
         print(f"[ai] LLM unavailable: {e}")
@@ -176,7 +177,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         state_manager.transition_to(AssistantState.SPEAKING)
         await _speak_selective(reply, device_id)
         spoken_event = SpokenResponse(text=reply)
-        bus.publish(spoken_event)
+        get_bus().publish(spoken_event, priority=Priority.NORMAL)
         _emit(emit, spoken_event)
         state_manager.transition_to(AssistantState.IDLE)
         return False
@@ -187,7 +188,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         target=routed.intent.target,
         source_layer=routed.source_layer,
     )
-    bus.publish(intent_event)
+    get_bus().publish(intent_event, priority=Priority.NORMAL)
     _emit(emit, intent_event)
 
     state_manager.transition_to(AssistantState.EXECUTING)
@@ -208,7 +209,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         confidence=result.confidence,
         confidence_reason=result.confidence_reason
     )
-    bus.publish(exec_event)
+    get_bus().publish(exec_event, priority=Priority.NORMAL)
     _emit(emit, exec_event)
 
     reply = _spoken_response(routed.intent, result)
@@ -217,7 +218,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
     await _speak_selective(reply, device_id)
 
     spoken_event = SpokenResponse(text=reply)
-    bus.publish(spoken_event)
+    get_bus().publish(spoken_event, priority=Priority.NORMAL)
     _emit(emit, spoken_event)
 
     state_manager.transition_to(AssistantState.IDLE)
@@ -283,4 +284,7 @@ async def _handle_proactive_async(query: str):
     command = f"[Proactive] {query}"
     await _process_and_execute(command, peak=0, t0=t0, emit=None, device_id=None)
 
-bus.subscribe(ProactiveEvent, on_proactive_event)
+
+def register_proactive_handler() -> None:
+    """Register the proactive event handler. Call after event bus is initialized."""
+    get_bus().subscribe(ProactiveEvent, on_proactive_event)

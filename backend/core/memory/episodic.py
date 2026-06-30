@@ -54,3 +54,7 @@ Reply with a single JSON object:
 
         except Exception as e:
             log.warning(f"Episodic summarization failed: {e}")
+
+
+# Global instance
+summarizer = EpisodeSummarizer()

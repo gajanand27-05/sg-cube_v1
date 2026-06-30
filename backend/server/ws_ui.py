@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from backend.core.events import bus
+from backend.core.events import get_bus
 from backend.core.state import StateChangedEvent
 from backend.daemon.ui_events import (
     AgentCompletedEvent,
@@ -77,13 +77,20 @@ class UIEventManager:
     def __init__(self):
         self._connections: list[WebSocket] = []
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._setup_event_bridge()
+        self._bridge_setup = False
 
     def _setup_event_bridge(self):
+        if self._bridge_setup:
+            return
+        bus = get_bus()
         for event_type in EVENT_TYPES:
             bus.subscribe(event_type, self._broadcast_event)
+        self._bridge_setup = True
 
     def _broadcast_event(self, event: Any):
+        # Lazy setup on first event
+        if not self._bridge_setup:
+            self._setup_event_bridge()
         wire_type = TYPE_MAP.get(type(event), type(event).__name__)
         data = {
             "type": wire_type,
@@ -139,4 +146,11 @@ class UIEventManager:
         return d
 
 
-manager = UIEventManager()
+_manager: UIEventManager | None = None
+
+
+def get_manager() -> UIEventManager:
+    global _manager
+    if _manager is None:
+        _manager = UIEventManager()
+    return _manager

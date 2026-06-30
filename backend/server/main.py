@@ -11,6 +11,8 @@ from backend.server.routes import admin, agents, auth, diagnostics, execute, fil
 
 # Initialize LLM provider at startup
 from backend.ai_modules.llm import create_llm_provider
+from backend.core.events import init_event_bus, get_bus
+from backend.daemon.trigger import register_proactive_handler
 
 log = logging.getLogger(__name__)
 
@@ -18,8 +20,12 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_llm_provider()
-    log.info("LLM provider initialized")
+    init_event_bus()
+    get_bus().start()
+    register_proactive_handler()
+    log.info("LLM provider & event bus initialized")
     yield
+    await get_bus().stop()
     log.info("Shutting down")
 
 

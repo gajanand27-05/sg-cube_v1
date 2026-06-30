@@ -6,7 +6,7 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from backend.core.events import bus
+from backend.core.events import get_bus
 from backend.core.state import AssistantState, StateChangedEvent
 from backend.daemon.trigger import handle_wake, on_wake_detected
 from backend.daemon.ui_events import (
@@ -69,10 +69,13 @@ class RemoteManager:
     def __init__(self):
         self.active_connections: Dict[str, RemoteConnection] = {}
         self.loop: Optional[asyncio.AbstractEventLoop] = None
-        self._setup_event_bridge()
+        self._event_bridge_setup = False
 
     def _setup_event_bridge(self):
         """Bridge Desktop EventBus to all connected Android devices."""
+        if self._event_bridge_setup:
+            return
+        bus = get_bus()
         for event_type in [
             StateChangedEvent, CommandTranscribed, IntentResolved,
             Executed, SpokenResponse, TokenStreamEvent,
@@ -80,6 +83,13 @@ class RemoteManager:
             ClipboardChangedEvent, HandoverEvent
         ]:
             bus.subscribe(event_type, self._broadcast_event)
+        self._event_bridge_setup = True
+
+    def _get_bus(self):
+        """Get bus, setting up bridge if needed."""
+        if not self._event_bridge_setup:
+            self._setup_event_bridge()
+        return get_bus()
 
     def _broadcast_event(self, event):
         """Forward local event to remote clients as JSON."""

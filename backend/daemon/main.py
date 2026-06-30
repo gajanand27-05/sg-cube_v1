@@ -19,6 +19,9 @@ import backend.core.tools  # noqa: F401
 from backend.ai_modules.llm import create_llm_provider
 create_llm_provider()
 
+# Initialize async event bus — must be done on the event loop
+from backend.core.events import init_event_bus, get_bus
+
 from backend.daemon.trigger import handle_wake, on_wake_detected
 from backend.daemon.wake_word import WakeWordListener
 from backend.daemon.clipboard_watcher import watcher as cb_watcher
@@ -31,6 +34,7 @@ log = logging.getLogger(__name__)
 
 
 def _run_headless(args) -> None:
+    # Start background services
     cb_watcher.start()
     vision_loop.start()
     watcher_agent.start()
@@ -48,7 +52,7 @@ def _run_headless(args) -> None:
     )
     listener_thread.start()
 
-    # Start the FastAPI web server
+    # Start the FastAPI web server (uvicorn creates the event loop)
     host = args.host or settings.app_host
     port = args.port or settings.app_port
     log.info(f"Starting SG_CUBE web server on http://{host}:{port}")

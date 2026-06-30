@@ -2,7 +2,7 @@ import time
 import threading
 import logging
 import pyperclip
-from backend.core.events import bus
+from backend.core.events import bus, Priority
 from backend.daemon.ui_events import ClipboardChangedEvent
 
 log = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ class ClipboardWatcher:
             if current_text != self.last_text:
                 self.last_text = current_text
                 log.debug(f"Clipboard changed: {len(current_text)} chars")
-                bus.publish(ClipboardChangedEvent(text=current_text))
+                bus.publish(ClipboardChangedEvent(text=current_text), priority=Priority.LOW)
             time.sleep(self.interval)
 
 # Global instance

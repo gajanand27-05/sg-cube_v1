@@ -3,7 +3,7 @@ import time
 import logging
 import psutil
 
-from backend.core.events import bus
+from backend.core.events import bus, Priority
 from backend.daemon.ui_events import SystemStatsEvent
 
 log = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ class TelemetryLoop:
                     net_up_bps=round(net_up_bps, 2),
                     temp_c=round(temp_c, 1) if temp_c is not None else None
                 )
-                bus.publish(event)
+                bus.publish(event, priority=Priority.LOW)
 
             except Exception as e:
                 log.debug(f"Telemetry error: {e}")
