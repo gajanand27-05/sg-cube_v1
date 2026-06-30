@@ -31,7 +31,7 @@ async def generate(
     **kwargs: Any,
 ) -> str:
     """Non-streaming generation."""
-    model = model or settings.ollama_model
+    model = model or settings.fast_model
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -62,7 +62,7 @@ async def chat_stream(
     **kwargs: Any,
 ) -> AsyncGenerator[dict, None]:
     """Streaming chat — yields {'token': str, 'done': bool}."""
-    model = model or settings.ollama_model
+    model = model or settings.fast_model
     payload: dict[str, Any] = {
         "model": model,
         "messages": messages,

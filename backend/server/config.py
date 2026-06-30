@@ -21,11 +21,25 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
 
     ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "phi3"  # fast intent classifier (cache/rule-miss path)
-    agent_model: str = "gemma4:12b"  # heavier tool-calling agent
-    embedding_model: str = "nomic-embed-text"
-    vlm_model: str = "qwen2.5vl:3b"
-    whisper_model: str = "small"
+    
+    # ── Model aliases (single source of truth for routing) ──
+    # Fast local models
+    fast_model: str = "phi3"                    # classification, verification, intent
+    embedding_model: str = "nomic-embed-text"   # vector embeddings
+    
+    # Reasoning / coding models
+    reasoning_model: str = "gemini-2.5-flash"   # planner, complex logic
+    coding_model: str = "gemini-2.5-flash"      # code generation
+    
+    # General conversation
+    chat_model: str = "qwen/qwen3-coder-480b-a35b"  # openrouter
+    
+    # Vision
+    vision_model: str = "qwen2.5vl:3b"          # local VLM
+    
+    # STT/TTS
+    whisper_model: str = "small"                # faster-whisper
+    piper_voice: str = "en_US-ryan-high"        # Piper TTS voice
 
     # ── OpenRouter (cloud LLM) ──
     openrouter_api_key: str = ""

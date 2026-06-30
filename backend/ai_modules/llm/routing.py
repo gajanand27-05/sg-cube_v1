@@ -31,12 +31,12 @@ class RoutingPolicy:
     def _default_mapping(self) -> dict[TaskType, str]:
         """Default routing — prefers local for fast tasks, cloud for reasoning."""
         return {
-            TaskType.INTENT_CLASSIFICATION: "ollama",      # phi3 - fast, local
-            TaskType.VERIFICATION: "ollama",               # phi3 - fast, local
-            TaskType.EMBEDDING: "embedding",               # ollama embeddings
+            TaskType.INTENT_CLASSIFICATION: "ollama",
+            TaskType.VERIFICATION: "ollama",
+            TaskType.EMBEDDING: "embedding",
             TaskType.PLANNING: "gemini" if settings.gemini_api_key else "openrouter",
             TaskType.CODING: "gemini" if settings.gemini_api_key else "openrouter",
-            TaskType.SUMMARIZATION: "ollama",              # local summarization
+            TaskType.SUMMARIZATION: "ollama",
             TaskType.CHAT: "openrouter" if settings.openrouter_api_key else "gemini" if settings.gemini_api_key else "ollama",
             TaskType.GENERAL: "openrouter" if settings.openrouter_api_key else "gemini" if settings.gemini_api_key else "ollama",
         }
