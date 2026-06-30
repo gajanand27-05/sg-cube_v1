@@ -3,7 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-from backend.ai_modules.llm.ollama_client import OllamaError, generate
+from backend.ai_modules.llm import get_provider
+from backend.ai_modules.llm.routing import TaskType
 
 SYSTEM_PROMPT = """You are an intent-parser for SG_CUBE, a local AI Operating System.
 Convert the user's natural-language command into a JSON object with this exact shape:
@@ -71,18 +72,24 @@ class LLMResolveError(RuntimeError):
     pass
 
 
-def resolve(text: str, retries: int = 1) -> Intent:
-    """Convert natural-language input into an Intent via Ollama.
+async def resolve(text: str, retries: int = 1) -> Intent:
+    """Convert natural-language input into an Intent via LLM Provider.
 
-    Calls Ollama with format=json so the response is guaranteed to be JSON.
+    Uses the routing policy to select the appropriate backend.
     On parse/validation failure, retries up to `retries` more times.
-    Raises LLMResolveError if all attempts fail or Ollama is unreachable.
+    Raises LLMResolveError if all attempts fail.
     """
+    llm = get_provider()
     last_err: Exception | None = None
     for _ in range(retries + 1):
         try:
-            raw = generate(text, system=SYSTEM_PROMPT, json_mode=True)
-        except OllamaError as e:
+            raw = await llm.generate(
+                text,
+                system=SYSTEM_PROMPT,
+                task=TaskType.INTENT_CLASSIFICATION,
+                json_mode=True,
+            )
+        except Exception as e:
             raise LLMResolveError(str(e)) from e
 
         try:

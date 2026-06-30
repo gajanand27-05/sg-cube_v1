@@ -8,36 +8,38 @@ from typing import Any, List, Optional
 import chromadb
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 
-from backend.ai_modules.llm import ollama_client
+from backend.ai_modules.llm import get_provider
 from backend.core.memory.base import MemoryEntry, MemoryType
-from backend.server.config import settings
 
 log = logging.getLogger(__name__)
 
 CHROMA_PATH = Path(__file__).resolve().parents[3] / "backend" / "database" / "chroma_db"
 
-class OllamaEmbeddingFunction(EmbeddingFunction):
-    """Bridge between ChromaDB and local Ollama embeddings."""
+
+class ProviderEmbeddingFunction(EmbeddingFunction):
+    """Bridge between ChromaDB and LLM Provider embeddings."""
     def __call__(self, input: Documents) -> Embeddings:
         # ChromaDB calls this with a list of strings.
-        # We call our Ollama client for each.
+        # We call our LLM provider for each.
+        llm = get_provider()
         embeddings = []
         for text in input:
             try:
-                vec = ollama_client.embed(text)
+                vec = llm.embed(text)
                 embeddings.append(vec)
             except Exception as e:
                 log.error(f"Embedding failed for text: {text[:50]}... Error: {e}")
                 # Fallback to zero vector if embedding fails (prevents crash)
-                embeddings.append([0.0] * 768) # nomic-embed-text is 768d usually
+                embeddings.append([0.0] * 768)
         return embeddings
 
+
 class LongTermMemory:
-    """Persistent semantic storage using ChromaDB and Ollama embeddings."""
+    """Persistent semantic storage using ChromaDB and LLM Provider embeddings."""
     def __init__(self):
         CHROMA_PATH.parent.mkdir(parents=True, exist_ok=True)
         self.client = chromadb.PersistentClient(path=str(CHROMA_PATH))
-        self.ef = OllamaEmbeddingFunction()
+        self.ef = ProviderEmbeddingFunction()
         
         # Initialize or get the collection
         self.collection = self.client.get_or_create_collection(

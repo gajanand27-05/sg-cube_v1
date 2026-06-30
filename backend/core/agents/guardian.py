@@ -10,16 +10,16 @@ class GuardianAgent(BaseInternalAgent):
     def __init__(self):
         super().__init__("Guardian")
 
-    def verify_plan(self, user_query: str, calls: List[dict], request_id: str) -> Tuple[List[dict], List[dict], List[str]]:
+    async def verify_plan(self, user_query: str, calls: List[dict], request_id: str) -> Tuple[List[dict], List[dict], List[str]]:
         self._emit("verifying", tool_count=len(calls))
-        
+
         valid_calls = []
         pending_calls = []
         errors = []
         is_multi_step = len(calls) > 1
 
         for call in calls:
-            res = verify_call(user_query, call, is_multi_step=is_multi_step, request_id=request_id)
+            res = await verify_call(user_query, call, is_multi_step=is_multi_step, request_id=request_id)
             if not res.is_valid:
                 errors.append(res.error)
                 self._emit("rejected", tool=call.get("name"), reason=res.error)

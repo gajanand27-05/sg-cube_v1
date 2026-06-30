@@ -1,10 +1,11 @@
 import json
 
-from backend.ai_modules.llm import gemini_client
+from backend.ai_modules.llm import get_provider
 from backend.core.agents.base import BaseInternalAgent, TokenStreamEvent
 from backend.core.events import bus
 from backend.core.tools.registry import schemas_prompt
 from backend.daemon.ui_events import AgentThinkingEvent
+from backend.ai_modules.llm.routing import TaskType
 
 
 class PlannerAgent(BaseInternalAgent):
@@ -22,7 +23,8 @@ class PlannerAgent(BaseInternalAgent):
 
         full_content = ""
         try:
-            async for chunk in gemini_client.chat_stream(messages, temperature=0.2):
+            llm = get_provider()
+            async for chunk in llm.chat_stream(messages, task=TaskType.REASONING, temperature=0.2):
                 token = chunk["token"]
                 full_content += token
                 bus.publish(TokenStreamEvent(self.name, token, full_content))

@@ -4,17 +4,36 @@ from datetime import datetime
 from typing import List, Optional
 
 import chromadb
-from backend.core.memory.long_term import OllamaEmbeddingFunction, CHROMA_PATH
+from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
+from backend.ai_modules.llm import get_provider
 from backend.core.memory.base import MemoryEntry, MemoryType
 
 log = logging.getLogger(__name__)
+
+CHROMA_PATH = __file__.rsplit("\\", 3)[0] + "\\backend\\database\\chroma_db" if "\\" in __file__ else "/".join(__file__.split("/")[:-3]) + "/backend/database/chroma_db"
+
+
+class ScreenEmbeddingFunction(EmbeddingFunction):
+    """Bridge between ChromaDB and LLM Provider for screen memory."""
+    def __call__(self, input):
+        llm = get_provider()
+        embeddings = []
+        for text in input:
+            try:
+                vec = llm.embed(text)
+                embeddings.append(vec)
+            except Exception as e:
+                log.error(f"Screen embedding failed: {e}")
+                embeddings.append([0.0] * 768)
+        return embeddings
+
 
 class ScreenMemory:
     """Manages the visual situational awareness memory (Screen-RAG)."""
     
     def __init__(self):
         self.client = chromadb.PersistentClient(path=str(CHROMA_PATH))
-        self.ef = OllamaEmbeddingFunction()
+        self.ef = ScreenEmbeddingFunction()
         
         # Specific collection for visual context
         self.collection = self.client.get_or_create_collection(

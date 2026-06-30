@@ -15,6 +15,10 @@ import uvicorn
 # Bootstrap tool registry — triggers all @tool decorators before any agent runs.
 import backend.core.tools  # noqa: F401
 
+# Initialize LLM provider — single interface for all model backends
+from backend.ai_modules.llm import create_llm_provider
+create_llm_provider()
+
 from backend.daemon.trigger import handle_wake, on_wake_detected
 from backend.daemon.wake_word import WakeWordListener
 from backend.daemon.clipboard_watcher import watcher as cb_watcher

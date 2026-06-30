@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -8,12 +9,25 @@ from fastapi.staticfiles import StaticFiles
 from backend.server.config import settings
 from backend.server.routes import admin, agents, auth, diagnostics, execute, files, memory, orchestrate, remote, system, ui, vision, voice
 
+# Initialize LLM provider at startup
+from backend.ai_modules.llm import create_llm_provider
+
 log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_llm_provider()
+    log.info("LLM provider initialized")
+    yield
+    log.info("Shutting down")
+
 
 app = FastAPI(
     title="SG_CUBE",
     description="Local-first AI Operating System — agentic build",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

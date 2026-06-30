@@ -3,10 +3,9 @@ import logging
 import re
 from typing import Any
 
-import httpx
-
+from backend.ai_modules.llm import get_provider
+from backend.ai_modules.llm.routing import TaskType
 from backend.core.tools.registry import REGISTRY, SecurityLevel, _resolve_name
-from backend.server.config import settings
 
 log = logging.getLogger(__name__)
 
@@ -47,39 +46,31 @@ def _is_malicious(args: dict) -> str | None:
     return None
 
 
-def _secondary_check(user_query: str, tool_name: str, tool_args: dict, reasoning: str) -> bool:
+async def _secondary_check(user_query: str, tool_name: str, tool_args: dict, reasoning: str) -> bool:
     """Ask a smaller, faster model (phi3) if this tool call makes sense."""
-    url = f"{settings.ollama_url.rstrip('/')}/api/chat"
+    llm = get_provider()
     prompt = f"""You are a safety and logic verifier for an AI Operating System.
 User Query: "{user_query}"
 Proposed Action: Call tool "{tool_name}" with arguments {json.dumps(tool_args)}
 LLM Reasoning: "{reasoning}"
 
 Is this action logically sound, safe, and directly relevant to the user's query?
-Reply with a single JSON object: {{"verified": true}} or {{"verified": false, "reason": "..."}}
-"""
-    payload = {
-        "model": settings.ollama_model,  # phi3
-        "messages": [{"role": "system", "content": prompt}],
-        "stream": False,
-        "format": "json",
-        "options": {"temperature": 0.0},
-    }
+Reply with a single JSON object: {{"verified": true}} or {{"verified": false, "reason": "..."}}"""
     try:
-        with httpx.Client(timeout=15.0) as client:
-            r = client.post(url, json=payload)
-        r.raise_for_status()
-        body = r.json()
-        content = (body.get("message", {}).get("content") or "").strip()
-        res = json.loads(content)
+        response = await llm.generate(
+            prompt,
+            task=TaskType.CLASSIFICATION,
+            json_mode=True,
+            temperature=0.0,
+        )
+        res = json.loads(response)
         return bool(res.get("verified"))
     except Exception as e:
         log.warning(f"Secondary check failed: {e}")
-        # Fail closed for verification layer.
         return False
 
 
-def verify(user_query: str, call: dict, is_multi_step: bool = False, request_id: str = "default") -> VerificationResult:
+async def verify(user_query: str, call: dict, is_multi_step: bool = False, request_id: str = "default") -> VerificationResult:
     """The SG_CUBE Verification Stack:
     1. Rule-based checks (Hallucination, Schema, Security, Injection)
     2. Confidence scoring (Routing Signal)

@@ -73,7 +73,7 @@ class CommanderAgent:
                 return spoken, tool_records
 
             # C. Guardian Stage (Verification)
-            valid_calls, pending_calls, errors = self.guardian.verify_plan(text, calls, request_id)
+            valid_calls, pending_calls, errors = await self.guardian.verify_plan(text, calls, request_id)
 
             if errors:
                 log.warning(f"Commander: Guardian rejected parts of the plan: {errors}")

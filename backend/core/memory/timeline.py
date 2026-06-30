@@ -4,17 +4,36 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 import chromadb
-from backend.core.memory.long_term import OllamaEmbeddingFunction, CHROMA_PATH
+from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 from backend.core.memory.base import MemoryEntry, MemoryType
+from backend.ai_modules.llm import get_provider
 
 log = logging.getLogger(__name__)
+
+CHROMA_PATH = __file__.rsplit("\\", 3)[0] + "\\backend\\database\\chroma_db" if "\\" in __file__ else "/".join(__file__.split("/")[:-3]) + "/backend/database/chroma_db"
+
+
+class TimelineEmbeddingFunction(EmbeddingFunction):
+    """Bridge between ChromaDB and LLM Provider for timeline embeddings."""
+    def __call__(self, input: Documents) -> Embeddings:
+        llm = get_provider()
+        embeddings = []
+        for text in input:
+            try:
+                vec = llm.embed(text)
+                embeddings.append(vec)
+            except Exception as e:
+                log.error(f"Timeline embedding failed: {e}")
+                embeddings.append([0.0] * 768)
+        return embeddings
+
 
 class TimelineMemory:
     """Manages the chronological activity tracking (Timeline Memory)."""
     
     def __init__(self):
         self.client = chromadb.PersistentClient(path=str(CHROMA_PATH))
-        self.ef = OllamaEmbeddingFunction()
+        self.ef = TimelineEmbeddingFunction()
         
         # Specific collection for chronological events
         self.collection = self.client.get_or_create_collection(
