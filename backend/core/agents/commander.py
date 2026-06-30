@@ -8,9 +8,10 @@ from backend.core.agent.context import ConversationContext
 from backend.core.agents.guardian import GuardianAgent
 from backend.core.agents.operator import OperatorAgent
 from backend.core.agents.planner import PlannerAgent
+from backend.core.context.builder import context_builder
+from backend.core.context.types import RequestContext
 from backend.core.healing import healer as self_healer
 from backend.core.memory.episodic import summarizer as episodic_summarizer
-from backend.core.memory.manager import memory as memory_manager
 from backend.core.memory.timeline import timeline
 
 log = logging.getLogger(__name__)
@@ -32,20 +33,33 @@ class CommanderAgent:
             self._current_task.cancel()
             log.info("Commander: Interrupted by user.")
 
-    async def run(self, text: str, context: ConversationContext) -> Tuple[str, List[dict]]:
+    async def run(self, text: str, context: ConversationContext, user_id: str | None = None) -> Tuple[str, List[dict]]:
         self._current_task = asyncio.current_task()
         try:
-            return await self._run_loop(text, context)
+            return await self._run_loop(text, context, user_id)
         except asyncio.CancelledError:
             return "Interrupted.", []
         finally:
             self._current_task = None
 
-    async def _run_loop(self, text: str, context: ConversationContext) -> Tuple[str, List[dict]]:
-        # 1. Setup Request
-        request_id = str(uuid.uuid4())[:8]
+    async def _run_loop(self, text: str, context: ConversationContext, user_id: str | None) -> Tuple[str, List[dict]]:
+        # 1. Build unified context via ContextBuilder
+        request = RequestContext(
+            user_intent=text,
+            user_id=user_id,
+            session_id=context.session_id if hasattr(context, 'session_id') else None,
+            request_id=str(uuid.uuid4())[:8],
+            input_mode="voice",
+        )
+        agent_context = await context_builder.collect(request)
+
+        # Update agent context with conversation history
+        agent_context.recent_conversation = context.render()
+
+        # 2. Setup Request
+        request_id = agent_context.request_id
         context.add_user(text)
-        history = context.render()
+        history = agent_context.recent_conversation
         
         # Record user query in timeline
         timeline.record_event(content=f"User asked: \"{text}\"", source="user_query")
@@ -53,18 +67,14 @@ class CommanderAgent:
         tool_records: list[dict] = []
 
         for _iter in range(MAX_ITER):
-            # A. Scholar Stage (Memory Injection)
-            mem_context = memory_manager.get_relevant_context(text)
-            
-            # B. Planner Stage
-            calls = await self.planner.generate_plan(text, history, mem_context)
+            # A. Planner Stage (receives full AgentContext)
+            calls = await self.planner.generate_plan(text, history, agent_context)
             
             # Check for final response from Planner
             if isinstance(calls, dict) and "final_response" in calls:
                 spoken = calls["final_response"]
                 context.add_assistant(spoken)
                 asyncio.create_task(episodic_summarizer.summarize_and_store(text, tool_records))
-                memory_manager.wm.clear()
                 return spoken, tool_records
 
             if not calls:
@@ -72,8 +82,8 @@ class CommanderAgent:
                 context.add_assistant(spoken)
                 return spoken, tool_records
 
-            # C. Guardian Stage (Verification)
-            valid_calls, pending_calls, errors = await self.guardian.verify_plan(text, calls, request_id)
+            # B. Guardian Stage (Verification) - receives AgentContext
+            valid_calls, pending_calls, errors = await self.guardian.verify_plan(text, calls, request_id, agent_context)
 
             if errors:
                 log.warning(f"Commander: Guardian rejected parts of the plan: {errors}")
@@ -98,19 +108,15 @@ class CommanderAgent:
                     spoken = f"I need your permission to {tool_name}. Should I proceed?"
                 
                 context.add_assistant(spoken)
-                # In a real implementation, we would store the pending plan 
-                # in session state to resume when the user says "yes".
-                # For now, we just inform the user.
                 return spoken, tool_records
 
-            # D. Operator Stage (Execution)
+            # C. Operator Stage (Execution)
             batch_results = await self.operator.execute_batch(valid_calls, request_id)
             tool_records.extend(batch_results)
 
             # Record successful tool executions in timeline
             for res_wrapper in batch_results:
                 res = res_wrapper.get("result")
-                # ToolResult or legacy dict
                 status = getattr(res, "status", res.get("status") if isinstance(res, dict) else "error")
                 if status == "success":
                     tool_name = res_wrapper.get("tool", "unknown tool").replace("_", " ")
@@ -120,9 +126,7 @@ class CommanderAgent:
                         source="execution"
                     )
 
-            # E. Assessment Stage
-            # (Composition for final answer if needed)
-            # This follows the previous logic: if one tool succeeded, speak its result.
+            # D. Assessment Stage
             if len(batch_results) == 1:
                 res = batch_results[0]["result"]
                 status = getattr(res, "status", res.get("status") if isinstance(res, dict) else "error")
