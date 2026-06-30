@@ -2,7 +2,7 @@
 import asyncio
 import time
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Tuple
 
 import numpy as np
 import sounddevice as sd
@@ -32,6 +32,20 @@ def _get_voice() -> PiperVoice:
             )
         _voice = PiperVoice.load(str(model_path), config_path=str(config_path))
     return _voice
+
+
+def generate_audio(text: str) -> Tuple[bytes, int]:
+    """Synthesize `text` and return raw PCM bytes (16kHz) and sample rate.
+    
+    Kept for backward compatibility with tests and legacy callers.
+    """
+    voice = _get_voice()
+    chunks = list(voice.synthesize(text))
+    if not chunks:
+        return b"", 0
+    rate = chunks[0].sample_rate
+    audio = np.concatenate([c.audio_int16_array for c in chunks])
+    return audio.tobytes(), rate
 
 
 async def _audio_player() -> None:
