@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.server.config import settings
-from backend.server.routes import admin, agents, auth, diagnostics, execute, files, memory, orchestrate, remote, system, ui, vision, voice
+from backend.server.routes import admin, agents, auth, diagnostics, execute, files, memory, orchestrate, remote, system, ui, vision, voice, replay
 
 # Initialize LLM provider at startup
 from backend.ai_modules.llm import create_llm_provider
@@ -57,6 +57,7 @@ app.include_router(agents.router)
 app.include_router(system.router)
 app.include_router(files.router)
 app.include_router(diagnostics.router)
+app.include_router(replay.router)
 
 # Phase E: Optionally mount MCP server at /mcp
 try:
