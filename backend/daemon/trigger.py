@@ -12,17 +12,12 @@ import sounddevice as sd
 
 from backend.ai_modules.speech.stt_whisper import transcribe_array
 from backend.ai_modules.speech.tts_piper import speak, stop_speech
-from backend.core.agents.commander import commander
-from backend.core.orchestrator.llm_layer import Intent, LLMResolveError
-from backend.core.orchestrator.router import process_input
-from backend.core.safe_executor.executor import ExecutionResult
-from backend.core.safe_executor.executor import execute as do_execute
+from backend.core.brain import brain, BrainRequest
 from backend.core.events import get_bus, Priority
 from backend.core.state import AssistantState, manager as state_manager
 from backend.daemon.ui_events import (
     CommandTranscribed,
     Executed,
-    IntentResolved,
     SpokenResponse,
     TriggerError,
     WakeHeard,
@@ -66,51 +61,14 @@ def _play_chime() -> None:
     sd.wait()
 
 
-def _spoken_response(intent: Intent, result: ExecutionResult) -> str:
-    status = result.status
-    action = intent.action
-    target = intent.target
-    if action == "agent_complete":
-        return (intent.args or {}).get("spoken") or result.message or "Done."
-    if status == "success":
-        if action == "open_app":
-            return f"Opening {target}"
-        if action == "close_app":
-            return f"Closing {target}"
-        if action == "get_time":
-            return f"The time is {result.message}"
-        if action == "play_youtube":
-            return result.message or f"Playing {target}"
-        if action == "search_google":
-            return f"Searching Google for {target}"
-        if action == "search_youtube":
-            return f"Searching YouTube for {target}"
-        if action == "open_url":
-            return f"Opening {target}"
-        if action == "set_volume":
-            return f"Setting volume to {intent.args.get('level', '')}"
-        if action == "volume_up":
-            return "Volume up"
-        if action == "volume_down":
-            return "Volume down"
-        if action == "mute":
-            return "Muted"
-        if action == "unmute":
-            return "Unmuted"
-        if action in ("shutdown_pc", "restart_pc", "sleep_pc"):
-            return result.message or "Done"
-        if action == "lock_screen":
-            return "Locking screen"
-        if action == "take_note":
-            return "Note saved"
-        if action == "set_reminder":
-            return "Reminder set"
-        return "Done"
-    if status == "blocked":
-        if action == "unknown":
-            return "Sorry, I didn't understand"
-        return result.reason or "Sorry, that command is not allowed"
-    return "Something went wrong"
+def _spoken_response(response) -> str:
+    """Extract spoken text from BrainResponse."""
+    if hasattr(response, 'spoken_text'):
+        return response.spoken_text
+    # Fallback for legacy format
+    if isinstance(response, dict):
+        return response.get('spoken_text', response.get('message', 'Done.'))
+    return str(response)
 
 
 def _emit(emit: EmitFn | None, event: Any) -> None:
@@ -163,15 +121,24 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         state_manager.transition_to(AssistantState.IDLE)
         return False
 
+    # Use Brain for unified pipeline
+    brain_request = BrainRequest(
+        user_id=DEFAULT_DAEMON_USER_ID,
+        input_text=command,
+        input_mode="voice",
+        session_id=None,
+        metadata={"peak": peak, "device_id": device_id},
+    )
+    
     try:
-        routed = await process_input(command, DEFAULT_DAEMON_USER_ID)
-    except LLMResolveError as e:
+        response = await brain.run(brain_request)
+    except Exception as e:
         state_manager.transition_to(AssistantState.ERROR)
-        err_event = TriggerError(detail=f"LLM unavailable: {e}")
+        err_event = TriggerError(detail=f"Brain error: {e}")
         get_bus().publish(err_event, priority=Priority.NORMAL)
         _emit(emit, err_event)
-        reply = "Sorry, my reasoning model is unavailable"
-        print(f"[ai] LLM unavailable: {e}")
+        reply = "Sorry, I encountered an error"
+        print(f"[ai] Brain error: {e}")
         print(f"[ai] → {reply}")
 
         state_manager.transition_to(AssistantState.SPEAKING)
@@ -182,37 +149,22 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         state_manager.transition_to(AssistantState.IDLE)
         return False
 
-    print(f"[ai] intent: {routed.intent.action} → {routed.intent.target} ({routed.source_layer})")
-    intent_event = IntentResolved(
-        action=routed.intent.action,
-        target=routed.intent.target,
-        source_layer=routed.source_layer,
-    )
-    get_bus().publish(intent_event, priority=Priority.NORMAL)
-    _emit(emit, intent_event)
+    print(f"[ai] response: {response.spoken_text} (latency: {response.latency_ms}ms, tools: {len(response.tool_calls)})")
+    
+    # Publish execution events for each tool call
+    for tool_call in response.tool_calls:
+        exec_event = Executed(
+            command=command,
+            status="success",
+            message=str(tool_call.get("result", "ok")),
+            latency_ms=response.latency_ms,
+            confidence=100.0,
+            confidence_reason=[]
+        )
+        get_bus().publish(exec_event, priority=Priority.NORMAL)
+        _emit(emit, exec_event)
 
-    state_manager.transition_to(AssistantState.EXECUTING)
-    result = await do_execute(routed.intent)
-
-    from backend.core.observability import engine as obs_engine
-    total_latency = int((asyncio.get_event_loop().time() - t0) * 1000)
-    obs_engine.report_tool_quality(request_id, result.confidence, result.status)
-    obs_engine.report_latency(request_id, total_latency)
-
-    print(f"[ai] result: {result.status} — {result.message or result.reason or 'ok'}")
-    exec_event = Executed(
-        command=command,
-        status=result.status,
-        message=result.message,
-        reason=result.reason,
-        latency_ms=result.latency_ms,
-        confidence=result.confidence,
-        confidence_reason=result.confidence_reason
-    )
-    get_bus().publish(exec_event, priority=Priority.NORMAL)
-    _emit(emit, exec_event)
-
-    reply = _spoken_response(routed.intent, result)
+    reply = response.spoken_text
 
     state_manager.transition_to(AssistantState.SPEAKING)
     await _speak_selective(reply, device_id)
