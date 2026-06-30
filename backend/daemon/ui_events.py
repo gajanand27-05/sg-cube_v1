@@ -176,3 +176,26 @@ class MemoryHitEvent:
 class VisionUpdateEvent:
     description: str
     windows: list | None = None
+
+
+@dataclass
+class STTPartialEvent:
+    """Partial transcript from streaming STT."""
+    text: str
+    is_final: bool = False
+
+
+@dataclass
+class TTSStartEvent:
+    text: str
+
+
+@dataclass
+class TTSChunkEvent:
+    text: str
+    progress: float  # 0.0 - 1.0
+
+
+@dataclass
+class TTSEndEvent:
+    text: str

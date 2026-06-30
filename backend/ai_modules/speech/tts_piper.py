@@ -1,14 +1,23 @@
+"""Streaming TTS with proper chunked playback and interrupt support."""
+import asyncio
 import time
 from pathlib import Path
+from typing import AsyncGenerator
 
 import numpy as np
 import sounddevice as sd
 from piper import PiperVoice
 
+from backend.core.events import get_bus, Priority
+from backend.daemon.ui_events import TTSChunkEvent, TTSStartEvent, TTSEndEvent
+
 VOICE_DIR = Path(__file__).parent / "piper_voices"
 VOICE_NAME = "en_US-ryan-high"
 
 _voice: PiperVoice | None = None
+_playback_task: asyncio.Task | None = None
+_audio_queue: asyncio.Queue | None = None
+_stop_event: asyncio.Event | None = None
 
 
 def _get_voice() -> PiperVoice:
@@ -25,98 +34,160 @@ def _get_voice() -> PiperVoice:
     return _voice
 
 
-def generate_audio(text: str) -> tuple[bytes, int]:
-    """Synthesize `text` and return raw PCM bytes (16kHz) and sample rate."""
+async def _audio_player() -> None:
+    """Background task that plays audio chunks from queue."""
+    global _audio_queue, _stop_event
+    
+    if _audio_queue is None or _stop_event is None:
+        return
+    
+    stream = None
+    try:
+        # Get first chunk to determine sample rate
+        first_chunk = await _audio_queue.get()
+        if first_chunk is None:
+            return
+        
+        rate = first_chunk.get("rate", 22050)
+        audio_data = first_chunk.get("audio", np.array([], dtype=np.int16))
+        
+        if audio_data.size > 0:
+            stream = sd.OutputStream(samplerate=rate, channels=1, dtype="int16")
+            stream.start()
+            stream.write(audio_data)
+        
+        # Play remaining chunks
+        while not _stop_event.is_set():
+            try:
+                chunk = await asyncio.wait_for(_audio_queue.get(), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
+            
+            if chunk is None:  # End signal
+                break
+            
+            audio_data = chunk.get("audio", np.array([], dtype=np.int16))
+            if audio_data.size > 0 and stream:
+                stream.write(audio_data)
+    
+    except Exception as e:
+        print(f"[TTS] Audio player error: {e}")
+    finally:
+        if stream:
+            stream.stop()
+            stream.close()
+        # Drain queue
+        while not _audio_queue.empty():
+            try:
+                _audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+
+async def speak_stream(text: str) -> AsyncGenerator[dict, None]:
+    """True streaming TTS — plays chunks as they're synthesized.
+    
+    Yields progress dicts: {"status": "started|playing|finished", "text": str, "progress": float}
+    """
+    global _playback_task, _audio_queue, _stop_event
+    
     voice = _get_voice()
-    chunks = list(voice.synthesize(text))
-    if not chunks:
-        return b"", 0
-    rate = chunks[0].sample_rate
-    audio = np.concatenate([c.audio_int16_array for c in chunks])
-    return audio.tobytes(), rate
+    
+    # Initialize streaming infrastructure
+    _audio_queue = asyncio.Queue(maxsize=10)
+    _stop_event = asyncio.Event()
+    _stop_event.clear()
+    
+    # Start audio player task
+    _playback_task = asyncio.create_task(_audio_player())
+    
+    # Emit start event
+    bus = get_bus()
+    bus.publish(TTSStartEvent(text=text), priority=Priority.HIGH)
+    
+    yield {"status": "started", "text": text, "progress": 0.0}
+    
+    try:
+        iterator = voice.synthesize(text)
+        chunk_count = 0
+        
+        for chunk in iterator:
+            if _stop_event.is_set():
+                break
+            
+            audio_array = chunk.audio_int16_array
+            rate = chunk.sample_rate
+            
+            # Queue chunk for playback
+            await _audio_queue.put({"audio": audio_array, "rate": rate})
+            
+            chunk_count += 1
+            yield {"status": "playing", "text": text, "progress": chunk_count * 0.1}
+            
+            # Small delay to let audio player start
+            await asyncio.sleep(0.01)
+        
+        # Signal end
+        await _audio_queue.put(None)
+        
+        if _playback_task:
+            await _playback_task
+        
+        bus.publish(TTSEndEvent(text=text), priority=Priority.HIGH)
+        yield {"status": "finished", "text": text, "progress": 1.0}
+        
+    except Exception as e:
+        print(f"[TTS] Streaming error: {e}")
+        _stop_event.set()
+        yield {"status": "error", "text": text, "error": str(e)}
+    finally:
+        # Cleanup
+        _audio_queue = None
+        _stop_event = None
+        _playback_task = None
 
-
-# ── Phase C2: Non-blocking TTS with interrupt ──
 
 def speak(text: str) -> dict:
-    """Synthesize `text` via Piper and play through the default audio device.
-
-    Non-blocking — returns immediately after dispatching audio playback.
-    Call `stop_speech()` to interrupt playback mid-utterance.
-    """
-    t0 = time.perf_counter()
-    voice = _get_voice()
-
-    chunks = list(voice.synthesize(text))
-    if not chunks:
-        return {
-            "status": "spoke",
-            "text": text,
-            "engine": "piper",
-            "voice": VOICE_NAME,
-            "latency_ms": int((time.perf_counter() - t0) * 1000),
-        }
-
-    rate = chunks[0].sample_rate
-    audio = np.concatenate([c.audio_int16_array for c in chunks])
-    # Pad with 250ms of trailing silence to avoid truncation.
-    silence = np.zeros(int(0.25 * rate), dtype=np.int16)
-    audio = np.concatenate([audio, silence])
-
-    sd.play(audio, samplerate=rate)
-
-    return {
-        "status": "spoke",
-        "text": text,
-        "engine": "piper",
-        "voice": VOICE_NAME,
-        "latency_ms": int((time.perf_counter() - t0) * 1000),
-    }
-
-
-def speak_stream(text: str) -> dict:
-    """Streaming variant — plays each synthesized chunk immediately.
-
-    Piper's `synthesize()` already returns an iterator. We play the first
-    chunk while subsequent chunks are still being generated.
-    Non-blocking — returns immediately after dispatching the first chunk.
-    """
-    t0 = time.perf_counter()
-    voice = _get_voice()
-    iterator = voice.synthesize(text)
-
+    """Synthesize and play text (blocking synthesis, non-blocking playback)."""
+    # Use streaming internally but wait for completion
+    async def _run():
+        async for _ in speak_stream(text):
+            pass
+    
+    import asyncio
     try:
-        first = next(iterator)
-    except StopIteration:
-        return {
-            "status": "spoke",
-            "text": text,
-            "engine": "piper",
-            "voice": VOICE_NAME,
-            "latency_ms": int((time.perf_counter() - t0) * 1000),
-        }
-
-    rate = first.sample_rate
-    first_audio = first.audio_int16_array
-    trailing = np.zeros(int(0.25 * rate), dtype=np.int16)
-
-    remaining: list[np.ndarray] = [first_audio]
-    for chunk in iterator:
-        remaining.append(chunk.audio_int16_array)
-    remaining.append(trailing)
-
-    full_audio = np.concatenate(remaining)
-    sd.play(full_audio, samplerate=rate)
-
-    return {
-        "status": "spoke",
-        "text": text,
-        "engine": "piper",
-        "voice": VOICE_NAME,
-        "latency_ms": int((time.perf_counter() - t0) * 1000),
-    }
+        loop = asyncio.get_running_loop()
+        # If already in async context, create task
+        task = loop.create_task(_run())
+        # Don't await - non-blocking
+        return {"status": "started", "text": text}
+    except RuntimeError:
+        # No running loop, run in new loop
+        asyncio.run(_run())
+        return {"status": "finished", "text": text}
 
 
 def stop_speech() -> None:
     """Immediately stop any in-progress speech playback."""
+    global _stop_event, _audio_queue, _playback_task
+    
+    if _stop_event:
+        _stop_event.set()
+    
+    # Clear queue
+    if _audio_queue:
+        while not _audio_queue.empty():
+            try:
+                _audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+    
+    # Also stop sounddevice directly
     sd.stop()
+    
+    print("[TTS] Speech interrupted")
+
+
+def is_speaking() -> bool:
+    """Check if TTS is currently playing."""
+    return _playback_task is not None and not _playback_task.done()

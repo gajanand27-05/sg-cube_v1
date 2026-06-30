@@ -5,13 +5,13 @@ import threading
 import uuid
 import wave
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, AsyncGenerator
 
 import numpy as np
 import sounddevice as sd
 
-from backend.ai_modules.speech.stt_whisper import transcribe_array
-from backend.ai_modules.speech.tts_piper import speak, stop_speech
+from backend.ai_modules.speech.stt_whisper import transcribe_array, transcribe_stream
+from backend.ai_modules.speech.tts_piper import speak, stop_speech, speak_stream, is_speaking
 from backend.core.brain import brain, BrainRequest
 from backend.core.events import get_bus, Priority
 from backend.core.state import AssistantState, manager as state_manager
@@ -22,6 +22,7 @@ from backend.daemon.ui_events import (
     TriggerError,
     WakeHeard,
 )
+from backend.daemon.ui_events import STTPartialEvent, TTSChunkEvent
 
 log = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ def on_wake_detected(emit: EmitFn | None = None) -> None:
 
 
 async def _speak_selective(text: str, device_id: Optional[str] = None):
-    """Speak locally (non-blocking) or push audio to a remote device."""
+    """Speak locally (streaming) or push audio to a remote device."""
     if device_id:
         from backend.ai_modules.speech.tts_piper import generate_audio
         from backend.server.routes.remote import manager as remote_manager
@@ -103,7 +104,9 @@ async def _speak_selective(text: str, device_id: Optional[str] = None):
         if audio_bytes:
             await remote_manager.broadcast_bytes_to_device(device_id, audio_bytes)
     else:
-        speak(text)
+        # Use streaming TTS for local playback
+        async for _ in speak_stream(text):
+            pass
 
 
 def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
