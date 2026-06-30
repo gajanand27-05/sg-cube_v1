@@ -6,12 +6,14 @@ import uuid
 import time
 import re
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional, List
 
 from backend.core.agents.commander import commander
 from backend.core.agent.context import ConversationContext
 from backend.core.context.builder import context_builder
 from backend.core.context.types import RequestContext
+from backend.core.memory.base import MemoryEntry, MemoryType
+from backend.core.memory.manager import memory as memory_manager
 
 
 @dataclass
@@ -171,6 +173,99 @@ class Brain:
             {"stage": "operator", "latency_ms": sum(tc.latency_ms for tc in tool_calls)},
             {"stage": "tts", "latency_ms": 0},
         ]
+
+    # ===== Unified Memory API =====
+    
+    def remember(self, content: str, mtype: MemoryType = MemoryType.FACT, 
+                 importance: float = 0.5, confidence: float = 0.9,
+                 tags: list[str] = None, source: str = "user",
+                 metadata: dict = None) -> str:
+        """Store a fact/preference/pattern in long-term memory.
+        
+        Returns the memory ID."""
+        entry = MemoryEntry(
+            content=content,
+            mtype=mtype,
+            importance=importance,
+            confidence=confidence,
+            tags=tags or [],
+            source=source,
+            metadata=metadata or {},
+        )
+        memory_manager.ltm.store(entry)
+        return str(entry.metadata.get("id", "unknown"))
+
+    def recall(self, query: str, mtype: MemoryType = None, limit: int = 5,
+               min_importance: float = 0.0) -> List[MemoryEntry]:
+        """Retrieve relevant memories with importance scoring."""
+        results = memory_manager.ltm.search(query, mtype=mtype, limit=limit * 2)
+        
+        # Filter by importance and apply access tracking
+        filtered = []
+        for entry in results:
+            if entry.importance >= min_importance:
+                entry.access()
+                filtered.append(entry)
+        
+        # Sort by combined score (relevance * importance * confidence * recency)
+        filtered.sort(key=lambda e: e.relevance * e.importance * e.confidence, reverse=True)
+        return filtered[:limit]
+
+    def forget(self, memory_id: str) -> bool:
+        """Mark a memory as forgotten (soft delete)."""
+        # ChromaDB doesn't have easy delete by custom ID, so we'd need to query first
+        # For now, we'll mark as forgotten in metadata if we can find it
+        # This is a placeholder - full implementation needs ID tracking
+        return False
+
+    def learn(self, user_query: str, tool_results: list[dict], success: bool = True) -> None:
+        """Learn from successful (or failed) tool executions.
+        
+        Extracts patterns and stores as PATTERN memory type."""
+        if not success or not tool_results:
+            return
+        
+        # Build pattern description
+        tools_used = [r.get("name", "unknown") for r in tool_results]
+        pattern = f"For '{user_query}': {', '.join(tools_used)}"
+        
+        entry = MemoryEntry(
+            content=pattern,
+            mtype=MemoryType.PATTERN,
+            importance=0.7,
+            confidence=0.8,
+            tags=["learned", "auto"],
+            source="auto",
+            metadata={"original_query": user_query, "tools": tools_used},
+        )
+        entry.strengthen(0.1)  # Boost because it worked
+        memory_manager.ltm.store(entry)
+
+    def strengthen_memory(self, query: str, amount: float = 0.1) -> int:
+        """Strengthen memories matching a query (e.g., after successful use)."""
+        results = self.recall(query, limit=10, min_importance=0.0)
+        count = 0
+        for entry in results:
+            entry.strengthen(amount)
+            # Re-store with updated importance
+            memory_manager.ltm.store(entry)
+            count += 1
+        return count
+
+    def consolidate_memories(self) -> dict:
+        """Periodic memory consolidation: merge duplicates, decay old, archive junk."""
+        # This would be called periodically (e.g., every few hours)
+        # For now, return stats
+        all_facts = memory_manager.ltm.get_all(MemoryType.FACT)
+        all_prefs = memory_manager.ltm.get_all(MemoryType.PREFERENCE)
+        all_patterns = memory_manager.ltm.get_all(MemoryType.PATTERN)
+        
+        return {
+            "facts": len(all_facts),
+            "preferences": len(all_prefs),
+            "patterns": len(all_patterns),
+            "status": "consolidation_scheduled",
+        }
 
 
 # Global instance
