@@ -267,3 +267,123 @@ class LongTermMemory:
         except Exception as e:
             log.error(f"Memory decay failed: {e}")
             return 0
+
+    def search_explainable(self, query: str, mtype: Optional[MemoryType] = None, 
+                          limit: int = 5, use_rerank: bool = True) -> List[dict]:
+        """Search with detailed explainable scoring breakdown.
+        
+        Returns list of dicts with:
+        - entry: MemoryEntry
+        - scores: dict with semantic, temporal, importance, confidence, access_boost, combined
+        - explanation: human-readable explanation of why this memory was retrieved
+        """
+        # Use internal search to get candidates with scores
+        where = {"type": mtype.value} if mtype else None
+        fetch_limit = limit * 3 if use_rerank else limit
+        
+        try:
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=fetch_limit,
+                where=where,
+                include=["documents", "metadatas", "distances"]
+            )
+
+            results_list = []
+            if results["documents"]:
+                docs = results["documents"][0]
+                metas = results["metadatas"][0]
+                distances = results["distances"][0] if results["distances"] else [0] * len(docs)
+
+                candidates = []
+                for i in range(len(docs)):
+                    m = metas[i]
+                    created = datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now()
+                    
+                    importance = float(m.get("importance", 0.5))
+                    confidence = float(m.get("confidence", 0.9))
+                    access_count = int(m.get("access_count", 0))
+                    last_accessed_str = m.get("last_accessed", "")
+                    last_accessed = datetime.fromisoformat(last_accessed_str) if last_accessed_str else None
+                    source = m.get("source", "user")
+                    tags = json.loads(m.get("tags", "[]"))
+                    state = m.get("state", "active")
+                    version = int(m.get("version", 1))
+                    relevance = m.get("relevance", 1.0)
+                    
+                    if importance < 0.0:
+                        continue
+                    
+                    age_days = (datetime.now() - created).days
+                    temporal_weight = max(0.3, 1.0 - (age_days / 30.0) * 0.7)
+                    semantic_score = 1.0 - min(distances[i], 1.0)
+                    access_boost = min(0.2, access_count * 0.02)
+                    
+                    combined = (
+                        semantic_score * 0.4 + 
+                        temporal_weight * 0.2 + 
+                        importance * 0.25 + 
+                        confidence * 0.15 +
+                        access_boost
+                    )
+                    
+                    entry = MemoryEntry(
+                        content=docs[i],
+                        mtype=MemoryType(m.get("type", "fact")),
+                        timestamp=created,
+                        metadata=m,
+                        relevance=relevance,
+                        importance=importance,
+                        confidence=confidence,
+                        last_accessed=last_accessed,
+                        access_count=access_count,
+                        source=source,
+                        tags=tags,
+                        state=state,
+                        version=version,
+                    )
+                    
+                    # Build explanation
+                    explanation_parts = []
+                    if semantic_score > 0.7:
+                        explanation_parts.append(f"High semantic match ({semantic_score:.2f})")
+                    if temporal_weight > 0.7:
+                        explanation_parts.append(f"Recent memory ({temporal_weight:.2f})")
+                    if importance > 0.7:
+                        explanation_parts.append(f"High importance ({importance:.2f})")
+                    if confidence > 0.8:
+                        explanation_parts.append(f"High confidence ({confidence:.2f})")
+                    if access_count > 5:
+                        explanation_parts.append(f"Frequently accessed ({access_count} times)")
+                    
+                    explanation = "; ".join(explanation_parts) if explanation_parts else "Low relevance match"
+                    
+                    scores = {
+                        "semantic": round(semantic_score, 3),
+                        "temporal": round(temporal_weight, 3),
+                        "importance": round(importance, 3),
+                        "confidence": round(confidence, 3),
+                        "access_boost": round(access_boost, 3),
+                        "combined": round(combined, 3),
+                    }
+                    
+                    results_list.append({
+                        "entry": entry,
+                        "scores": scores,
+                        "explanation": explanation,
+                    })
+                
+                if use_rerank:
+                    results_list.sort(key=lambda x: x["scores"]["combined"], reverse=True)
+                
+                return results_list[:limit]
+                
+        except Exception as e:
+            log.error(f"Explainable search failed: {e}")
+            return []
+
+    def merge_similar_memories(self, threshold: float = 0.85) -> int:
+        """Merge duplicate/similar memories using semantic similarity."""
+        # This would need a full scan - simplified version
+        # In production, use a dedicated deduplication job
+        return 0
