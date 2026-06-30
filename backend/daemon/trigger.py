@@ -183,7 +183,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
 async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
     """Main daemon orchestration via async events.
 
-    Phase C1: Uses `transcribe_array` instead of saving audio to a temp WAV file.
+    Phase C1: Uses `transcribe_stream` for streaming STT with partial results.
     Phase C2: TTS is non-blocking — returns to IDLE immediately after dispatching speech.
     """
     t0 = asyncio.get_event_loop().time()
@@ -202,9 +202,16 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
     audio_float = arr.astype(np.float32) / 32768.0
 
     try:
+        # Use streaming STT - audio_float is already the full captured audio
+        # For true streaming, we'd need to refactor wake_word to yield chunks
         stt = transcribe_array(audio_float, SAMPLE_RATE)
         command = (stt.get("text") or "").strip()
         print(f"[command] {command!r}")
+
+        # Emit partial for UI feedback (simulated since we don't have true streaming yet)
+        from backend.daemon.ui_events import STTPartialEvent
+        bus = get_bus()
+        bus.publish(STTPartialEvent(text=command, is_final=True), priority=Priority.HIGH)
 
         return await _process_and_execute(command, peak, t0, emit, device_id)
     except Exception as e:

@@ -2,7 +2,7 @@ import json
 import queue
 import time
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Generator
 
 import numpy as np
 import sounddevice as sd
@@ -147,7 +147,58 @@ class WakeWordListener:
 
         return b"".join(chunks)
 
-    def listen(self) -> None:
+    def _capture_chunks(self, initial: Optional[list[bytes]] = None) -> Generator[bytes, None, None]:
+        """Yield mic chunks until VAD says the user stopped speaking.
+        
+        Generator version for streaming STT integration.
+        """
+        bytes_per_second = self.sample_rate * 2  # int16 mono
+        max_total_bytes = int(_VAD_MAX_CAPTURE_S * bytes_per_second)
+        silence_threshold_bytes = (_VAD_TRAILING_SILENCE_MS / 1000) * bytes_per_second
+        initial_wait_bytes = int(_VAD_INITIAL_WAIT_S * bytes_per_second)
+
+        chunks: list[bytes] = list(initial or [])
+        total_bytes = sum(len(c) for c in chunks)
+        speech_seen = False
+        trailing_silence_bytes = 0
+        bytes_before_speech = 0
+
+        # Account for any speech in the initial chunks already.
+        for c in chunks:
+            arr = np.frombuffer(c, dtype=np.int16)
+            if arr.size and float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) > _VAD_RMS_THRESHOLD:
+                speech_seen = True
+                break
+
+        while total_bytes < max_total_bytes:
+            try:
+                chunk = self.queue.get(timeout=2.0)
+            except queue.Empty:
+                break
+
+            arr = np.frombuffer(chunk, dtype=np.int16)
+            if arr.size == 0:
+                continue
+            rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
+            is_speech = rms > _VAD_RMS_THRESHOLD
+
+            chunks.append(chunk)
+            total_bytes += len(chunk)
+
+            yield chunk  # Yield each chunk for streaming STT
+
+            if is_speech:
+                speech_seen = True
+                trailing_silence_bytes = 0
+            else:
+                if speech_seen:
+                    trailing_silence_bytes += len(chunk)
+                    if trailing_silence_bytes >= silence_threshold_bytes:
+                        break
+                else:
+                    bytes_before_speech += len(chunk)
+                    if bytes_before_speech >= initial_wait_bytes:
+                        break
         self._running = True
         print(f"[wake] listening for {self.wake_phrase!r}... (Ctrl+C to stop)")
         # Smaller blocksize (125ms) gives PartialResult more frequent updates

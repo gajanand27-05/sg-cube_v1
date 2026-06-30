@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from backend.ai_modules.llm import get_provider
 from backend.core.agents.base import BaseInternalAgent, TokenStreamEvent
@@ -17,6 +17,14 @@ class PlannerAgent(BaseInternalAgent):
         super().__init__("Planner")
 
     async def generate_plan(self, user_query: str, history: list[dict], context: AgentContext) -> list[dict]:
+        """Non-streaming entry point for backward compatibility."""
+        result = []
+        async for chunk in self.generate_plan_stream(user_query, history, context):
+            if chunk["type"] == "final":
+                return chunk["content"]
+        return result
+
+    async def generate_plan_stream(self, user_query: str, history: list[dict], context: AgentContext) -> AsyncGenerator[dict, None]:
         self._emit("planning", query=user_query)
         bus.publish(AgentThinkingEvent(self.name, True))
 
@@ -30,11 +38,13 @@ class PlannerAgent(BaseInternalAgent):
                 token = chunk["token"]
                 full_content += token
                 bus.publish(TokenStreamEvent(self.name, token, full_content))
+                yield {"type": "token", "content": token}
 
             parsed = json.loads(full_content)
 
             if "final_response" in parsed:
-                return parsed
+                yield {"type": "final", "content": parsed}
+                return
 
             calls = parsed.get("tool_calls") or parsed.get("toolCalls") or []
             if not isinstance(calls, list):
@@ -42,7 +52,7 @@ class PlannerAgent(BaseInternalAgent):
 
             steps = [c.get("reasoning", c.get("name")) for c in calls]
             self._emit("plan_ready", tool_count=len(calls), steps=steps)
-            return calls
+            yield {"type": "final", "content": calls}
         except Exception as e:
             self._emit("error", detail=str(e))
             raise
