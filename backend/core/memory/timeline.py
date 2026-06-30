@@ -100,27 +100,52 @@ class TimelineMemory:
             return []
 
     def search_timeline(self, query: str, limit: int = 5) -> List[MemoryEntry]:
-        """Semantic search for past events (e.g., 'What was I doing with PDF?')"""
+        """Semantic search for past events with temporal weighting."""
         try:
+            fetch_limit = limit * 3
             results = self.collection.query(
                 query_texts=[query],
-                n_results=limit
+                n_results=fetch_limit,
+                include=["documents", "metadatas", "distances"]
             )
 
             entries = []
             if results["documents"]:
                 docs = results["documents"][0]
                 metas = results["metadatas"][0]
+                distances = results["distances"][0] if results["distances"] else [0] * len(docs)
 
+                candidates = []
                 for i in range(len(docs)):
                     m = metas[i]
-                    entries.append(MemoryEntry(
-                        content=docs[i],
-                        mtype=MemoryType.EVENT,
-                        timestamp=datetime.fromisoformat(m["created_at"]),
-                        metadata=m,
-                        relevance=1.0
-                    ))
+                    created = datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now()
+                    
+                    # Semantic similarity
+                    semantic_score = 1.0 - min(distances[i], 1.0)
+                    
+                    # Temporal decay: recent events more relevant for "what was I doing" queries
+                    age_hours = (datetime.now() - created).total_seconds() / 3600
+                    temporal_weight = max(0.3, 1.0 - (age_hours / 48.0) * 0.7)
+                    
+                    # Source/app context bonus could be added here
+                    combined = (semantic_score * 0.7 + temporal_weight * 0.3)
+                    
+                    candidates.append({
+                        "entry": MemoryEntry(
+                            content=docs[i],
+                            mtype=MemoryType.EVENT,
+                            timestamp=created,
+                            metadata=m,
+                            relevance=combined
+                        ),
+                        "combined_score": combined
+                    })
+
+                # Rerank by combined score
+                candidates.sort(key=lambda x: x["combined_score"], reverse=True)
+                entries = [c["entry"] for c in candidates[:limit]]
+                
+                log.debug(f"Timeline search: {len(docs)} candidates -> {len(entries)} results")
             return entries
         except Exception as e:
             log.error(f"Timeline search failed: {e}")

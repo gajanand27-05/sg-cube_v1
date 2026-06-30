@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 import chromadb
@@ -98,49 +98,75 @@ class ScreenMemory:
     def get_latest_observation(self) -> Optional[str]:
         """Return the most recent visual summary stored."""
         try:
-            # Chroma doesn't have a simple 'get last' by default without sorting
-            # But we can query everything and sort by date if we had a metadata filter
-            # Or just use the 'get' with a limit.
-            results = self.collection.get(
-                limit=1,
-                include=["documents", "metadatas"]
-            )
-            if results["documents"]:
-                # Note: 'get' with limit=1 doesn't guarantee 'latest' without sorting.
-                # However, since we use UUIDs, it's random. 
-                # Let's use query with a very broad string to get recent stuff if possible,
-                # or better, just keep a cache in memory of the last one.
-                return results["documents"][0]
+            # Get recent and sort by time
+            recent = self.get_recent_observations(limit=1)
+            if recent:
+                return recent[0]["content"]
             return None
         except Exception:
             return None
 
-    def search_visual(self, query: str, limit: int = 3) -> List[MemoryEntry]:
-        """Retrieve relevant past visual context."""
+    def search_visual(self, query: str, limit: int = 3, current_app: str = None) -> List[MemoryEntry]:
+        """Retrieve relevant past visual context with relevance scoring."""
         try:
+            # Fetch more candidates for scoring
+            fetch_limit = limit * 3
             results = self.collection.query(
                 query_texts=[query],
-                n_results=limit
+                n_results=fetch_limit,
+                include=["documents", "metadatas", "distances"]
             )
 
             entries = []
             if results["documents"]:
                 docs = results["documents"][0]
                 metas = results["metadatas"][0]
+                distances = results["distances"][0] if results["distances"] else [0] * len(docs)
 
+                candidates = []
                 for i in range(len(docs)):
                     m = metas[i]
-                    entries.append(MemoryEntry(
-                        content=docs[i],
-                        mtype=MemoryType.VISUAL, # Visuals are effectively episodic context
-                        timestamp=datetime.fromisoformat(m["created_at"]),
-                        metadata=m,
-                        relevance=1.0
-                    ))
+                    created = datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now()
+                    
+                    # Visual relevance scoring
+                    semantic_score = 1.0 - min(distances[i], 1.0)
+                    
+                    # App match bonus (if currently in same app)
+                    app_bonus = 0.2 if current_app and m.get("app") == current_app else 0.0
+                    
+                    # Keyword overlap bonus
+                    query_keywords = set(query.lower().split())
+                    stored_keywords = set(m.get("keywords", "").lower().split(","))
+                    keyword_overlap = len(query_keywords & stored_keywords) / max(len(query_keywords), 1)
+                    keyword_bonus = min(keyword_overlap * 0.3, 0.3)
+                    
+                    # Temporal decay (recent visual context more relevant)
+                    age_hours = (datetime.now() - created).total_seconds() / 3600
+                    temporal_weight = max(0.4, 1.0 - (age_hours / 24.0) * 0.6)
+                    
+                    combined = (semantic_score * 0.5 + keyword_bonus + app_bonus) * temporal_weight
+                    
+                    candidates.append({
+                        "entry": MemoryEntry(
+                            content=docs[i],
+                            mtype=MemoryType.VISUAL,
+                            timestamp=created,
+                            metadata=m,
+                            relevance=combined
+                        ),
+                        "combined_score": combined
+                    })
+
+                # Rerank by combined score
+                candidates.sort(key=lambda x: x["combined_score"], reverse=True)
+                entries = [c["entry"] for c in candidates[:limit]]
+                
+                log.debug(f"Visual search: {len(docs)} candidates -> {len(entries)} results")
             return entries
         except Exception as e:
             log.error(f"Visual search failed: {e}")
             return []
+
 
 # Global instance
 screen_memory = ScreenMemory()

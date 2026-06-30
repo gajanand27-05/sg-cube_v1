@@ -1,7 +1,7 @@
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -19,8 +19,6 @@ CHROMA_PATH = Path(__file__).resolve().parents[3] / "backend" / "database" / "ch
 class ProviderEmbeddingFunction(EmbeddingFunction):
     """Bridge between ChromaDB and LLM Provider embeddings."""
     def __call__(self, input: Documents) -> Embeddings:
-        # ChromaDB calls this with a list of strings.
-        # We call our LLM provider for each.
         llm = get_provider()
         embeddings = []
         for text in input:
@@ -29,7 +27,6 @@ class ProviderEmbeddingFunction(EmbeddingFunction):
                 embeddings.append(vec)
             except Exception as e:
                 log.error(f"Embedding failed for text: {text[:50]}... Error: {e}")
-                # Fallback to zero vector if embedding fails (prevents crash)
                 embeddings.append([0.0] * 768)
         return embeddings
 
@@ -41,7 +38,6 @@ class LongTermMemory:
         self.client = chromadb.PersistentClient(path=str(CHROMA_PATH))
         self.ef = ProviderEmbeddingFunction()
         
-        # Initialize or get the collection
         self.collection = self.client.get_or_create_collection(
             name="sg_cube_memories",
             embedding_function=self.ef,
@@ -49,8 +45,6 @@ class LongTermMemory:
         )
 
     def store(self, entry: MemoryEntry):
-        """Store a fact or pattern with semantic embedding and metadata."""
-        # Ensure metadata contains required fields from Phase 12 plan
         metadata = entry.metadata.copy()
         metadata["type"] = entry.mtype.value
         metadata["created_at"] = entry.timestamp.isoformat() if isinstance(entry.timestamp, datetime) else entry.timestamp
@@ -66,45 +60,71 @@ class LongTermMemory:
         except Exception as e:
             log.error(f"Failed to store semantic memory: {e}")
 
-    def search(self, query: str, mtype: Optional[MemoryType] = None, limit: int = 5) -> List[MemoryEntry]:
-        """Perform semantic search (RAG) against the vector store."""
+    def search(self, query: str, mtype: Optional[MemoryType] = None, limit: int = 5, 
+               use_rerank: bool = True) -> List[MemoryEntry]:
+        """Semantic search with optional reranking and temporal weighting."""
         where = {"type": mtype.value} if mtype else None
 
         try:
+            # Fetch more candidates for reranking
+            fetch_limit = limit * 3 if use_rerank else limit
             results = self.collection.query(
                 query_texts=[query],
-                n_results=limit,
-                where=where
+                n_results=fetch_limit,
+                where=where,
+                include=["documents", "metadatas", "distances"]
             )
 
             entries = []
-            # results['documents'], results['metadatas'], results['distances'] are lists of lists
             if results["documents"]:
                 docs = results["documents"][0]
                 metas = results["metadatas"][0]
-                # distances = results["distances"][0] if results["distances"] else [0] * len(docs)
+                distances = results["distances"][0] if results["distances"] else [0] * len(docs)
 
+                candidates = []
                 for i in range(len(docs)):
                     m = metas[i]
-                    entries.append(MemoryEntry(
-                        content=docs[i],
-                        mtype=MemoryType(m.get("type", "fact")),
-                        timestamp=datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now(),
-                        metadata=m,
-                        relevance=m.get("relevance", 1.0)
-                    ))
+                    created = datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now()
+                    relevance = m.get("relevance", 1.0)
+                    
+                    # Temporal weight: recent memories get boost (exponential decay over 30 days)
+                    age_days = (datetime.now() - created).days
+                    temporal_weight = max(0.3, 1.0 - (age_days / 30.0) * 0.7)
+                    
+                    # Semantic similarity (1 - cosine distance)
+                    semantic_score = 1.0 - min(distances[i], 1.0)
+                    
+                    # Combined score
+                    combined = (semantic_score * 0.7 + temporal_weight * 0.3) * relevance
+                    
+                    candidates.append({
+                        "entry": MemoryEntry(
+                            content=docs[i],
+                            mtype=MemoryType(m.get("type", "fact")),
+                            timestamp=created,
+                            metadata=m,
+                            relevance=relevance
+                        ),
+                        "semantic_score": semantic_score,
+                        "temporal_weight": temporal_weight,
+                        "combined_score": combined
+                    })
+
+                # Rerank by combined score
+                if use_rerank:
+                    candidates.sort(key=lambda x: x["combined_score"], reverse=True)
+                
+                entries = [c["entry"] for c in candidates[:limit]]
+                log.debug(f"LTM search: {len(docs)} candidates -> {len(entries)} results (rerank={use_rerank})")
+            
             return entries
         except Exception as e:
             log.error(f"Semantic search failed: {e}")
             return []
 
     def get_all(self, mtype: MemoryType) -> List[MemoryEntry]:
-        """Retrieve all memories of a specific type (non-semantic)."""
         try:
-            results = self.collection.get(
-                where={"type": mtype.value}
-            )
-            
+            results = self.collection.get(where={"type": mtype.value})
             entries = []
             if results["documents"]:
                 docs = results["documents"]
