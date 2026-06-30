@@ -45,23 +45,38 @@ class LongTermMemory:
         )
 
     def store(self, entry: MemoryEntry):
+        """Store a memory entry with all enhanced fields."""
+        # Ensure entry has an ID
+        if "id" not in entry.metadata:
+            entry.metadata["id"] = str(uuid.uuid4())
+        
         metadata = entry.metadata.copy()
         metadata["type"] = entry.mtype.value
         metadata["created_at"] = entry.timestamp.isoformat() if isinstance(entry.timestamp, datetime) else entry.timestamp
         metadata["relevance"] = entry.relevance
+        
+        # Add enhanced fields to metadata for retrieval
+        metadata["importance"] = entry.importance
+        metadata["confidence"] = entry.confidence
+        metadata["last_accessed"] = entry.last_accessed.isoformat() if entry.last_accessed else ""
+        metadata["access_count"] = entry.access_count
+        metadata["source"] = entry.source
+        metadata["tags"] = json.dumps(entry.tags)
+        metadata["state"] = entry.state
+        metadata["version"] = entry.version
 
         try:
             self.collection.add(
-                ids=[str(uuid.uuid4())],
+                ids=[entry.metadata["id"]],
                 documents=[entry.content],
                 metadatas=[metadata]
             )
-            log.info(f"Stored semantic memory: {entry.content[:50]}...")
+            log.info(f"Stored semantic memory: {entry.content[:50]}... (importance={entry.importance:.2f})")
         except Exception as e:
             log.error(f"Failed to store semantic memory: {e}")
 
     def search(self, query: str, mtype: Optional[MemoryType] = None, limit: int = 5, 
-               use_rerank: bool = True) -> List[MemoryEntry]:
+               use_rerank: bool = True, min_importance: float = 0.0) -> List[MemoryEntry]:
         """Semantic search with optional reranking and temporal weighting."""
         where = {"type": mtype.value} if mtype else None
 
@@ -85,7 +100,22 @@ class LongTermMemory:
                 for i in range(len(docs)):
                     m = metas[i]
                     created = datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now()
+                    
+                    # Parse enhanced fields from metadata
+                    importance = float(m.get("importance", 0.5))
+                    confidence = float(m.get("confidence", 0.9))
+                    access_count = int(m.get("access_count", 0))
+                    last_accessed_str = m.get("last_accessed", "")
+                    last_accessed = datetime.fromisoformat(last_accessed_str) if last_accessed_str else None
+                    source = m.get("source", "user")
+                    tags = json.loads(m.get("tags", "[]"))
+                    state = m.get("state", "active")
+                    version = int(m.get("version", 1))
                     relevance = m.get("relevance", 1.0)
+                    
+                    # Filter by importance threshold
+                    if importance < 0.0:
+                        continue
                     
                     # Temporal weight: recent memories get boost (exponential decay over 30 days)
                     age_days = (datetime.now() - created).days
@@ -94,17 +124,36 @@ class LongTermMemory:
                     # Semantic similarity (1 - cosine distance)
                     semantic_score = 1.0 - min(distances[i], 1.0)
                     
-                    # Combined score
-                    combined = (semantic_score * 0.7 + temporal_weight * 0.3) * relevance
+                    # Access frequency boost
+                    access_boost = min(0.2, access_count * 0.02)
+                    
+                    # Combined score with importance, confidence, access frequency
+                    combined = (
+                        semantic_score * 0.4 + 
+                        temporal_weight * 0.2 + 
+                        importance * 0.25 + 
+                        confidence * 0.15 +
+                        access_boost
+                    )
+                    
+                    entry = MemoryEntry(
+                        content=docs[i],
+                        mtype=MemoryType(m.get("type", "fact")),
+                        timestamp=created,
+                        metadata=m,
+                        relevance=relevance,
+                        importance=importance,
+                        confidence=confidence,
+                        last_accessed=last_accessed,
+                        access_count=access_count,
+                        source=source,
+                        tags=tags,
+                        state=state,
+                        version=version,
+                    )
                     
                     candidates.append({
-                        "entry": MemoryEntry(
-                            content=docs[i],
-                            mtype=MemoryType(m.get("type", "fact")),
-                            timestamp=created,
-                            metadata=m,
-                            relevance=relevance
-                        ),
+                        "entry": entry,
                         "semantic_score": semantic_score,
                         "temporal_weight": temporal_weight,
                         "combined_score": combined
@@ -131,14 +180,90 @@ class LongTermMemory:
                 metas = results["metadatas"]
                 for i in range(len(docs)):
                     m = metas[i]
+                    created = datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now()
+                    importance = float(m.get("importance", 0.5))
+                    confidence = float(m.get("confidence", 0.9))
+                    access_count = int(m.get("access_count", 0))
+                    last_accessed_str = m.get("last_accessed", "")
+                    last_accessed = datetime.fromisoformat(last_accessed_str) if last_accessed_str else None
+                    source = m.get("source", "user")
+                    tags = json.loads(m.get("tags", "[]"))
+                    state = m.get("state", "active")
+                    version = int(m.get("version", 1))
+                    relevance = m.get("relevance", 1.0)
+                    
                     entries.append(MemoryEntry(
                         content=docs[i],
                         mtype=MemoryType(m.get("type", "fact")),
-                        timestamp=datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now(),
+                        timestamp=created,
                         metadata=m,
-                        relevance=m.get("relevance", 1.0)
+                        relevance=relevance,
+                        importance=importance,
+                        confidence=confidence,
+                        last_accessed=last_accessed,
+                        access_count=access_count,
+                        source=source,
+                        tags=tags,
+                        state=state,
+                        version=version,
                     ))
             return entries
         except Exception as e:
             log.error(f"Failed to retrieve all memories: {e}")
             return []
+
+    def update_access(self, memory_id: str) -> bool:
+        """Update access count and last_accessed for a memory."""
+        try:
+            results = self.collection.get(ids=[memory_id], include=["metadatas"])
+            if results["metadatas"]:
+                m = results["metadatas"][0]
+                access_count = int(m.get("access_count", 0)) + 1
+                m["access_count"] = access_count
+                m["last_accessed"] = datetime.now().isoformat()
+                self.collection.update(ids=[memory_id], metadatas=[m])
+                return True
+        except Exception as e:
+            log.error(f"Failed to update access for {memory_id}: {e}")
+        return False
+
+    def strengthen_memory(self, memory_id: str, amount: float = 0.1) -> bool:
+        """Increase importance/confidence of a memory."""
+        try:
+            results = self.collection.get(ids=[memory_id], include=["metadatas"])
+            if results["metadatas"]:
+                m = results["metadatas"][0]
+                importance = min(1.0, float(m.get("importance", 0.5)) + amount)
+                confidence = min(1.0, float(m.get("confidence", 0.9)) + amount * 0.5)
+                m["importance"] = importance
+                m["confidence"] = confidence
+                m["version"] = int(m.get("version", 1)) + 1
+                m["state"] = "strengthened"
+                self.collection.update(ids=[memory_id], metadatas=[m])
+                return True
+        except Exception as e:
+            log.error(f"Failed to strengthen memory {memory_id}: {e}")
+        return False
+
+    def decay_memories(self, days_threshold: int = 30) -> int:
+        """Decay old, unused memories."""
+        try:
+            all_results = self.collection.get(include=["metadatas", "documents"])
+            decayed = 0
+            for i, m in enumerate(all_results["metadatas"]):
+                created = datetime.fromisoformat(m.get("created_at", datetime.now().isoformat()))
+                age_days = (datetime.now() - created).days
+                access_count = int(m.get("access_count", 0))
+                
+                if age_days > days_threshold and access_count < 2:
+                    importance = max(0.1, float(m.get("importance", 0.5)) - 0.1)
+                    m["importance"] = importance
+                    if importance < 0.2:
+                        m["state"] = "archived"
+                    memory_id = all_results["ids"][i]
+                    self.collection.update(ids=[memory_id], metadatas=[m])
+                    decayed += 1
+            return decayed
+        except Exception as e:
+            log.error(f"Memory decay failed: {e}")
+            return 0
