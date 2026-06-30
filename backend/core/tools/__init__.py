@@ -11,7 +11,7 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_TOOL_MODULES_BLACKLIST = {"__init__", "registry", "sandbox", "llm_helper", "builtins"}
+_TOOL_MODULES_BLACKLIST = {"__init__", "registry", "sandbox", "llm_helper"}
 
 
 def _discover_tools() -> None:
