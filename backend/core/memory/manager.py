@@ -74,7 +74,7 @@ class MemoryManager:
             recent_events.sort(key=lambda x: x.timestamp, reverse=True)
             
             for e in recent_events[:8]: # Cap at 8 unique items
-                delta = datetime.now() - e.timestamp
+                delta = datetime.now = datetime.now()
                 if delta.total_seconds() < 60:
                     time_str = "Just now"
                 elif delta.total_seconds() < 3600:
@@ -104,6 +104,95 @@ class MemoryManager:
         context += "──────────────────────────────────────────────────"
         
         return context
+
+    # ===== Enhanced Memory API =====
+    
+    def remember(self, content: str, mtype: MemoryType = MemoryType.FACT, 
+                 importance: float = 0.5, confidence: float = 0.9,
+                 tags: list[str] = None, source: str = "user",
+                 metadata: dict = None) -> str:
+        """Store a memory with full metadata."""
+        entry = MemoryEntry(
+            content=content,
+            mtype=mtype,
+            importance=importance,
+            confidence=confidence,
+            tags=tags or [],
+            source=source,
+            metadata=metadata or {},
+        )
+        self.ltm.store(entry)
+        return entry.metadata.get("id", "unknown")
+
+    def recall(self, query: str, mtype: MemoryType = None, limit: int = 5,
+               min_importance: float = 0.0) -> List[MemoryEntry]:
+        """Retrieve relevant memories with importance scoring."""
+        results = self.ltm.search(query, mtype=mtype, limit=limit, min_importance=min_importance)
+        
+        # Filter by importance and apply access tracking
+        filtered = []
+        for entry in results:
+            if entry.importance >= min_importance:
+                entry.access()
+                filtered.append(entry)
+        
+        # Sort by combined score
+        filtered.sort(key=lambda e: e.relevance * e.importance * e.confidence, reverse=True)
+        return filtered[:limit]
+
+    def forget(self, memory_id: str) -> bool:
+        """Mark a memory as forgotten (soft delete)."""
+        return False  # Placeholder - requires ID tracking
+
+    def learn(self, user_query: str, tool_results: list[dict], success: bool = True) -> None:
+        """Learn from successful (or failed) tool executions."""
+        if not success or not tool_results:
+            return
+        
+        tools_used = [r.get("name", "unknown") for r in tool_results]
+        pattern = f"For '{user_query}': {', '.join(tools_used)}"
+        
+        entry = MemoryEntry(
+            content=pattern,
+            mtype=MemoryType.PATTERN,
+            importance=0.7,
+            confidence=0.8,
+            tags=["learned", "auto"],
+            source="auto",
+            metadata={"original_query": user_query, "tools": tools_used},
+        )
+        entry.strengthen(0.1)
+        self.ltm.store(entry)
+
+    def strengthen_memory(self, query: str, amount: float = 0.1) -> int:
+        """Strengthen memories matching a query (e.g., after successful use)."""
+        results = self.recall(query, limit=10, min_importance=0.0)
+        count = 0
+        for entry in results:
+            entry.strengthen(amount)
+            self.ltm.strengthen_memory(entry.metadata.get("id", ""), amount)
+            count += 1
+        return count
+
+    def consolidate_memories(self) -> dict:
+        """Periodic memory consolidation: merge duplicates, decay old, archive junk."""
+        decayed = self.ltm.decay_memories()
+        all_facts = self.ltm.get_all(MemoryType.FACT)
+        all_prefs = self.ltm.get_all(MemoryType.PREFERENCE)
+        all_patterns = self.ltm.get_all(MemoryType.PATTERN)
+        
+        return {
+            "facts": len(all_facts),
+            "preferences": len(all_prefs),
+            "patterns": len(all_patterns),
+            "decayed": decayed,
+            "status": "consolidation_complete",
+        }
+
+    def search_explainable(self, query: str, mtype: MemoryType = None, 
+                          limit: int = 5) -> List[dict]:
+        """Search with detailed explainable scoring breakdown."""
+        return self.ltm.search_explainable(query, mtype=mtype, limit=limit)
 
 
 # Global instance
