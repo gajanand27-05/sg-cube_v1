@@ -1,8 +1,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12+-blue?style=for-the-badge&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/platform-windows-lightgrey?style=for-the-badge&logo=windows&logoColor=white" />
-  <img src="https://img.shields.io/badge/LLM-OpenRouter-FF6600?style=for-the-badge&logo=openai&logoColor=white" />
-  <img src="https://img.shields.io/badge/local--phi3-777?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/LLM-Gemini-4285F4?style=for-the-badge&logo=google&logoColor=white" />
+  <img src="https://img.shields.io/badge/local-Ollama-777?style=for-the-badge" />
   <img src="https://img.shields.io/badge/STT-faster--whisper-9cf?style=for-the-badge" />
   <img src="https://img.shields.io/badge/TTS-Piper-ff69b4?style=for-the-badge" />
   <img src="https://img.shields.io/badge/frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=white" />
@@ -44,7 +44,7 @@ flowchart TB
 
     subgraph ROUTER["🔀 3-Tier Router"]
         direction LR
-        CACHE[Cache] --> RULE[Rules] -->         LLM[OpenRouter Cloud]
+        CACHE[Cache] --> RULE[Rules] -->         LLM[Gemini / Ollama]
     end
 
     LLM --> SCH --> PLA --> GUA --> OPR --> HLR
@@ -80,7 +80,7 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    REQ[Request] --> SCH[Scholar] -->|inject context| PLA[Planner]
+    REQ[Request] --> CMD[Commander] -->|inject context| PLA[Planner]
     PLA --> GUA{Guardian}
     GUA -->|unsafe| PLA
     GUA -->|safe| OPR[Operator]
@@ -100,11 +100,11 @@ flowchart TB
 | **Text-to-Speech** | Piper neural TTS | ✅ |
 | **Voice Pipeline** | Local (default) or LiveKit streaming | ✅ |
 | **Intent Routing** | 3-tier: Cache → Regex Rules (~40) → LLM | ✅ |
-| **Agent LLM** | OpenRouter — Qwen3 Coder 480B (cloud) | ✅ |
+| **Agent LLM** | Gemini 2.5 Flash (cloud) / Ollama (local fallback) | ✅ |
 | **Intent Classifier** | Ollama — phi3 (local, lightweight) | ✅ |
 | **Vision** | Periodic screen capture + Qwen2.5-VL | ✅ |
 | **Memory** | ChromaDB (long-term/episodic) + in-memory (short-term/timeline/screen) | ✅ |
-| **Agent Pipeline** | Scholar → Planner → Guardian → Operator → Healer | ✅ |
+| **Agent Pipeline** | Commander → Planner → Guardian → Operator → Healer | ✅ |
 | **Tool System** | 70+ built-in tools (system, files, web, media, AI, games) | ✅ |
 | **Games** | Blackjack · Hangman · Wordle · TicTacToe · Connect4 · RPS | ✅ |
 | **MCP Protocol** | FastMCP SSE server + external MCP client | ✅ |
@@ -130,8 +130,9 @@ flowchart TB
 ### Setup
 
 ```bash
-# 1. Pull local models (intent classifier + embeddings)
+# 1. Pull local models (intent classifier + embeddings + vision)
 ollama pull phi3
+ollama pull qwen2.5vl:3b
 ollama pull nomic-embed-text
 
 # 2. Python environment
@@ -145,14 +146,14 @@ python tools/download_piper_voice.py
 
 # 4. Configure
 copy .env.example .env
-# Set OPENROUTER_API_KEY in .env (get one at https://openrouter.ai/keys)
+# Set GEMINI_API_KEY in .env (get one at https://aistudio.google.com/apikey)
 ```
 
 ### Run
 
 ```bash
-# Terminal 1 — Backend daemon (wake word + web server)
-python -m backend.daemon.main
+# Terminal 1 — Backend API server
+python -m uvicorn backend.server.main:app --host 127.0.0.1 --port 8001
 
 # Terminal 2 — Frontend dev server
 cd frontend
@@ -168,7 +169,7 @@ Open **http://localhost:5173** — API at `http://127.0.0.1:8001`.
 
 ```bash
 cd frontend && npm run build
-python -m backend.daemon.main   # FastAPI auto-serves built frontend
+python -m uvicorn backend.server.main:app --host 0.0.0.0 --port 8001   # auto-serves built frontend
 ```
 
 ---
@@ -177,9 +178,10 @@ python -m backend.daemon.main   # FastAPI auto-serves built frontend
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `APP_HOST` / `APP_PORT` | `127.0.0.1` / `8000` | Web server bind address |
-| `OPENROUTER_API_KEY` | — | Cloud LLM key (get at openrouter.ai/keys) |
-| `OPENROUTER_MODEL` | `qwen/qwen3-coder-480b-a35b` | Agent model |
+| `APP_HOST` / `APP_PORT` | `127.0.0.1` / `8001` | Web server bind address |
+| `GEMINI_API_KEY` | — | Cloud LLM key (get at aistudio.google.com/apikey) |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Agent model |
+| `OPENROUTER_API_KEY` | — | Fallback cloud LLM key |
 | `OLLAMA_MODEL` | `phi3` | Local intent classifier (lightweight) |
 | `WHISPER_MODEL` | `base` | STT model size (tiny/base/small) |
 | `VOICE_PIPELINE` | `local` | `local` or `livekit` |
@@ -204,7 +206,7 @@ backend/
 │   └── routes/       # admin, agents, auth, execute, files,
 │                      # memory, orchestrate, system, vision, voice
 ├── core/             # Intelligence layer
-│   ├── agents/       # Scholar, Planner, Guardian, Operator, Watcher
+│   ├── agents/       # Commander, Planner, Guardian, Operator, Watcher
 │   ├── tools/        # 70+ tools + registry + builtins (+ 6 games)
 │   ├── memory/       # ChromaDB, episodic, timeline, working, screen
 │   ├── orchestrator/ # Cache → Rules → LLM router
@@ -247,5 +249,5 @@ All phases A–G covered (35 tests passing).
 ---
 
 <p align="center">
-  <sub>agent model via OpenRouter — voice, vision &amp; memory stay local</sub>
+  <sub>agent model via Gemini — voice, vision &amp; memory stay local</sub>
 </p>
