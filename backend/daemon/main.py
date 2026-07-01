@@ -22,7 +22,7 @@ create_llm_provider()
 # Initialize async event bus — must be done on the event loop
 from backend.core.events import init_event_bus, get_bus
 
-from backend.daemon.trigger import handle_wake, on_wake_detected
+from backend.daemon.trigger import handle_wake, on_wake_detected, register_proactive_handler
 from backend.daemon.wake_word import WakeWordListener
 from backend.daemon.clipboard_watcher import watcher as cb_watcher
 from backend.daemon.vision_loop import vision_loop

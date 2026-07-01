@@ -28,14 +28,20 @@ async def generate(
     temperature: float = 0.0,
     json_mode: bool = False,
     timeout: float = 30.0,
+    images: list[str] | None = None,
     **kwargs: Any,
 ) -> str:
-    """Non-streaming generation."""
+    """Non-streaming generation. Supports images for VLM."""
     model = model or settings.fast_model
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+    
+    user_content: list[dict] = [{"type": "text", "text": prompt}]
+    if images:
+        for img in images:
+            user_content.append({"type": "image", "image": img})
+    messages.append({"role": "user", "content": user_content})
 
     payload: dict[str, Any] = {
         "model": model,

@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 import psutil
 
-from backend.core.events import bus
+from backend.core.events import get_bus
 from backend.daemon.ui_events import ProactiveEvent, InternalAgentEvent
 
 log = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ class WatcherAgent:
             "action": action, 
             "triggered": False
         })
-        bus.publish(InternalAgentEvent("Watcher", "registered battery monitor", {"threshold": threshold}))
+        get_bus().publish(InternalAgentEvent("Watcher", "registered battery monitor", {"threshold": threshold}))
         log.info(f"Watcher: monitoring battery < {threshold}%")
 
     def add_folder_task(self, folder: str, pattern: str, action: str) -> bool:
@@ -62,7 +62,7 @@ class WatcherAgent:
             "action": action, 
             "known": known
         })
-        bus.publish(InternalAgentEvent("Watcher", "registered folder monitor", {"folder": str(p)}))
+        get_bus().publish(InternalAgentEvent("Watcher", "registered folder monitor", {"folder": str(p)}))
         log.info(f"Watcher: monitoring {p} for {pattern}")
         return True
 
@@ -101,7 +101,7 @@ class WatcherAgent:
 
     def _fire(self, query: str):
         log.info(f"Watcher firing proactive event: {query}")
-        bus.publish(ProactiveEvent(query=query))
+        get_bus().publish(ProactiveEvent(query=query))
 
 
 # Global instance

@@ -20,12 +20,20 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_llm_provider()
-    init_event_bus()
-    get_bus().start()
+    log.info("LLM provider created")
+    bus = init_event_bus()
+    log.info(f"Bus initialized: {bus}")
+    log.info(f"Bus.start: {bus.start}")
+    result = bus.start()
+    log.info(f"Bus.start() returned: {result}, type: {type(result)}")
+    await result
+    log.info("Bus started")
     register_proactive_handler()
     log.info("LLM provider & event bus initialized")
     yield
-    await get_bus().stop()
+    result = bus.stop()
+    log.info(f"Bus.stop() returned: {result}, type: {type(result)}")
+    await result
     log.info("Shutting down")
 
 

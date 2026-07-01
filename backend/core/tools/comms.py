@@ -6,6 +6,8 @@ from urllib.parse import quote_plus
 import pyperclip
 
 from backend.core.tools.registry import SecurityLevel, ToolResult, tool
+from backend.core.events import get_bus
+from backend.daemon.ui_events import HandoverEvent
 
 
 @tool
@@ -33,15 +35,12 @@ def clipboard_get() -> ToolResult:
 def send_to_phone(content: str, is_url: bool = False) -> ToolResult:
     """Send a link or a text snippet directly to the connected Android device.
     Useful for "send this to my phone", "open this link on my mobile"."""
-    from backend.core.events import bus
-    from backend.daemon.ui_events import HandoverEvent
-    
     event = HandoverEvent(
         url=content if is_url else None,
         text=content if not is_url else None,
         htype="link" if is_url else "text"
     )
-    bus.publish(event)
+    get_bus().publish(event)
     return ToolResult.success(f"Sent {'link' if is_url else 'text'} to mobile device")
 
 

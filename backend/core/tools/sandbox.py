@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from backend.core.events import bus
+from backend.core.events import get_bus
 from backend.core.tools.registry import REGISTRY, SecurityLevel, ToolResult
 
 
@@ -40,7 +40,7 @@ class PermissionGuard:
             self._pending[token] = (name, args)
             
             # Publish event so the UI can show a confirmation dialog
-            bus.publish(PendingConfirmation(token, name, args))
+            get_bus().publish(PendingConfirmation(token, name, args))
             
             return ToolResult.pending(
                 confirmation_token=token,

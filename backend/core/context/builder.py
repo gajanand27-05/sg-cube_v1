@@ -51,7 +51,7 @@ class ContextBuilder:
         
         # 7. Tools & capabilities
         tools = list(REGISTRY.values())
-        capabilities = capability_registry.get_all()
+        capabilities = capability_registry.all()
         
         # Await all
         stm_context, ltm_context, timeline_context, screen_context = await asyncio.gather(

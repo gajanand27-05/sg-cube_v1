@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Coroutine, Optional
 
-from backend.core.events import bus
+from backend.core.events import get_bus
 from backend.core.tools.registry import ToolResult, ToolStatus
 from backend.daemon.ui_events import ToolFinishedEvent, ToolStartedEvent
 
@@ -44,7 +44,7 @@ class Task:
         if self._async_task and not self._async_task.done():
             self._async_task.cancel()
             self.status = TaskStatus.CANCELLED
-            bus.publish(TaskEvent(self.id, self.status, message="Task cancelled by user"))
+            get_bus().publish(TaskEvent(self.id, self.status, message="Task cancelled by user"))
 
 
 class Runtime:
@@ -70,8 +70,8 @@ class Runtime:
         
         task.status = TaskStatus.RUNNING
         task.start_time = time.perf_counter()
-        bus.publish(TaskEvent(task_id, task.status, message=f"Starting tool {name}"))
-        bus.publish(ToolStartedEvent(tool_name=name, args=args))
+        get_bus().publish(TaskEvent(task_id, task.status, message=f"Starting tool {name}"))
+        get_bus().publish(ToolStartedEvent(tool_name=name, args=args))
 
         try:
             # Execute with timeout
@@ -117,7 +117,7 @@ class Runtime:
         finally:
             task.end_time = time.perf_counter()
             latency = int((task.end_time - task.start_time) * 1000)
-            bus.publish(ToolFinishedEvent(
+            get_bus().publish(ToolFinishedEvent(
                 tool_name=name,
                 status=task.result.status.value if task.result else "error",
                 result=task.result.message if task.result else None,
@@ -125,7 +125,7 @@ class Runtime:
                 latency_ms=latency,
             ))
             
-            bus.publish(TaskEvent(
+            get_bus().publish(TaskEvent(
                 task_id, 
                 task.status, 
                 message=task.result.message or task.result.reason,

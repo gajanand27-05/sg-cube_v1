@@ -109,7 +109,7 @@ class AsyncEventBus:
                 except Exception:
                     log.exception(f"Error in callback {callback.__name__} for {event_type.__name__}")
 
-    def start(self) -> None:
+    async def start(self) -> None:
         """Start worker tasks on the current event loop."""
         if self._running:
             return
@@ -139,6 +139,7 @@ class AsyncEventBus:
 
 # Global instance
 bus: AsyncEventBus | None = None
+_initialized = False
 
 
 def init_event_bus(
@@ -147,12 +148,16 @@ def init_event_bus(
     low_workers: int = 2,
 ) -> AsyncEventBus:
     """Initialize global event bus."""
-    global bus
+    global bus, _initialized
     bus = AsyncEventBus(high_workers, normal_workers, low_workers)
+    _initialized = True
     return bus
 
 
 def get_bus() -> AsyncEventBus:
+    global bus, _initialized
     if bus is None:
-        raise RuntimeError("Event bus not initialized. Call init_event_bus() first.")
+        # Auto-initialize if not already initialized
+        bus = AsyncEventBus()
+        _initialized = True
     return bus

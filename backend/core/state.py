@@ -2,7 +2,7 @@ import logging
 from enum import Enum
 from typing import Optional
 
-from backend.core.events import bus
+from backend.core.events import get_bus
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class StateMachine:
         log.info(f"State: {old_state} -> {new_state}")
         
         # Publish the change to the bus so the UI and other modules can react
-        bus.publish(StateChangedEvent(old_state, new_state))
+        get_bus().publish(StateChangedEvent(old_state, new_state))
 
 
 # Global instance

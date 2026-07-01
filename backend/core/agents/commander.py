@@ -91,15 +91,17 @@ class CommanderAgent:
         for _iter in range(MAX_ITER):
             # A. Planner Stage (receives full AgentContext) - streaming
             async for chunk in self.planner.generate_plan_stream(text, history, agent_context):
-                if chunk.type == "token":
-                    yield CommanderChunk("token", chunk.content, {"request_id": request_id})
-                elif chunk.type == "final_response":
-                    yield CommanderChunk("final_response", chunk.content)
-                    context.add_assistant(chunk.content)
-                    asyncio.create_task(episodic_summarizer.summarize_and_store(text, tool_records))
-                    return
-                elif chunk.type == "tool_calls":
-                    calls = chunk.content
+                if chunk["type"] == "token":
+                    yield CommanderChunk("token", chunk["content"], {"request_id": request_id})
+                elif chunk["type"] == "final":
+                    content = chunk["content"]
+                    if isinstance(content, dict) and "final_response" in content:
+                        yield CommanderChunk("final_response", content["final_response"])
+                        context.add_assistant(content["final_response"])
+                        asyncio.create_task(episodic_summarizer.summarize_and_store(text, tool_records))
+                        return
+                    # tool_calls
+                    calls = content if isinstance(content, list) else content.get("tool_calls", [content])
                     # B. Guardian Stage (Verification)
                     valid_calls, pending_calls, errors = await self.guardian.verify_plan(text, calls, request_id, agent_context)
 

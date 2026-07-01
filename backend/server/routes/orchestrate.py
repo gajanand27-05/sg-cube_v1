@@ -44,7 +44,7 @@ async def chat(
     except LLMResolveError as e:
         return {"response": f"LLM unavailable: {e}", "status": "error"}
 
-    reply = result.message or f"Executing: {result.intent.action} {result.intent.target}"
+    reply = result.intent.args.get("spoken", "") or f"Executing: {result.intent.action} {result.intent.target}"
     return {
         "response": reply,
         "intent": result.intent.model_dump(),

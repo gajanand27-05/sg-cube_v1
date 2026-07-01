@@ -2,10 +2,10 @@ import json
 from typing import Any, AsyncGenerator
 
 from backend.ai_modules.llm import get_provider
-from backend.core.agents.base import BaseInternalAgent, TokenStreamEvent
-from backend.core.events import bus
+from backend.core.agents.base import BaseInternalAgent
+from backend.core.events import get_bus
 from backend.core.tools.registry import schemas_prompt
-from backend.daemon.ui_events import AgentThinkingEvent
+from backend.daemon.ui_events import AgentThinkingEvent, TokenStreamEvent
 from backend.ai_modules.llm.routing import TaskType
 from backend.core.context.types import AgentContext
 
@@ -26,21 +26,28 @@ class PlannerAgent(BaseInternalAgent):
 
     async def generate_plan_stream(self, user_query: str, history: list[dict], context: AgentContext) -> AsyncGenerator[dict, None]:
         self._emit("planning", query=user_query)
-        bus.publish(AgentThinkingEvent(self.name, True))
+        get_bus().publish(AgentThinkingEvent(self.name, True))
 
         prompt = self._build_prompt(context)
-        messages = [{"role": "system", "content": prompt}, *history]
+        messages = [{"role": "system", "content": prompt}]
+        if history:
+            messages.extend(history)
+        else:
+            messages.append({"role": "user", "content": user_query})
 
         full_content = ""
         try:
             llm = get_provider()
-            async for chunk in llm.chat_stream(messages, task=TaskType.REASONING, temperature=0.2):
+            async for chunk in llm.chat_stream(messages, task=TaskType.PLANNING, temperature=0.2):
                 token = chunk["token"]
                 full_content += token
-                bus.publish(TokenStreamEvent(self.name, token, full_content))
+                get_bus().publish(TokenStreamEvent(self.name, token, full_content))
                 yield {"type": "token", "content": token}
 
-            parsed = json.loads(full_content)
+            import re
+            m = re.search(r"```(?:json)?\s*\n?(.*?)```", full_content, re.DOTALL)
+            clean = m.group(1).strip() if m else full_content.strip()
+            parsed = json.loads(clean)
 
             if "final_response" in parsed:
                 yield {"type": "final", "content": parsed}
@@ -57,7 +64,7 @@ class PlannerAgent(BaseInternalAgent):
             self._emit("error", detail=str(e))
             raise
         finally:
-            bus.publish(AgentThinkingEvent(self.name, False))
+            get_bus().publish(AgentThinkingEvent(self.name, False))
 
     def _build_prompt(self, context: AgentContext) -> str:
         from backend.core.safe_executor.command_whitelist import _get_chrome_profiles

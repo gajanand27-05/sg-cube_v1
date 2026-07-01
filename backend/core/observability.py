@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Optional
 
-from backend.core.events import bus
+from backend.core.events import get_bus
 from backend.daemon.ui_events import ConfidenceEvent, ReliabilityMetrics
 
 log = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ class ObservabilityEngine:
             hallucination_total=self._hallucination_total
         )
         
-        bus.publish(ConfidenceEvent(
+        get_bus().publish(ConfidenceEvent(
             request_id=request_id,
             metrics=metrics,
             details=metrics_data

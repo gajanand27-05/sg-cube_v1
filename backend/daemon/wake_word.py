@@ -199,6 +199,9 @@ class WakeWordListener:
                     bytes_before_speech += len(chunk)
                     if bytes_before_speech >= initial_wait_bytes:
                         break
+
+    def listen(self) -> None:
+        """Continuously listen for wake word and fire callbacks."""
         self._running = True
         print(f"[wake] listening for {self.wake_phrase!r}... (Ctrl+C to stop)")
         # Smaller blocksize (125ms) gives PartialResult more frequent updates

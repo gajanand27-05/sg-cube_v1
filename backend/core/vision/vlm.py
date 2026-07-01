@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Any, Optional
 
-from backend.ai_modules.llm import ollama_client
+from backend.ai_modules.llm.ollama_client import generate as ollama_generate
 from backend.server.config import settings
 
 log = logging.getLogger(__name__)
@@ -23,11 +23,11 @@ async def analyze_screenshot(image_b64: str, window_title: str) -> Optional[dict
     prompt = f"Focused Window: {window_title}\n\nWhat is on the screen?"
     
     try:
-        response = ollama_client.generate(
+        response = await ollama_generate(
             prompt=prompt,
             system=VLM_SYSTEM_PROMPT,
             images=[image_b64],
-            model=settings.vlm_model,
+            model=settings.vision_model,
             json_mode=True,
             timeout=120.0 # Vision models take longer
         )

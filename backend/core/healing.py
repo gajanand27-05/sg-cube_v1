@@ -2,7 +2,7 @@ import logging
 from enum import Enum
 from typing import Any, Optional
 
-from backend.core.events import bus
+from backend.core.events import get_bus
 
 log = logging.getLogger(__name__)
 
