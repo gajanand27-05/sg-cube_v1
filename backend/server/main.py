@@ -9,9 +9,13 @@ from fastapi.staticfiles import StaticFiles
 from backend.server.config import settings
 from backend.server.routes import admin, agents, auth, diagnostics, execute, files, memory, orchestrate, remote, system, ui, vision, voice, replay
 
+# Bootstrap tool registry — triggers all @tool decorators before any agent runs.
+import backend.core.tools  # noqa: F401
+
 # Initialize LLM provider at startup
 from backend.ai_modules.llm import create_llm_provider
 from backend.core.events import init_event_bus, get_bus
+from backend.core.caps.registry import capability_registry
 from backend.daemon.trigger import register_proactive_handler
 
 log = logging.getLogger(__name__)
@@ -21,6 +25,11 @@ log = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     create_llm_provider()
     log.info("LLM provider created")
+    # Ponytail-fix: capabilities were never discovered, so the Planner saw an
+    # empty tool list and fell through to final_response for any rule-engine
+    # miss. Discover once at startup; idempotent via internal guard.
+    capability_registry.discover()
+    log.info(f"Capability registry: {len(capability_registry.all())} capabilities")
     bus = init_event_bus()
     log.info(f"Bus initialized: {bus}")
     log.info(f"Bus.start: {bus.start}")
