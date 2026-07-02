@@ -23,6 +23,7 @@ env/
 *.sqlite3
 backend/database/*.db
 backend/database/chroma_db/
+backend/database/dogfooding.json
 
 # Logs / runtime
 backend/logs/**

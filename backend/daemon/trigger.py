@@ -15,6 +15,7 @@ from backend.ai_modules.speech.tts_piper import speak, stop_speech, speak_stream
 from backend.core.brain import brain, BrainRequest
 from backend.core.events import get_bus, Priority
 from backend.core.state import AssistantState, manager as state_manager
+from backend.core.dogfooding import ledger as dogfooding_ledger
 from backend.daemon.ui_events import (
     CommandTranscribed,
     Executed,
@@ -136,6 +137,10 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
     try:
         response = await brain.run(brain_request)
     except Exception as e:
+        try:
+            dogfooding_ledger.record_crash()
+        except Exception:
+            pass
         state_manager.transition_to(AssistantState.ERROR)
         err_event = TriggerError(detail=f"Brain error: {e}")
         get_bus().publish(err_event, priority=Priority.NORMAL)
@@ -187,38 +192,51 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
     Phase C2: TTS is non-blocking — returns to IDLE immediately after dispatching speech.
     """
     t0 = asyncio.get_event_loop().time()
-
-    state_manager.transition_to(AssistantState.THINKING)
-    arr = np.frombuffer(audio_bytes, dtype=np.int16)
-    peak = int(np.max(np.abs(arr))) if arr.size else 0
-    rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) if arr.size else 0
-
-    if rms < 200:
-        print(f"[trigger] skipping whisper: capture too quiet (rms={rms:.0f})")
-        state_manager.transition_to(AssistantState.IDLE)
-        return False
-
-    # Normalize int16 → float32 for Whisper
-    audio_float = arr.astype(np.float32) / 32768.0
+    outcome = False  # ponytail: captured into dogfooding ledger via finally
 
     try:
-        # Use streaming STT - audio_float is already the full captured audio
-        # For true streaming, we'd need to refactor wake_word to yield chunks
-        stt = transcribe_array(audio_float, SAMPLE_RATE)
-        command = (stt.get("text") or "").strip()
-        print(f"[command] {command!r}")
+        state_manager.transition_to(AssistantState.THINKING)
+        arr = np.frombuffer(audio_bytes, dtype=np.int16)
+        peak = int(np.max(np.abs(arr))) if arr.size else 0
+        rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) if arr.size else 0
 
-        # Emit partial for UI feedback (simulated since we don't have true streaming yet)
-        from backend.daemon.ui_events import STTPartialEvent
-        bus = get_bus()
-        bus.publish(STTPartialEvent(text=command, is_final=True), priority=Priority.HIGH)
+        if rms < 200:
+            print(f"[trigger] skipping whisper: capture too quiet (rms={rms:.0f})")
+            state_manager.transition_to(AssistantState.IDLE)
+            return False
 
-        return await _process_and_execute(command, peak, t0, emit, device_id)
-    except Exception as e:
-        state_manager.transition_to(AssistantState.ERROR)
-        log.exception(f"trigger crash: {e}")
-        state_manager.transition_to(AssistantState.IDLE)
-        return False
+        # Normalize int16 → float32 for Whisper
+        audio_float = arr.astype(np.float32) / 32768.0
+
+        try:
+            # Use streaming STT - audio_float is already the full captured audio
+            # For true streaming, we'd need to refactor wake_word to yield chunks
+            stt = transcribe_array(audio_float, SAMPLE_RATE)
+            command = (stt.get("text") or "").strip()
+            print(f"[command] {command!r}")
+
+            # Emit partial for UI feedback (simulated since we don't have true streaming yet)
+            from backend.daemon.ui_events import STTPartialEvent
+            bus = get_bus()
+            bus.publish(STTPartialEvent(text=command, is_final=True), priority=Priority.HIGH)
+
+            outcome = await _process_and_execute(command, peak, t0, emit, device_id)
+            return outcome
+        except Exception as e:
+            state_manager.transition_to(AssistantState.ERROR)
+            log.exception(f"trigger crash: {e}")
+            state_manager.transition_to(AssistantState.IDLE)
+            try:
+                dogfooding_ledger.record_crash()
+            except Exception:
+                pass
+            return False
+    finally:
+        latency_ms = int((asyncio.get_event_loop().time() - t0) * 1000)
+        try:
+            dogfooding_ledger.record_command(outcome, latency_ms)
+        except Exception:
+            pass
 
 
 from backend.daemon.ui_events import ProactiveEvent

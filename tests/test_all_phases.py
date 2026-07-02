@@ -412,6 +412,64 @@ def test_phase_g_tool_usage_tracking():
     print("  [PASS] Phase G: tool usage tracking")
 
 
+def test_phase_h_dogfooding_ledger(tmp_path=None):
+    """Dogfooding ledger: counters persist, rates compute, bugs record, and /diagnostics surfaces the snapshot.
+
+    Uses a temp ledger path so the real backend/database/dogfooding.json is not mutated.
+    """
+    import tempfile
+    from pathlib import Path
+    from backend.core import dogfooding as dg_mod
+    from backend.core.dogfooding import Ledger
+
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "test_ledger.json"
+        led = Ledger(path=path)
+
+        led.record_wake(True)
+        led.record_wake(False)
+        led.record_command(True, latency_ms=900)
+        led.record_command(False, latency_ms=1200)
+        led.record_tool(True, latency_ms=80)
+        led.record_tool(False, latency_ms=50)
+        led.record_crash()
+        ent = led.record_bug("P1", "the test passed")
+        assert ent["priority"] == "P1"
+
+        snap = led.snapshot()
+        assert snap["wake_attempts"] == 2
+        assert snap["wake_successes"] == 1
+        assert snap["command_total"] == 2
+        assert snap["command_success"] == 1
+        assert snap["tools_total"] == 2
+        assert snap["tools_success"] == 1
+        assert snap["crashes"] == 1
+        assert snap["p1_bugs"] == 1
+        assert snap["rates"]["wake_success_pct"] == 50.0
+        assert snap["rates"]["command_success_pct"] == 50.0
+        assert snap["rates"]["avg_command_latency_ms"] == 1050
+
+        # dump → reload: counters survive, semantics preserved
+        reloaded = Ledger(path=path)
+        s2 = reloaded.snapshot()
+        assert s2["wake_attempts"] == 2
+        assert s2["command_total"] == 2
+        assert s2["p1_bugs"] == 1
+        assert s2["rates"]["avg_command_latency_ms"] == 1050
+
+    # Module-level singleton also returns a snapshot without crashing.
+    snap = dg_mod.ledger.snapshot()
+    assert "rates" in snap and "wake_success_pct" in snap["rates"]
+
+    # /diagnostics surface picks up the ledger
+    from backend.server.routes.diagnostics import get_diagnostics
+    res = get_diagnostics()
+    assert "dogfooding" in res
+    assert "rates" in res["dogfooding"]
+
+    print("  [PASS] Phase H: dogfooding ledger persists, computes rates, surfaces in /diagnostics")
+
+
 def test_phase_g_hello_world_plugin():
     """hello_world plugin should be discoverable and callable via registry."""
     import backend.core.tools
@@ -462,6 +520,7 @@ def main():
         ("Phase G: Diagnostics", test_phase_g_diagnostics_endpoint),
         ("Phase G: Tool usage", test_phase_g_tool_usage_tracking),
         ("Phase G: hello_world", test_phase_g_hello_world_plugin),
+        ("Phase H: Dogfooding ledger", test_phase_h_dogfooding_ledger),
     ]
 
     passed = 0

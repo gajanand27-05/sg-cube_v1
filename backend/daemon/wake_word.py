@@ -8,6 +8,8 @@ import numpy as np
 import sounddevice as sd
 import vosk
 
+from backend.core.dogfooding import ledger as dogfooding_ledger
+
 vosk.SetLogLevel(-1)
 
 MODELS_DIR = Path(__file__).resolve().parents[1] / "ai_modules" / "speech" / "vosk_models"
@@ -280,6 +282,11 @@ class WakeWordListener:
                         pass
                     self._drain()
                     self._capturing = False
+                    # ponytail: one-line dogfooding hook — survived wake=True/False
+                    try:
+                        dogfooding_ledger.record_wake(command_handled)
+                    except Exception:
+                        pass
                     if command_handled:
                         empty_in_a_row = 0
                         followup_until = time.monotonic() + _FOLLOWUP_WINDOW_S

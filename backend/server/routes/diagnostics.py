@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter
 
 from backend.core.observability import engine as obs_engine
+from backend.core.dogfooding import ledger as dogfooding_ledger
 from backend.core.tools.registry import REGISTRY
 
 log = logging.getLogger(__name__)
@@ -32,6 +33,11 @@ def record_tool_usage(name: str, success: bool, latency_ms: int) -> None:
         stats["successes"] += 1
     else:
         stats["errors"] += 1
+    # mirror into the persistent dogfooding ledger
+    try:
+        dogfooding_ledger.record_tool(success, latency_ms)
+    except Exception:
+        pass
 
 
 @router.get("")
@@ -67,7 +73,14 @@ def get_diagnostics():
                 sum(metrics._recall_scores) / len(metrics._recall_scores), 1
             ) if metrics._recall_scores else 100,
         },
+        "dogfooding": dogfooding_ledger.snapshot(),
     }
+
+
+@router.get("/dogfooding")
+def get_dogfooding():
+    """Lightweight counter summary from the persistent ledger."""
+    return dogfooding_ledger.snapshot()
 
 
 @router.get("/tools")
