@@ -47,7 +47,24 @@ class PlannerAgent(BaseInternalAgent):
             import re
             m = re.search(r"```(?:json)?\s*\n?(.*?)```", full_content, re.DOTALL)
             clean = m.group(1).strip() if m else full_content.strip()
-            parsed = json.loads(clean)
+            try:
+                parsed = json.loads(clean)
+            except (json.JSONDecodeError, ValueError):
+                # Ponytail-fix: bad LLM JSON used to bubble out of the planner and
+                # trip the outer except (Commander -> "I tried a few steps but
+                # couldn't finish that."). One corrective retry with zero prose
+                # lets the model recover without re-prompting the user.
+                self._emit("retrying_parse", reason="bad_json")
+                messages.append({"role": "assistant", "content": full_content})
+                messages.append({"role": "user", "content": "Your previous reply was not valid JSON. Output ONLY a single JSON object. No prose, no markdown."})
+                full_content = ""
+                async for chunk in llm.chat_stream(messages, task=TaskType.PLANNING, temperature=0.2):
+                    token = chunk["token"]
+                    full_content += token
+                    yield {"type": "token", "content": token}
+                m = re.search(r"```(?:json)?\s*\n?(.*?)```", full_content, re.DOTALL)
+                clean = m.group(1).strip() if m else full_content.strip()
+                parsed = json.loads(clean)
 
             if "final_response" in parsed:
                 yield {"type": "final", "content": parsed}
