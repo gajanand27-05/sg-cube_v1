@@ -92,7 +92,14 @@ class PlannerAgent(BaseInternalAgent):
             profile_hint = f"\nChrome profiles available: {names}\nIf the user asks about 'my account' or a Chrome profile, use the matching profile name from this list.\n"
 
         # Build capability list from context
-        caps = "\n".join([f"- {c.name}: {c.description}" for c in context.capabilities[:50]])
+        # Ponytail-fix: removed the arbitrary 50-cap so the planner sees every
+        # available tool, and enriched each line with security level + tags so
+        # the model can self-declare confidence on non-SAFE picks.
+        def _cap_line(c):
+            sec = c.security.value if hasattr(c.security, "value") else str(c.security)
+            tags = f" [{','.join(c.tags)}]" if c.tags else ""
+            return f"- {c.name}{tags} ({sec}): {c.description}"
+        caps = "\n".join(_cap_line(c) for c in context.capabilities)
         
         # Build memory context string
         memory_parts = []
