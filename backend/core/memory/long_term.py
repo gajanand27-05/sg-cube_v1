@@ -113,10 +113,12 @@ class LongTermMemory:
                     version = int(m.get("version", 1))
                     relevance = m.get("relevance", 1.0)
                     
-                    # Filter by importance threshold
-                    if importance < 0.0:
+                    # Ponytail-fix: previous `importance < 0.0` was a tautological skip
+                    # — importance is float >= 0 by construction, so the filter was a
+                    # no-op and min_importance was silently ignored. Use the real param.
+                    if importance < min_importance:
                         continue
-                    
+
                     # Temporal weight: recent memories get boost (exponential decay over 30 days)
                     age_days = (datetime.now() - created).days
                     temporal_weight = max(0.3, 1.0 - (age_days / 30.0) * 0.7)
@@ -311,9 +313,8 @@ class LongTermMemory:
                     version = int(m.get("version", 1))
                     relevance = m.get("relevance", 1.0)
                     
-                    if importance < 0.0:
-                        continue
-                    
+                    # Ponytail-fix: search_explainable accepts no min_importance, so the
+                    # previous `importance < 0.0` was an unreachable tautology. Drop it.
                     age_days = (datetime.now() - created).days
                     temporal_weight = max(0.3, 1.0 - (age_days / 30.0) * 0.7)
                     semantic_score = 1.0 - min(distances[i], 1.0)

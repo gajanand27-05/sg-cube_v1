@@ -87,8 +87,9 @@ class Brain:
 
         yield BrainChunk(type="context_ready", metadata={"latency_ms": int((time.perf_counter() - t0) * 1000)})
 
-        # Create conversation context for Commander
-        conversation = ConversationContext()
+        # Ponytail-fix: pass session_id into the conversation context so Commander
+        # can stamp RequestContext.session_id without a hasattr fallback.
+        conversation = ConversationContext(session_id=request.session_id)
 
         # Run Commander pipeline with streaming
         tool_records = []

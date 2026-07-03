@@ -69,7 +69,7 @@ class CommanderAgent:
         request = RequestContext(
             user_intent=text,
             user_id=user_id,
-            session_id=context.session_id if hasattr(context, 'session_id') else None,
+            session_id=context.session_id,
             request_id=str(uuid.uuid4())[:8],
             input_mode="voice",
         )
@@ -103,7 +103,11 @@ class CommanderAgent:
                     # tool_calls
                     calls = content if isinstance(content, list) else content.get("tool_calls", [content])
                     # B. Guardian Stage (Verification)
-                    valid_calls, pending_calls, errors = await self.guardian.verify_plan(text, calls, request_id, agent_context)
+                    # Ponytail-fix: GuardianAgent.verify_plan signature is (user_query, calls, request_id)
+                    # — passes exactly 3 args. The previous extra `agent_context` positional raised
+                    # TypeError on every planning iteration, so the planner never reached the operator
+                    # stage for LLM-survivable tool picks.
+                    valid_calls, pending_calls, errors = await self.guardian.verify_plan(text, calls, request_id)
 
                     if errors:
                         log.warning(f"Commander: Guardian rejected parts of the plan: {errors}")

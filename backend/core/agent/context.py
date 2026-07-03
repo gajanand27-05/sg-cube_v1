@@ -15,9 +15,13 @@ class Turn:
 
 
 class ConversationContext:
-    def __init__(self, max_turns: int = 10) -> None:
+    def __init__(self, max_turns: int = 10, session_id: str | None = None) -> None:
         # max_turns counts individual messages (5 user + 5 assistant = 10)
         self.turns: deque[Turn] = deque(maxlen=max_turns)
+        # Ponytail-fix: plumbed in so Commander can stamp RequestContext.session_id
+        # end-to-end instead of `hasattr`-guarding a missing field. None is the
+        # default — daemon is single-user so a session_id is best-effort identity.
+        self.session_id = session_id
 
     def add_user(self, text: str) -> None:
         self.turns.append(Turn("user", text))
