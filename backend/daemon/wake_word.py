@@ -23,11 +23,9 @@ _VAD_TRAILING_SILENCE_MS = 800  # stop after this much silence post-speech
 _VAD_MAX_CAPTURE_S = 10.0  # hard cap so a stuck mic doesn't hang forever
 _VAD_INITIAL_WAIT_S = 3.0  # how long to wait for the user to start speaking
 
-# Follow-up mode is currently DISABLED (set to 0.0) so that the UI only
-# pops up when the wake word "onyx" is heard.
-_FOLLOWUP_TRIGGER_RMS = 1000
-_FOLLOWUP_WINDOW_S = 0.0
-_FOLLOWUP_MAX_EMPTY = 2  # unused when window is 0
+_FOLLOWUP_TRIGGER_RMS = 500    # lower = more sensitive to quiet speech
+_FOLLOWUP_WINDOW_S = 3.0        # seconds the follow-up window stays open
+_FOLLOWUP_MAX_EMPTY = 2
 
 
 

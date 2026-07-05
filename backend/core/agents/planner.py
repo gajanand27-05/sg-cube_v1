@@ -38,7 +38,7 @@ class PlannerAgent(BaseInternalAgent):
         full_content = ""
         try:
             llm = get_provider()
-            async for chunk in llm.chat_stream(messages, task=TaskType.PLANNING, temperature=0.2):
+            async for chunk in llm.chat_stream(messages, task=TaskType.PLANNING, temperature=0.1):
                 token = chunk["token"]
                 full_content += token
                 get_bus().publish(TokenStreamEvent(self.name, token, full_content))
@@ -58,7 +58,7 @@ class PlannerAgent(BaseInternalAgent):
                 messages.append({"role": "assistant", "content": full_content})
                 messages.append({"role": "user", "content": "Your previous reply was not valid JSON. Output ONLY a single JSON object. No prose, no markdown."})
                 full_content = ""
-                async for chunk in llm.chat_stream(messages, task=TaskType.PLANNING, temperature=0.2):
+                async for chunk in llm.chat_stream(messages, task=TaskType.PLANNING, temperature=0.1):
                     token = chunk["token"]
                     full_content += token
                     yield {"type": "token", "content": token}
