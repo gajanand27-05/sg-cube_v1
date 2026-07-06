@@ -126,19 +126,17 @@ class MemoryManager:
 
     def recall(self, query: str, mtype: MemoryType = None, limit: int = 5,
                min_importance: float = 0.0) -> List[MemoryEntry]:
-        """Retrieve relevant memories with importance scoring."""
+        """Retrieve relevant memories, honoring LTM.search's composite ranking."""
+        # ltm.search already ranks by
+        # semantic*0.4 + temporal*0.2 + importance*0.25 + confidence*0.15 + access_boost
+        # and applies min_importance internally. Don't re-sort here — an earlier
+        # `relevance * importance * confidence` resort dropped the semantic and
+        # temporal signals, so a well-matched memory could rank below an
+        # off-topic high-importance one.
         results = self.ltm.search(query, mtype=mtype, limit=limit, min_importance=min_importance)
-        
-        # Filter by importance and apply access tracking
-        filtered = []
         for entry in results:
-            if entry.importance >= min_importance:
-                entry.access()
-                filtered.append(entry)
-        
-        # Sort by combined score
-        filtered.sort(key=lambda e: e.relevance * e.importance * e.confidence, reverse=True)
-        return filtered[:limit]
+            entry.access()
+        return results
 
     def forget(self, memory_id: str) -> bool:
         """Mark a memory as forgotten (soft delete)."""
