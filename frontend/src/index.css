@@ -56,12 +56,48 @@
     @apply bg-sgc-bg text-sgc-primary font-sans antialiased;
   }
 
-  ::-webkit-scrollbar { width: 6px; }
-  ::-webkit-scrollbar-track { @apply bg-sgc-bg; }
-  ::-webkit-scrollbar-thumb { @apply bg-sgc-dim rounded; }
-  ::-webkit-scrollbar-thumb:hover { @apply bg-sgc-secondary; }
+  /* Scrollbars — previously #005577 thumb on #000 bg gave ~2:1 contrast,
+     effectively invisible. Bump to 8px with a gradient thumb, defined
+     border, and glowing hover so scrollable areas actually read as
+     interactive. */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track {
+    background: rgba(0, 20, 30, 0.6);
+    border-left: 1px solid rgba(0, 229, 255, 0.08);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #0088aa 0%, #005577 100%);
+    border: 1px solid rgba(0, 229, 255, 0.25);
+    border-radius: 1px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #00e5ff 0%, #0088aa 100%);
+    border-color: #00e5ff;
+    box-shadow: 0 0 4px rgba(0, 229, 255, 0.4);
+  }
+  ::-webkit-scrollbar-corner { background: rgba(0, 20, 30, 0.6); }
+
+  /* Firefox */
+  * { scrollbar-color: #0088aa rgba(0, 20, 30, 0.6); scrollbar-width: thin; }
 
   ::selection {
     @apply bg-sgc-primary text-sgc-bg;
+  }
+}
+
+/* Typographic scale — page titles, section headings, captions.
+   The audit found "all headings identical". Use these on any page that
+   currently repeats the same font-sans font-bold text-2xl tracking-[2px]
+   combo for both a page title and a section header. */
+@layer components {
+  .h-page {
+    @apply font-sans font-bold text-2xl tracking-[2px] text-sgc-primary;
+    text-shadow: 0 0 12px rgba(0, 243, 255, 0.35);
+  }
+  .h-section {
+    @apply font-sans font-semibold text-base tracking-wider text-sgc-secondary;
+  }
+  .h-caption {
+    @apply font-mono text-[10px] tracking-widest uppercase text-sgc-dim;
   }
 }

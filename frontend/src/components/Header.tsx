@@ -1,6 +1,14 @@
 import { motion } from 'framer-motion'
+import { useSocketStore } from '@/store'
 
 export function Header() {
+  // Tie ONYX status to the actual WS connection. The old pill was always
+  // green regardless — misleading when the backend is down and the UI
+  // silently reconnects every 3s.
+  const connected = useSocketStore((s) => s.connected)
+  const color = connected ? '#00ff41' : '#ff0033'
+  const label = connected ? 'ONYX ONLINE' : 'ONYX OFFLINE'
+
   return (
     <header className="flex justify-between items-center h-10 border-b border-sgc-border-bright px-4 bg-[rgba(0,243,255,0.05)] shadow-[0_2px_10px_rgba(0,243,255,0.1)]">
       <div className="flex items-center gap-5">
@@ -20,12 +28,16 @@ export function Header() {
       </div>
       <div className="flex items-center gap-2">
         <motion.span
-          className="w-2 h-2 rounded-full bg-[#00ff41] shadow-[0_0_8px_#00ff41]"
-          animate={{ opacity: [1, 0, 1] }}
-          transition={{ duration: 2, repeat: Infinity }}
+          className="w-2 h-2 rounded-full"
+          style={{ background: color, boxShadow: `0 0 8px ${color}` }}
+          animate={connected ? { opacity: [1, 0.3, 1] } : { opacity: [1, 0, 1] }}
+          transition={{ duration: connected ? 2 : 0.8, repeat: Infinity }}
         />
-        <span className="font-mono text-[11px] text-[#00ff41] tracking-[2px] drop-shadow-[0_0_8px_#00ff41]">
-          ONYX ONLINE
+        <span
+          className="font-mono text-[11px] tracking-[2px]"
+          style={{ color, textShadow: `0 0 8px ${color}` }}
+        >
+          {label}
         </span>
       </div>
     </header>
