@@ -107,16 +107,23 @@ def get_tool_usage():
 
 @router.get("/inspect")
 def agent_inspector():
-    """Agent Inspector — current tool registry state with usage."""
+    """Agent Inspector — current tool registry state with usage.
+
+    `category` is the tool's source-module basename (e.g. "files",
+    "web_reader", "games") so the dashboard can group tools by category
+    without a hand-maintained mapping.
+    """
     tools = []
     for name, tool_obj in REGISTRY.items():
         usage = _tool_usage.get(name, {})
+        category = getattr(tool_obj.func, "__module__", "").rsplit(".", 1)[-1] or "other"
         tools.append({
             "name": name,
             "description": tool_obj.description,
             "security": tool_obj.security.value,
             "schema": tool_obj.schema,
             "usage": usage,
+            "category": category,
         })
     return {"agents": {"planner": "gemma4", "operator": "tool-executor"}, "tools": tools}
 
