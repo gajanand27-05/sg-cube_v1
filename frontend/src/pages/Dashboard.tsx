@@ -412,6 +412,14 @@ export function Dashboard({ systemStats }: Props) {
             <Sparkline label="CPU"  data={cpuHist}  value={stats.cpu_percent}    color="#00e5ff" />
             <Sparkline label="MEM"  data={memHist}  value={stats.memory_percent} color="#00ff41" />
             <Sparkline label="DISK" data={diskHist} value={stats.disk_percent}   color="#ff8800" />
+            <Sparkline
+              label="NET"
+              data={netHist}
+              value={(stats.net_down_bps + stats.net_up_bps) / 1024}
+              unit=" KB/s"
+              color="#cc66ff"
+              max={Math.max(1024, ...netHist)}
+            />
             {stats.temp_c !== null && (
               <div className="flex items-baseline justify-between font-mono text-[10px] tracking-wider pt-0.5">
                 <span className="text-sgc-dim">TEMP</span>
@@ -419,7 +427,7 @@ export function Dashboard({ systemStats }: Props) {
               </div>
             )}
             <div className="flex items-baseline justify-between font-mono text-[10px] tracking-wider">
-              <span className="text-sgc-dim">NET</span>
+              <span className="text-sgc-dim">FLOW</span>
               <div className="flex gap-2 text-sgc-bright">
                 <span>↓ {formatBytes(stats.net_down_bps)}</span>
                 <span className="text-sgc-dim">·</span>
