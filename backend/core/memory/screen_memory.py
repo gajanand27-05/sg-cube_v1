@@ -1,6 +1,7 @@
 import logging
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import List, Optional
 
 import chromadb
@@ -10,7 +11,7 @@ from backend.core.memory.base import MemoryEntry, MemoryType
 
 log = logging.getLogger(__name__)
 
-CHROMA_PATH = __file__.rsplit("\\", 3)[0] + "\\backend\\database\\chroma_db" if "\\" in __file__ else "/".join(__file__.split("/")[:-3]) + "/backend/database/chroma_db"
+CHROMA_PATH = Path(__file__).resolve().parents[3] / "backend" / "database" / "chroma_db"
 
 
 class ScreenEmbeddingFunction(EmbeddingFunction):
