@@ -2,7 +2,6 @@ import json
 import logging
 import uuid
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any, List, Optional
 
 import chromadb
@@ -10,10 +9,9 @@ from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 
 from backend.ai_modules.llm import get_provider
 from backend.core.memory.base import MemoryEntry, MemoryType
+from backend.database import CHROMA_PATH
 
 log = logging.getLogger(__name__)
-
-CHROMA_PATH = Path(__file__).resolve().parents[3] / "backend" / "database" / "chroma_db"
 
 
 class ProviderEmbeddingFunction(EmbeddingFunction):
