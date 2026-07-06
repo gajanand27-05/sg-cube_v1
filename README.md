@@ -152,7 +152,7 @@ copy .env.example .env
 ### Run
 
 ```bash
-# Terminal 1 — Backend API server
+# Terminal 1 — Backend (boots API + wake word + vision + clipboard + telemetry + watcher)
 python -m uvicorn backend.server.main:app --host 127.0.0.1 --port 8001
 
 # Terminal 2 — Frontend dev server
@@ -164,6 +164,8 @@ npm run dev
 Open **http://localhost:5173** — API at `http://127.0.0.1:8001`.
 
 > **PowerShell users:** type `.\sg_cube` instead of `sg_cube`.
+
+Every background service is toggleable via `.env` — see the **Configuration** table below.
 
 ### Production Build
 
@@ -185,6 +187,16 @@ python -m uvicorn backend.server.main:app --host 0.0.0.0 --port 8001   # auto-se
 | `OLLAMA_MODEL` | `phi3` | Local intent classifier (lightweight) |
 | `WHISPER_MODEL` | `base` | STT model size (tiny/base/small) |
 | `VOICE_PIPELINE` | `local` | `local` or `livekit` |
+| `ENABLE_VISION` | `true` | Passive screen glance every 5 min (fills memory) |
+| `ENABLE_WAKE_WORD` | `true` | Mic listener for the wake phrase |
+| `ENABLE_CLIPBOARD` | `true` | Clipboard change tracking |
+| `ENABLE_TELEMETRY` | `true` | CPU/mem/disk broadcast to UI |
+| `ENABLE_WATCHER` | `true` | Proactive agent triggers (battery, folder watches) |
+| `WAKE_PHRASE` | `onyx` | Word that wakes the assistant |
+| `WAKE_CAPTURE_SECONDS` | `2.5` | Legacy capture window (VAD is authoritative) |
+| `WAKE_DEVICE` | — | Mic device index (blank = system default) |
+
+Set `ENABLE_VISION=false` to skip passive screen glances — the on-demand `describe_screen` tool still works (it captures fresh). Set `ENABLE_WAKE_WORD=false` on headless / no-mic machines to disable the listener without touching code.
 
 ---
 
@@ -192,8 +204,8 @@ python -m uvicorn backend.server.main:app --host 0.0.0.0 --port 8001   # auto-se
 
 ```text
 backend/
-├── daemon/           # Background services
-│   ├── main.py       # Entry point — starts everything
+├── daemon/           # Background services (booted from server/main.py's lifespan)
+│   ├── main.py       # Thin CLI wrapper — prefer `uvicorn backend.server.main:app`
 │   ├── trigger.py    # Wake word → STT → Router → Execute → TTS
 │   ├── wake_word.py  # Whisper/Vosk listener
 │   ├── vision_loop.py
