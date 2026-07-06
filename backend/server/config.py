@@ -56,5 +56,17 @@ class Settings(BaseSettings):
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
 
+    # ── Background services (toggle each independently) ──
+    enable_vision: bool = True      # passive screen glance every 5m
+    enable_wake_word: bool = True   # mic listener for the wake phrase
+    enable_clipboard: bool = True   # clipboard change tracking
+    enable_telemetry: bool = True   # CPU/mem/disk broadcast to UI
+    enable_watcher: bool = True     # proactive agent triggers
+
+    # ── Wake word ──
+    wake_phrase: str = "onyx"
+    wake_capture_seconds: float = 2.5
+    wake_device: int | None = None  # mic device index; None = system default
+
 
 settings = Settings()

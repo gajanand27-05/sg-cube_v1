@@ -16,6 +16,7 @@ import backend.core.tools  # noqa: F401
 from backend.ai_modules.llm import create_llm_provider
 from backend.core.events import init_event_bus, get_bus
 from backend.core.caps.registry import capability_registry
+from backend.daemon.main import start_services, stop_services
 from backend.daemon.trigger import register_proactive_handler
 
 log = logging.getLogger(__name__)
@@ -31,18 +32,23 @@ async def lifespan(app: FastAPI):
     capability_registry.discover()
     log.info(f"Capability registry: {len(capability_registry.all())} capabilities")
     bus = init_event_bus()
-    log.info(f"Bus initialized: {bus}")
-    log.info(f"Bus.start: {bus.start}")
-    result = bus.start()
-    log.info(f"Bus.start() returned: {result}, type: {type(result)}")
-    await result
-    log.info("Bus started")
+    await bus.start()
+    log.info("Event bus started")
     register_proactive_handler()
-    log.info("LLM provider & event bus initialized")
+
+    # Boot background services (vision, wake word, clipboard, telemetry, watcher)
+    # gated by ENABLE_* flags in .env. Previously these only ran when the daemon
+    # CLI was launched, so `uvicorn backend.server.main:app` alone gave you a
+    # text-only app despite the "voice-first, vision-aware" pitch.
+    service_handle = start_services(settings)
+    enabled = [k for k in ("vision", "wake_word", "clipboard", "telemetry", "watcher")
+               if getattr(settings, f"enable_{k}")]
+    log.info(f"Background services enabled: {enabled or 'none'}")
+
     yield
-    result = bus.stop()
-    log.info(f"Bus.stop() returned: {result}, type: {type(result)}")
-    await result
+
+    stop_services(service_handle)
+    await bus.stop()
     log.info("Shutting down")
 
 
