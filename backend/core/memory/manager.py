@@ -74,7 +74,7 @@ class MemoryManager:
             recent_events.sort(key=lambda x: x.timestamp, reverse=True)
             
             for e in recent_events[:8]: # Cap at 8 unique items
-                delta = datetime.now = datetime.now()
+                delta = datetime.now() - e.timestamp
                 if delta.total_seconds() < 60:
                     time_str = "Just now"
                 elif delta.total_seconds() < 3600:
