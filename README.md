@@ -100,7 +100,7 @@ flowchart TB
 | **Text-to-Speech** | Piper neural TTS | ✅ |
 | **Voice Pipeline** | Local (default) or LiveKit streaming | ✅ |
 | **Intent Routing** | 3-tier: Cache → Regex Rules (~40) → LLM | ✅ |
-| **Agent LLM** | Gemini 2.5 Flash (cloud) / Ollama (local fallback) | ✅ |
+| **Agent LLM** | Gemini 2.5 Flash (cloud) / Ollama (local fallback) — DeepSeek V3 via OpenRouter is the recommended migration target | ✅ |
 | **Intent Classifier** | Ollama — phi3 (local, lightweight) | ✅ |
 | **Vision** | Periodic screen capture + Qwen2.5-VL | ✅ |
 | **Memory** | ChromaDB (long-term/episodic) + in-memory (short-term/timeline/screen) | ✅ |
@@ -181,9 +181,10 @@ python -m uvicorn backend.server.main:app --host 0.0.0.0 --port 8001   # auto-se
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `APP_HOST` / `APP_PORT` | `127.0.0.1` / `8001` | Web server bind address |
-| `GEMINI_API_KEY` | — | Cloud LLM key (get at aistudio.google.com/apikey) |
+| `GEMINI_API_KEY` | — | Primary cloud LLM key (get at aistudio.google.com/apikey) |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Agent model |
-| `OPENROUTER_API_KEY` | — | Fallback cloud LLM key |
+| `OPENROUTER_API_KEY` | — | Alternative cloud LLM key — DeepSeek V3 is the recommended migration target |
+| `OPENROUTER_MODEL` | `deepseek/deepseek-chat` | Model used when OpenRouter key is set |
 | `OLLAMA_MODEL` | `phi3` | Local intent classifier (lightweight) |
 | `WHISPER_MODEL` | `base` | STT model size (tiny/base/small) |
 | `VOICE_PIPELINE` | `local` | `local` or `livekit` |

@@ -32,18 +32,22 @@ class Settings(BaseSettings):
     coding_model: str = "gemini-2.5-flash"      # code generation
     
     # General conversation
-    chat_model: str = "qwen/qwen3-coder-480b-a35b"  # openrouter
-    
+    chat_model: str = "deepseek/deepseek-chat"  # openrouter (aspirational — not currently read)
+
     # Vision
     vision_model: str = "qwen2.5vl:3b"          # local VLM
-    
+
     # STT/TTS
     whisper_model: str = "small"                # faster-whisper
     piper_voice: str = "en_US-ryan-high"        # Piper TTS voice
 
-    # ── OpenRouter (cloud LLM) ──
+    # ── OpenRouter (primary cloud LLM — DeepSeek V3 default) ──
+    # DeepSeek V3 wins for this project: strong JSON, tool-use, chat quality,
+    # cheapest of the frontier-tier open-source models. Kimi K2 and Qwen 3
+    # are the runner-ups kept in reserve — swap OPENROUTER_MODEL in .env
+    # to try them.
     openrouter_api_key: str = ""
-    openrouter_model: str = "qwen/qwen3-coder-480b-a35b"
+    openrouter_model: str = "deepseek/deepseek-chat"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     # ── Gemini (Google AI SDK) ──
