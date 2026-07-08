@@ -29,11 +29,12 @@ def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro) if not asyncio.get_event_loop().is_running() else asyncio.run(coro)
 
 
-def _register_stub(name: str, tier):
-    """Register a minimal tool with the given tier so `verify()` can find it."""
+def _register_stub(name: str, tier, trusted: bool = False):
+    """Register a minimal tool with the given tier + trust so `verify()`
+    can find it."""
     from backend.core.tools.registry import REGISTRY, tool, ToolResult
 
-    @tool(tier=tier)
+    @tool(tier=tier, trusted=trusted)
     def _stub_impl() -> ToolResult:  # pragma: no cover
         return ToolResult.success("ok")
 
@@ -111,26 +112,24 @@ def test_secondary_check_pass_lets_verification_proceed():
     """When the deep check returns True → tier gate applies normally."""
     from backend.core.agent.verifier import verify
     from backend.core.tools.registry import CapabilityTier, REGISTRY
-    from backend.server.config import settings
 
-    name = _register_stub("_phase05_stub_pass", CapabilityTier.SYSTEM_WRITE)
+    # Register as trusted so the tier gate passes through cleanly after
+    # the deep check approves — keeps the assertion unambiguous.
+    # (Phase 0.6 retired the global auto_confirm flag in favor of this
+    # per-tool trust flag.)
+    name = _register_stub("_phase05_stub_pass", CapabilityTier.SYSTEM_WRITE, trusted=True)
     spy = _SpyCheck(return_value=True)
     restore = _install_spy(spy)
-    original_flag = settings.auto_confirm_system_write
-    settings.auto_confirm_system_write = True  # keep the outcome unambiguous
 
     try:
         res = _run(verify(user_query="test", call=_make_call(name)))
         assert len(spy.calls) == 1
         assert res.is_valid is True
-        # With AUTO_CONFIRM_SYSTEM_WRITE=true, the tier gate passes through
-        # after the deep check approves.
         assert res.needs_confirmation is False
         assert res.error == ""
         print("  [PASS] secondary check True → verification proceeds")
     finally:
         REGISTRY.pop(name, None)
-        settings.auto_confirm_system_write = original_flag
         restore()
 
 

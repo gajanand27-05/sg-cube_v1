@@ -15,7 +15,7 @@ def _current() -> int:
     return int(vals[0]) if isinstance(vals, list) else int(vals)
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: changes display brightness, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # tier: display brightness, reversible; trusted: everyday tweak
 def set_brightness(level: int) -> dict:
     """Set screen brightness. `level` is 0-100."""
     level = _clamp(level)

@@ -20,7 +20,7 @@ def respond(text: str) -> ToolResult:
     return ToolResult.success(text)
 
 
-@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: launches process, reversible by closing app
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # tier: launches process, reversible; trusted: primary use case for a voice assistant
 def open_app(name: str, profile: str = "") -> ToolResult:
     """Open a desktop application by name. ANY installed app works
     (notepad, chrome, firefox, spotify, discord, whatsapp, vscode, vlc, ...).

@@ -54,7 +54,7 @@ def _schedule(delay_seconds: float, message: str, kind: str) -> int:
     return rid
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: schedules background timer, reversible via cancel
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # tier: schedules background timer, reversible via cancel; trusted: user-initiated scheduling
 def set_reminder(minutes: int, message: str) -> dict:
     """Schedule a spoken reminder. After `minutes` minutes, SG_CUBE will say
     "Reminder: <message>" aloud. Use for "remind me in 10 minutes to ..."."""

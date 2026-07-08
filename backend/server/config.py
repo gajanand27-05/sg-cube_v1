@@ -72,11 +72,12 @@ class Settings(BaseSettings):
     wake_capture_seconds: float = 2.5
     wake_device: int | None = None  # mic device index; None = system default
 
-    # ── Capability tier gate (Phase 0 Part B) ──
-    # When true, Guardian passes SYSTEM_WRITE tools without prompting the
-    # user. DESTRUCTIVE tier ignores this flag — power state, deletion,
-    # shell exec, external messages ALWAYS require confirmation.
-    auto_confirm_system_write: bool = False
+    # ── Capability tier gate ──
+    # Phase 0.6 retired the global AUTO_CONFIRM_SYSTEM_WRITE flag in favor
+    # of a per-tool trusted allowlist declared on each @tool. Legacy env
+    # values (AUTO_CONFIRM_SYSTEM_WRITE=true) are silently ignored via
+    # model_config extra="ignore" — no auto-approve happens on the
+    # untrusted state-changing tools anymore.
 
 
 settings = Settings()

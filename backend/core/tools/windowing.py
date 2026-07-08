@@ -17,7 +17,7 @@ def minimize_all() -> ToolResult:
     return ToolResult.success("showed desktop")
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: brings window to foreground, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # tier: window focus, reversible; trusted: benign UX affordance
 def focus_window(app: str) -> ToolResult:
     """Bring a window to the front by matching its title against `app`.
     Match is case-insensitive substring (e.g. "chrome" matches "Google Chrome").

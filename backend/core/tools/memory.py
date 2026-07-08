@@ -2,7 +2,7 @@ from backend.core.memory.manager import memory as memory_manager
 from backend.core.tools.registry import CapabilityTier, tool
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: writes to persistent memory store, reversible via forget
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # tier: writes memory, reversible; trusted: user-initiated capture, prompting kills the affordance
 def remember(fact: str) -> dict:
     """Store a piece of information for long-term recall.
     Example: 'remember that my cat is named Luna'

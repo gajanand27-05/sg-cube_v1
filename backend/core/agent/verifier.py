@@ -6,7 +6,6 @@ from typing import Any
 from backend.ai_modules.llm import get_provider
 from backend.ai_modules.llm.routing import TaskType
 from backend.core.tools.registry import REGISTRY, CapabilityTier, SecurityLevel, _resolve_name
-from backend.server.config import settings
 
 log = logging.getLogger(__name__)
 
@@ -171,18 +170,22 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
             )
         obs_engine.report_ai_quality(request_id, 100.0, "Secondary check passed")
 
-    # ── 4. Capability tier gate (Phase 0 Part B) ─────────────────────
-    # Keys off tier, NOT SecurityLevel. This is the confirmation surface
-    # the Guardian owns — sandbox.py's own SecurityLevel-based check is
-    # a separate, deeper layer that fires at actual execution time.
+    # ── 4. Capability tier gate ──────────────────────────────────────
+    # Keys off tier + per-tool trusted flag (Phase 0.6). Sandbox.py's
+    # own SecurityLevel-based check is a separate, deeper layer that
+    # fires at actual execution time.
     if tier == CapabilityTier.DESTRUCTIVE:
         obs_engine.report_ai_quality(request_id, 100.0, "Destructive tier — always confirm")
         # No flag can silence this — matches the Phase 0 contract.
+        # The registry decorator also refuses to set trusted=True on a
+        # destructive tool, so even a misdeclared tool ends up here.
         return VerificationResult(True, reasoning=reasoning, needs_confirmation=True, is_critical=True)
 
     if tier == CapabilityTier.SYSTEM_WRITE:
-        if settings.auto_confirm_system_write:
-            obs_engine.report_ai_quality(request_id, 100.0, "System-write auto-approved by config")
+        # Trusted allowlist entry — bypasses the confirmation prompt.
+        # Untrusted SYSTEM_WRITE still requires explicit user consent.
+        if getattr(tool_obj, "trusted", False):
+            obs_engine.report_ai_quality(request_id, 100.0, "System-write on trusted allowlist")
             return VerificationResult(True, reasoning=reasoning)
         obs_engine.report_ai_quality(request_id, 100.0, "System-write tier — confirm")
         return VerificationResult(True, reasoning=reasoning, needs_confirmation=True)

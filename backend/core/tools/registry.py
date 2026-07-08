@@ -122,6 +122,12 @@ class Tool:
     # Default is DESTRUCTIVE so any tool that forgets to declare a tier
     # fails safe (asks user) rather than silently getting exec permission.
     tier: CapabilityTier = CapabilityTier.DESTRUCTIVE
+    # Phase 0.6: per-tool trust flag. Only meaningful on SYSTEM_WRITE —
+    # a trusted SYSTEM_WRITE tool skips the confirmation prompt. On
+    # READONLY it's redundant (no prompt to skip). On DESTRUCTIVE the
+    # decorator forces this to False and logs a warning: destructive
+    # tools always prompt, no override permitted.
+    trusted: bool = False
 
     async def __call__(self, request_id: Optional[str] = None, **kwargs) -> ToolResult:
         from backend.core.runtime import runtime
@@ -145,12 +151,18 @@ def _type_to_json(py_type: Any) -> str:
     return _PRIMITIVE_TYPES.get(py_type, "string")
 
 
-def tool(security: Any = SecurityLevel.SAFE, tier: Any = None) -> Any:
+def tool(security: Any = SecurityLevel.SAFE, tier: Any = None, trusted: bool = False) -> Any:
     """Register a function as a tool. Supports:
-      @tool                                            # bare (tier defaults DESTRUCTIVE — fail closed)
-      @tool(tier=CapabilityTier.READONLY)              # explicit tier
-      @tool(security=SecurityLevel.CAUTION)            # legacy security only
-      @tool(security=SecurityLevel.CAUTION, tier=...)  # both
+      @tool                                                     # bare (tier → DESTRUCTIVE, trusted=False — fail closed)
+      @tool(tier=CapabilityTier.READONLY)                       # explicit tier
+      @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)     # trusted allowlist entry
+      @tool(security=SecurityLevel.CAUTION)                     # legacy security only
+      @tool(security=SecurityLevel.CAUTION, tier=..., trusted=True)  # all three
+
+    `trusted=True` on a DESTRUCTIVE tool is a bug — destructive tools
+    always prompt, no override. The decorator forces it back to False
+    and logs a warning at registration time so the misdeclaration is
+    visible in the boot log rather than silently taking effect.
     """
     func = None
 
@@ -159,15 +171,31 @@ def tool(security: Any = SecurityLevel.SAFE, tier: Any = None) -> Any:
         func = security
         security = SecurityLevel.SAFE
         # tier stays None → resolves to DESTRUCTIVE below (fail closed)
+        # trusted stays False
 
     # Resolve tier default. Missing / unknown → DESTRUCTIVE. Any @tool
     # that forgets to declare a tier gets the safest treatment (Guardian
     # will prompt every time) instead of silent execute permission.
     resolved_tier = tier if isinstance(tier, CapabilityTier) else CapabilityTier.DESTRUCTIVE
 
+    # Enforce the DESTRUCTIVE + trusted=True invariant at registration time.
+    resolved_trusted = bool(trusted)
+
     def decorator(f: Callable[..., dict]) -> Callable[..., dict]:
         name = f.__name__
         description = (f.__doc__ or "").strip().split("\n")[0]
+
+        # Phase 0.6: destructive tools cannot be trusted. If someone
+        # declares one, ignore the flag and warn — the invariant is
+        # non-negotiable per the tier contract.
+        effective_trusted = resolved_trusted
+        if effective_trusted and resolved_tier == CapabilityTier.DESTRUCTIVE:
+            log.warning(
+                "Tool %r declared trusted=True with tier=DESTRUCTIVE — ignoring trusted; "
+                "destructive tools always require confirmation",
+                name,
+            )
+            effective_trusted = False
 
         sig = inspect.signature(f)
         hints = get_type_hints(f)
@@ -206,6 +234,7 @@ def tool(security: Any = SecurityLevel.SAFE, tier: Any = None) -> Any:
             func=f,
             security=security,
             tier=resolved_tier,
+            trusted=effective_trusted,
         )
         return f
 

@@ -16,7 +16,7 @@ def _notes_path(date: str) -> Path:
     return NOTES_DIR / f"{date}.md"
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: appends to markdown file, reversible by editing
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # tier: append to notes file, reversible; trusted: user-initiated capture, prompting kills the affordance
 def take_note(text: str) -> dict:
     """Append a timestamped note to today's markdown file at
     ~/sg_cube/notes/YYYY-MM-DD.md. Use this for any "note this down", "save

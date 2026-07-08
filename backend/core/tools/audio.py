@@ -17,7 +17,7 @@ def _clamp(v: int) -> int:
     return max(0, min(100, int(v)))
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: changes machine audio state, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # tier: audio state change, reversible; trusted: everyday volume tweak, no need to prompt
 def set_volume(level: int) -> dict:
     """Set system master volume. `level` is 0-100."""
     level = _clamp(level)
