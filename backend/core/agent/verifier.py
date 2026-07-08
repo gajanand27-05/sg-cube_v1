@@ -5,7 +5,8 @@ from typing import Any
 
 from backend.ai_modules.llm import get_provider
 from backend.ai_modules.llm.routing import TaskType
-from backend.core.tools.registry import REGISTRY, SecurityLevel, _resolve_name
+from backend.core.tools.registry import REGISTRY, CapabilityTier, SecurityLevel, _resolve_name
+from backend.server.config import settings
 
 log = logging.getLogger(__name__)
 
@@ -135,30 +136,48 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
 
     obs_engine.report_ai_quality(request_id, conf_score * 100.0, "Self-reported confidence")
 
+    # Tier: Phase 0 capability gate. Missing/unknown → DESTRUCTIVE (fail closed).
+    tier = getattr(tool_obj, "tier", CapabilityTier.DESTRUCTIVE)
+    if not isinstance(tier, CapabilityTier):
+        tier = CapabilityTier.DESTRUCTIVE
+
     # ── 3. Conditional Verifier Model ────────────────────────────────
+    # Trigger the secondary LLM check when the tool changes state, the LLM
+    # is low-confidence, or the plan is multi-step. Keying off tier keeps
+    # deep verification firing on state-changing calls even though the
+    # legacy SecurityLevel column may not have been updated on new tools.
     needs_deep_verification = (
-        conf_score < 0.80 or 
+        conf_score < 0.80 or
+        tier in (CapabilityTier.SYSTEM_WRITE, CapabilityTier.DESTRUCTIVE) or
         tool_obj.security in [SecurityLevel.CAUTION, SecurityLevel.CRITICAL] or
         is_multi_step
     )
-    
+
     if needs_deep_verification:
-        log.info(f"Triggering deep verification for {resolved!r} (conf={conf_score}, multi={is_multi_step})")
+        log.info(f"Triggering deep verification for {resolved!r} (conf={conf_score}, multi={is_multi_step}, tier={tier.value})")
         if not _secondary_check(user_query, resolved, args, reasoning):
             obs_engine.report_ai_quality(request_id, 20.0, "Secondary check failed")
             return VerificationResult(
-                False, 
+                False,
                 error="Action rejected by secondary verifier: logic or relevance mismatch."
             )
         obs_engine.report_ai_quality(request_id, 100.0, "Secondary check passed")
 
-    # ── 4. Action Approval Levels ────────────────────────────────────
-    if tool_obj.security == SecurityLevel.CRITICAL:
-         obs_engine.report_ai_quality(request_id, 100.0, "Critical action detected")
-         return VerificationResult(True, reasoning=reasoning, needs_confirmation=True, is_critical=True)
-    
-    if tool_obj.security == SecurityLevel.CAUTION:
-         obs_engine.report_ai_quality(request_id, 100.0, "Caution action detected")
-         return VerificationResult(True, reasoning=reasoning, needs_confirmation=True)
+    # ── 4. Capability tier gate (Phase 0 Part B) ─────────────────────
+    # Keys off tier, NOT SecurityLevel. This is the confirmation surface
+    # the Guardian owns — sandbox.py's own SecurityLevel-based check is
+    # a separate, deeper layer that fires at actual execution time.
+    if tier == CapabilityTier.DESTRUCTIVE:
+        obs_engine.report_ai_quality(request_id, 100.0, "Destructive tier — always confirm")
+        # No flag can silence this — matches the Phase 0 contract.
+        return VerificationResult(True, reasoning=reasoning, needs_confirmation=True, is_critical=True)
 
+    if tier == CapabilityTier.SYSTEM_WRITE:
+        if settings.auto_confirm_system_write:
+            obs_engine.report_ai_quality(request_id, 100.0, "System-write auto-approved by config")
+            return VerificationResult(True, reasoning=reasoning)
+        obs_engine.report_ai_quality(request_id, 100.0, "System-write tier — confirm")
+        return VerificationResult(True, reasoning=reasoning, needs_confirmation=True)
+
+    # READONLY — pass through, no confirmation needed.
     return VerificationResult(True, reasoning=reasoning)

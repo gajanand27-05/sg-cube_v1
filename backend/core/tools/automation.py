@@ -1,9 +1,9 @@
 """Automation and background monitoring tools (Phase 14)."""
 
-from backend.core.tools.registry import SecurityLevel, ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
 from backend.core.agents.watcher import watcher
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: registers a persistent background monitor, reversible
 def monitor_battery(threshold_pct: int, action_query: str) -> ToolResult:
     """Monitor the system battery in the background. When it drops below
     `threshold_pct`, the system will autonomously execute `action_query`.
@@ -12,7 +12,7 @@ def monitor_battery(threshold_pct: int, action_query: str) -> ToolResult:
     watcher.add_battery_task(threshold_pct, action_query)
     return ToolResult.success(f"Monitoring battery. Will execute '{action_query}' when below {threshold_pct}%.")
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: registers folder watcher, reversible
 def monitor_folder(folder_path: str, file_pattern: str, action_query: str) -> ToolResult:
     """Monitor a folder for new files matching a pattern. When a new file appears,
     the system will autonomously execute `action_query`.

@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pyautogui
 
-from backend.core.tools.registry import SecurityLevel, ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
 
 # ... (rest of imports)
 
-@tool(security=SecurityLevel.CAUTION)
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.DESTRUCTIVE)  # tier: file deletion, hard to undo
 def delete_file(file: str) -> ToolResult:
     """Delete a file. `file` is a full path or a substring of a file name in
     your common user folders. REQUIRES CONFIRMATION."""
@@ -62,7 +62,7 @@ SEARCH_ROOTS = [
 ]
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: opens file explorer window, reversible
 def open_folder(name: str) -> dict:
     """Open a folder in File Explorer. `name` can be a special name
     (downloads, documents, desktop, pictures, videos, music) or a full path."""
@@ -81,7 +81,7 @@ def open_folder(name: str) -> dict:
     return {"status": "success", "message": f"opened {path}"}
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: filesystem search, no side effects
 def find_file(query: str, max_results: int = 10) -> dict:
     """Search for files whose name contains `query` under your common
     user folders (Desktop, Documents, Downloads, Pictures, Videos, Music).
@@ -114,7 +114,7 @@ def find_file(query: str, max_results: int = 10) -> dict:
     }
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: synthesizes keystrokes into focused window, reversible
 def type_text(text: str) -> dict:
     """Type `text` into the currently focused window — as if you typed it on
     the keyboard. Use for quick dictation. Does NOT press Enter at the end."""

@@ -10,7 +10,7 @@ from pypdf import PdfReader
 
 from backend.core.tools.files import SEARCH_ROOTS
 from backend.core.tools.llm_helper import llm_generate
-from backend.core.tools.registry import ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, ToolResult, tool
 
 MAX_CHARS = 6000  # cap text fed to the LLM — keeps a single call snappy
 
@@ -57,7 +57,7 @@ def _resolve_file(name: str, suffix: str | None = None) -> Path | None:
     return None
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: reads PDF + summarizes via LLM, no side effects
 def summarize_pdf(file: str) -> ToolResult:
     """Summarize a PDF file. `file` is a full path or a substring of a PDF
     name in Desktop/Downloads/Documents/Pictures/Videos/Music. Reads the text
@@ -118,7 +118,7 @@ def summarize_pdf(file: str) -> ToolResult:
     )
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: HTTP GET + summarize, no side effects
 def summarize_url(url: str) -> ToolResult:
     """Summarize a web page. Fetches `url`, strips HTML to text with
     BeautifulSoup, and asks gemma4 for a one-paragraph summary."""
@@ -164,7 +164,7 @@ def summarize_url(url: str) -> ToolResult:
     )
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: reads code + LLM explain, no side effects
 def explain_code(file: str) -> ToolResult:
     """Explain what a source code file does in three short sentences.
     `file` is a full path or a substring of a file name in your common

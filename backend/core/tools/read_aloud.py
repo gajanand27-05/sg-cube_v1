@@ -7,7 +7,7 @@ import threading
 
 import pyperclip
 
-from backend.core.tools.registry import tool
+from backend.core.tools.registry import CapabilityTier, tool
 
 MAX_CHARS = 4000  # cap clipboard size piped into TTS
 
@@ -19,7 +19,7 @@ def _speak_async(text: str) -> None:
     threading.Thread(target=_go, daemon=True).start()
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: TTS output only, no persistent state change
 def read_aloud() -> dict:
     """Read the current clipboard contents out loud. Copy text in any app
     first (Ctrl+C), then say "read this" or "read it out loud"."""

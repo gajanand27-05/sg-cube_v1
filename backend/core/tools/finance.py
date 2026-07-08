@@ -5,7 +5,7 @@ Both are free, no API key. Uses httpx directly to avoid pulling in pandas
 """
 import httpx
 
-from backend.core.tools.registry import tool
+from backend.core.tools.registry import CapabilityTier, tool
 
 YAHOO_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 COINGECKO_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price"
@@ -31,7 +31,7 @@ COIN_ALIASES = {
 }
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: HTTP GET to Yahoo, no side effects
 def get_stock_price(symbol: str) -> dict:
     """Get the current price for a stock ticker (e.g. "AAPL", "TSLA", "MSFT",
     "RELIANCE.NS"). Returns price, currency, and intraday change percent."""
@@ -79,7 +79,7 @@ def get_stock_price(symbol: str) -> dict:
     }
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: HTTP GET to CoinGecko, no side effects
 def get_crypto_price(symbol: str) -> dict:
     """Get the current USD price for a cryptocurrency (e.g. "btc", "bitcoin",
     "eth", "solana"). Returns price and 24-hour change percent."""

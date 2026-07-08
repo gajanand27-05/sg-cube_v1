@@ -9,7 +9,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from backend.core.tools.registry import SecurityLevel, ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
 
 _MAX_BYTES = 5_000_000  # 5MB — read/edit caps to avoid loading massive files blindly.
 
@@ -37,7 +37,7 @@ def _atomic_write(p: Path, content: str) -> None:
         raise
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: reads file bytes, no side effects
 def read_file(path: str, max_bytes: int = _MAX_BYTES) -> ToolResult:
     """Read a UTF-8 text file and return its contents. `max_bytes` is a soft
     cap (default 5MB) to keep prompts sane."""
@@ -56,7 +56,7 @@ def read_file(path: str, max_bytes: int = _MAX_BYTES) -> ToolResult:
     return ToolResult.success(f"read {size} bytes from {r.name}", data={"text": text, "bytes": size})
 
 
-@tool(security=SecurityLevel.CAUTION)
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.SYSTEM_WRITE)  # tier: mutates file, atomic write, reversible if user has backup
 def edit_file(path: str, old_text: str, new_text: str) -> ToolResult:
     """Replace the first occurrence of `old_text` in the file with `new_text`.
     Refuses if `old_text` is missing or ambiguous-friendly (zero matches)."""
@@ -79,7 +79,7 @@ def edit_file(path: str, old_text: str, new_text: str) -> ToolResult:
     return ToolResult.success(f"edited {r.name}")
 
 
-@tool(security=SecurityLevel.CAUTION)
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.SYSTEM_WRITE)  # tier: mutates file, reversible if user has backup
 def insert_lines(path: str, line_number: int, text: str) -> ToolResult:
     """Insert `text` BEFORE line `line_number` (1-indexed). Use line_number=0
     or a value larger than the file length to append."""
@@ -107,7 +107,7 @@ def insert_lines(path: str, line_number: int, text: str) -> ToolResult:
     return ToolResult.success(f"inserted into {r.name} ({where})")
 
 
-@tool(security=SecurityLevel.CAUTION)
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.SYSTEM_WRITE)  # tier: overwrites file (loses previous content), reversible if user has backup
 def write_file(path: str, content: str) -> ToolResult:
     """Overwrite the file with `content`. Creates parent dirs if missing."""
     r = _resolve(path)

@@ -6,9 +6,9 @@ helpful error rather than crashing the agent loop.
 """
 import pyautogui
 
-from backend.core.tools.registry import ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, ToolResult, tool
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: captures screen + OCR, no state change
 def ocr_screen() -> ToolResult:
     """Read text visible anywhere on the screen using OCR. Takes a screenshot
     of the full desktop and runs Tesseract on it. Useful for "read the error

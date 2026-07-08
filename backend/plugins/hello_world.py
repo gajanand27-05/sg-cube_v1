@@ -6,10 +6,10 @@ be auto-discovered at boot — zero configuration required.
 To activate this plugin, copy it to backend/plugins/ (it's already there).
 Restart the daemon and the `hello_world` tool will appear in the registry.
 """
-from backend.core.tools.registry import SecurityLevel, ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.READONLY)  # tier: pure greeting, no side effects
 def hello_world(name: str = "SG_CUBE") -> ToolResult:
     """A friendly greeting from a user plugin. Provide a name to greet."""
     return ToolResult.success(f"Hello, {name}! This is a user plugin loaded from backend/plugins/.")

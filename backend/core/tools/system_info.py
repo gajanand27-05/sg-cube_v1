@@ -1,10 +1,10 @@
 import os
 import psutil
 
-from backend.core.tools.registry import SecurityLevel, ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: reads battery sensor, no side effects
 def get_battery() -> ToolResult:
     """Return current battery percentage and charging status."""
     b = psutil.sensors_battery()
@@ -19,7 +19,7 @@ def get_battery() -> ToolResult:
     )
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: samples CPU/RAM, no side effects
 def get_system_status() -> ToolResult:
     """Return CPU% (0.5s sample) and RAM% used."""
     cpu = psutil.cpu_percent(interval=0.5)

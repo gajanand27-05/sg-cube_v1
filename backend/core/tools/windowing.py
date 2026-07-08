@@ -7,17 +7,17 @@ import subprocess
 import pyautogui
 import pygetwindow as gw
 
-from backend.core.tools.registry import SecurityLevel, ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: minimizes all windows, reversible
 def minimize_all() -> ToolResult:
     """Minimize every window and show the desktop (Win+D)."""
     pyautogui.hotkey("win", "d")
     return ToolResult.success("showed desktop")
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: brings window to foreground, reversible
 def focus_window(app: str) -> ToolResult:
     """Bring a window to the front by matching its title against `app`.
     Match is case-insensitive substring (e.g. "chrome" matches "Google Chrome").
@@ -40,14 +40,14 @@ def focus_window(app: str) -> ToolResult:
     return ToolResult.success(f"focused {target.title!r}")
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: closes focused window, reversible by reopening (may lose state)
 def close_active_window() -> ToolResult:
     """Close the currently focused window (Alt+F4)."""
     pyautogui.hotkey("alt", "f4")
     return ToolResult.success("closed active window")
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: enumerates open windows, no side effects
 def list_open_windows() -> ToolResult:
     """List the titles of all open windows."""
     titles = [w.title for w in gw.getAllWindows() if w.title]
@@ -57,14 +57,14 @@ def list_open_windows() -> ToolResult:
     )
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: locks workstation, reversible by unlock
 def lock_screen() -> ToolResult:
     """Lock the workstation (Win+L)."""
     subprocess.Popen(["rundll32.exe", "user32.dll,LockWorkStation"])
     return ToolResult.success("screen locked")
 
 
-@tool(security=SecurityLevel.CRITICAL)
+@tool(security=SecurityLevel.CRITICAL, tier=CapabilityTier.DESTRUCTIVE)  # tier: sleeps machine, disrupts running work
 def sleep_pc(seconds: int = 5) -> ToolResult:
     """Put the PC to sleep after a `seconds` countdown (default 5).
     Use cancel_shutdown to abort within the countdown window."""
@@ -85,7 +85,7 @@ def sleep_pc(seconds: int = 5) -> ToolResult:
     return ToolResult.success(f"sleeping in {seconds}s")
 
 
-@tool(security=SecurityLevel.CRITICAL)
+@tool(security=SecurityLevel.CRITICAL, tier=CapabilityTier.DESTRUCTIVE)  # tier: power state, unsaved work is lost
 def shutdown_pc(seconds: int = 10) -> ToolResult:
     """Shut down the PC after a `seconds` countdown (default 10).
     Run cancel_shutdown to abort within the countdown."""
@@ -94,7 +94,7 @@ def shutdown_pc(seconds: int = 10) -> ToolResult:
     return ToolResult.success(f"shutting down in {seconds}s — say cancel shutdown to abort")
 
 
-@tool(security=SecurityLevel.CRITICAL)
+@tool(security=SecurityLevel.CRITICAL, tier=CapabilityTier.DESTRUCTIVE)  # tier: power state, unsaved work is lost
 def restart_pc(seconds: int = 10) -> ToolResult:
     """Restart the PC after a `seconds` countdown (default 10).
     Run cancel_shutdown to abort within the countdown."""
@@ -103,7 +103,7 @@ def restart_pc(seconds: int = 10) -> ToolResult:
     return ToolResult.success(f"restarting in {seconds}s — say cancel shutdown to abort")
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: aborts a pending power event, reversible
 def cancel_shutdown() -> ToolResult:
     """Cancel a pending shutdown or restart."""
     r = subprocess.run(["shutdown", "/a"], capture_output=True, text=True)

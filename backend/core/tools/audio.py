@@ -4,7 +4,7 @@ from ctypes import POINTER, cast
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-from backend.core.tools.registry import tool
+from backend.core.tools.registry import CapabilityTier, tool
 
 
 def _endpoint():
@@ -17,7 +17,7 @@ def _clamp(v: int) -> int:
     return max(0, min(100, int(v)))
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: changes machine audio state, reversible
 def set_volume(level: int) -> dict:
     """Set system master volume. `level` is 0-100."""
     level = _clamp(level)
@@ -25,7 +25,7 @@ def set_volume(level: int) -> dict:
     return {"status": "success", "message": f"volume set to {level}%"}
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: reads current volume, no side effects
 def get_volume() -> dict:
     """Return current system master volume (0-100)."""
     scalar = _endpoint().GetMasterVolumeLevelScalar()
@@ -33,7 +33,7 @@ def get_volume() -> dict:
     return {"status": "success", "message": f"volume is {percent}%", "args": {"level": percent}}
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: changes audio state, reversible
 def volume_up(amount: int = 10) -> dict:
     """Raise system volume by `amount` percentage points (default 10)."""
     ep = _endpoint()
@@ -43,7 +43,7 @@ def volume_up(amount: int = 10) -> dict:
     return {"status": "success", "message": f"volume raised from {current}% to {new}%"}
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: changes audio state, reversible
 def volume_down(amount: int = 10) -> dict:
     """Lower system volume by `amount` percentage points (default 10)."""
     ep = _endpoint()
@@ -53,7 +53,7 @@ def volume_down(amount: int = 10) -> dict:
     return {"status": "success", "message": f"volume lowered from {current}% to {new}%"}
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: toggles mute state, reversible
 def mute() -> dict:
     """Toggle system mute on/off."""
     ep = _endpoint()

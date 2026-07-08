@@ -8,12 +8,12 @@ Distinct from `ocr_screen` (pytesseract, exact text extraction). Prefer this
 tool for "what am I doing", "what's on my screen", "describe the layout" —
 prefer `ocr_screen` for "read the error message text" or "OCR this image".
 """
-from backend.core.tools.registry import ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, ToolResult, tool
 from backend.core.vision.capture import capture_screen
 from backend.core.vision.vlm import analyze_screenshot
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: captures screen + VLM description, no state change
 async def describe_screen() -> ToolResult:
     """Look at the user's screen right now and describe what's on it. Uses a
     local vision language model (Qwen2.5-VL). Prefer this for "what's on my

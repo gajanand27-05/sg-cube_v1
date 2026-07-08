@@ -5,19 +5,19 @@ from urllib.parse import quote_plus
 
 import pyperclip
 
-from backend.core.tools.registry import SecurityLevel, ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
 from backend.core.events import get_bus
 from backend.daemon.ui_events import HandoverEvent
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: writes to system clipboard, reversible
 def clipboard_copy(text: str) -> ToolResult:
     """Set the system clipboard to `text`. Use for "copy this", "save to clipboard"."""
     pyperclip.copy(text)
     return ToolResult.success(f"copied {len(text)} characters to clipboard")
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: reads clipboard, no side effects
 def clipboard_get() -> ToolResult:
     """Read the current system clipboard contents (text only)."""
     try:
@@ -31,7 +31,7 @@ def clipboard_get() -> ToolResult:
     )
 
 
-@tool
+@tool(tier=CapabilityTier.DESTRUCTIVE)  # tier: external comms — cannot be recalled once sent
 def send_to_phone(content: str, is_url: bool = False) -> ToolResult:
     """Send a link or a text snippet directly to the connected Android device.
     Useful for "send this to my phone", "open this link on my mobile"."""
@@ -44,7 +44,7 @@ def send_to_phone(content: str, is_url: bool = False) -> ToolResult:
     return ToolResult.success(f"Sent {'link' if is_url else 'text'} to mobile device")
 
 
-@tool(security=SecurityLevel.CAUTION)
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.DESTRUCTIVE)  # tier: external comm, irreversible
 def send_whatsapp(contact: str, message: str) -> ToolResult:
     """Open WhatsApp with a pre-filled message to `contact`.
     `contact` must be a phone number with country code (e.g. "+919876543210"
@@ -60,7 +60,7 @@ def send_whatsapp(contact: str, message: str) -> ToolResult:
     return ToolResult.success(f"opened WhatsApp chat with +{phone}")
 
 
-@tool(security=SecurityLevel.CAUTION)
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.DESTRUCTIVE)  # tier: external email, irreversible
 def send_email(to: str, subject: str = "", body: str = "") -> ToolResult:
     """Open the default mail client with a draft email pre-filled.
     `to` must be an email address. `subject` and `body` are optional."""

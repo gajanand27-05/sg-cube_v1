@@ -40,6 +40,31 @@ class SecurityLevel(str, Enum):
     CRITICAL = "critical"      # High risk, needs extra warning (e.g., shutdown, format)
 
 
+class CapabilityTier(str, Enum):
+    """Phase-0 capability tier used by the Guardian confirmation gate.
+
+    Coexists with SecurityLevel (which drives the sandbox layer and the
+    conditional deep-verification trigger). The tier axis specifically
+    governs *whether the user is prompted before execution*:
+
+    - READONLY:     no side effects — read a value / fetch data / describe
+                    something. Passes without confirmation.
+    - SYSTEM_WRITE: mutates machine / app / browser / stored state but
+                    reversible. Requires confirmation unless the
+                    AUTO_CONFIRM_SYSTEM_WRITE setting is true.
+    - DESTRUCTIVE:  hard to undo (shell commands, deletion, external
+                    messages, power state). ALWAYS requires confirmation;
+                    no flag can silence this.
+
+    Default for any untagged tool is DESTRUCTIVE — a forgotten tier
+    fails safe (asks before firing) instead of silently getting execute
+    permission. This is the load-bearing decision of Phase 0.
+    """
+    READONLY = "readonly"
+    SYSTEM_WRITE = "system_write"
+    DESTRUCTIVE = "destructive"
+
+
 class ToolResult(BaseModel):
     """Standardized result returned by every tool."""
     status: ToolStatus
@@ -93,6 +118,10 @@ class Tool:
     schema: dict[str, Any]
     func: Callable[..., dict | ToolResult]
     security: SecurityLevel = SecurityLevel.SAFE
+    # Capability tier — Guardian's confirmation gate keys off this.
+    # Default is DESTRUCTIVE so any tool that forgets to declare a tier
+    # fails safe (asks user) rather than silently getting exec permission.
+    tier: CapabilityTier = CapabilityTier.DESTRUCTIVE
 
     async def __call__(self, request_id: Optional[str] = None, **kwargs) -> ToolResult:
         from backend.core.runtime import runtime
@@ -116,17 +145,25 @@ def _type_to_json(py_type: Any) -> str:
     return _PRIMITIVE_TYPES.get(py_type, "string")
 
 
-def tool(security: Any = SecurityLevel.SAFE) -> Any:
+def tool(security: Any = SecurityLevel.SAFE, tier: Any = None) -> Any:
     """Register a function as a tool. Supports:
-      @tool
-      @tool(security=SecurityLevel.CAUTION)
+      @tool                                            # bare (tier defaults DESTRUCTIVE — fail closed)
+      @tool(tier=CapabilityTier.READONLY)              # explicit tier
+      @tool(security=SecurityLevel.CAUTION)            # legacy security only
+      @tool(security=SecurityLevel.CAUTION, tier=...)  # both
     """
     func = None
 
     if callable(security):
-        # Used as @tool
+        # Used as @tool bare — first positional is the function itself.
         func = security
         security = SecurityLevel.SAFE
+        # tier stays None → resolves to DESTRUCTIVE below (fail closed)
+
+    # Resolve tier default. Missing / unknown → DESTRUCTIVE. Any @tool
+    # that forgets to declare a tier gets the safest treatment (Guardian
+    # will prompt every time) instead of silent execute permission.
+    resolved_tier = tier if isinstance(tier, CapabilityTier) else CapabilityTier.DESTRUCTIVE
 
     def decorator(f: Callable[..., dict]) -> Callable[..., dict]:
         name = f.__name__
@@ -167,7 +204,8 @@ def tool(security: Any = SecurityLevel.SAFE) -> Any:
             description=description,
             schema=schema,
             func=f,
-            security=security
+            security=security,
+            tier=resolved_tier,
         )
         return f
 

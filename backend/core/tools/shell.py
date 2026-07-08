@@ -7,10 +7,10 @@ so the user must approve each invocation.
 """
 import subprocess
 
-from backend.core.tools.registry import SecurityLevel, ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
 
 
-@tool(security=SecurityLevel.CAUTION)
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.DESTRUCTIVE)  # tier: arbitrary shell exec, spec-mandated DESTRUCTIVE
 def run_command(command: str, timeout_seconds: int = 30) -> ToolResult:
     """Run a shell command and return its stdout/stderr. CAUTION: arbitrary code
     execution; user must approve each call. `timeout_seconds` defaults to 30."""

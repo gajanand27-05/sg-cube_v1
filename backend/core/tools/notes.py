@@ -3,7 +3,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from backend.core.tools.registry import tool
+from backend.core.tools.registry import CapabilityTier, tool
 
 NOTES_DIR = Path.home() / "sg_cube" / "notes"
 
@@ -16,7 +16,7 @@ def _notes_path(date: str) -> Path:
     return NOTES_DIR / f"{date}.md"
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: appends to markdown file, reversible by editing
 def take_note(text: str) -> dict:
     """Append a timestamped note to today's markdown file at
     ~/sg_cube/notes/YYYY-MM-DD.md. Use this for any "note this down", "save
@@ -32,7 +32,7 @@ def take_note(text: str) -> dict:
     return {"status": "success", "message": f"noted: {text.strip()}"}
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: reads notes file, no side effects
 def read_notes(date: str = "") -> dict:
     """Return the notes for a given date (YYYY-MM-DD). Defaults to today.
     Use when the user asks "what did I note today" or "what are my notes"."""
@@ -50,7 +50,7 @@ def read_notes(date: str = "") -> dict:
     }
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: opens editor + may create file, reversible
 def open_notes_today() -> dict:
     """Open today's notes file in the default markdown editor."""
     NOTES_DIR.mkdir(parents=True, exist_ok=True)

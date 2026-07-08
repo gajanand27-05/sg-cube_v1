@@ -4,7 +4,7 @@ No external API; the same Ollama model that does reasoning handles the
 translation. Quality is good for common language pairs.
 """
 from backend.core.tools.llm_helper import llm_generate
-from backend.core.tools.registry import tool
+from backend.core.tools.registry import CapabilityTier, tool
 
 # Common alias -> canonical name (so the LLM sees something consistent).
 LANG_ALIASES = {
@@ -40,7 +40,7 @@ TRANSLATE_SYSTEM = (
 )
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: LLM text transform, no side effects
 def translate(text: str, target_language: str = "English") -> dict:
     """Translate `text` to `target_language`. Common names and ISO codes work:
     "Spanish"/"es", "Hindi"/"hi", "French"/"fr", "Japanese"/"ja", etc."""

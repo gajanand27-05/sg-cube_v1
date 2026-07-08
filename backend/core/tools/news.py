@@ -7,7 +7,7 @@
 import feedparser
 import httpx
 
-from backend.core.tools.registry import tool
+from backend.core.tools.registry import CapabilityTier, tool
 
 NEWS_FEEDS: dict[str, str] = {
     "world": "http://feeds.bbci.co.uk/news/rss.xml",
@@ -23,7 +23,7 @@ NEWS_FEEDS: dict[str, str] = {
 REDDIT_URL = "https://www.reddit.com/r/popular.json"
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: RSS fetch, no side effects
 def get_news(category: str = "world", limit: int = 5) -> dict:
     """Read top headlines from an RSS feed. Categories: world, tech,
     techcrunch, business, india, science, sports. Default is "world" (BBC)."""
@@ -53,7 +53,7 @@ def get_news(category: str = "world", limit: int = 5) -> dict:
     }
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: Reddit HTTP GET, no side effects
 def get_trending(limit: int = 5) -> dict:
     """Read what is trending right now on Reddit's r/popular. Useful for
     "what's everyone talking about" type queries."""
@@ -89,7 +89,7 @@ def get_trending(limit: int = 5) -> dict:
     }
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: composes time+weather+news read-only sources, no side effects
 def daily_briefing() -> dict:
     """Read out a morning briefing: current time + local weather + top three
     world headlines + (if any) active reminders. Use for "give me my daily

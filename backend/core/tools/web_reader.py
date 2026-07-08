@@ -7,12 +7,12 @@ LLM-side summarization. SAFE — read-only, no side effects.
 import httpx
 from bs4 import BeautifulSoup
 
-from backend.core.tools.registry import ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, ToolResult, tool
 
 _MAX_CHARS = 50_000  # keep prompt sizes sane.
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: HTTP GET + HTML strip, no side effects
 def read_webpage(url: str) -> ToolResult:
     """Fetch `url` and return its plain-text body (HTML stripped via
     BeautifulSoup). For summarization, see `summarize_url`."""

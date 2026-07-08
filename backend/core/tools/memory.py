@@ -1,8 +1,8 @@
 from backend.core.memory.manager import memory as memory_manager
-from backend.core.tools.registry import tool
+from backend.core.tools.registry import CapabilityTier, tool
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: writes to persistent memory store, reversible via forget
 def remember(fact: str) -> dict:
     """Store a piece of information for long-term recall.
     Example: 'remember that my cat is named Luna'
@@ -11,7 +11,7 @@ def remember(fact: str) -> dict:
     return {"status": "success", "message": f"I'll remember that: {fact}"}
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: writes user preference, reversible
 def set_preference(preference: str) -> dict:
     """Store a user preference for future behavior.
     Example: 'always open chrome in incognito mode'
@@ -20,7 +20,7 @@ def set_preference(preference: str) -> dict:
     return {"status": "success", "message": "Preference saved."}
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: writes working memory kv, reversible
 def update_task_state(key: str, value: str) -> dict:
     """Store temporary state for the current complex task.
     Use this to 'save' progress during multi-step plans.

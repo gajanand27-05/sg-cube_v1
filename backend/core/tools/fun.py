@@ -3,7 +3,7 @@ import random
 import string
 from typing import Any
 
-from backend.core.tools.registry import SecurityLevel, ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
 
 _JOKES: list[str] = [
     "Why do programmers prefer dark mode? Because light attracts bugs.",
@@ -52,33 +52,33 @@ _COPING_SUGGESTIONS: list[str] = [
 ]
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.READONLY)  # tier: pure output, no side effects
 def tell_joke() -> ToolResult:
     """Tell a random joke to lighten the mood."""
     return ToolResult.success(random.choice(_JOKES))
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.READONLY)  # tier: pure output, no side effects
 def tell_fact() -> ToolResult:
     """Share a random interesting fact."""
     return ToolResult.success(random.choice(_FACTS))
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.READONLY)  # tier: pure computation, no side effects
 def flip_coin() -> ToolResult:
     """Flip a coin — returns heads or tails."""
     result = random.choice(["heads", "tails"])
     return ToolResult.success(f"It's {result}!", data={"result": result})
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.READONLY)  # tier: pure computation, no side effects
 def roll_dice(sides: int = 6) -> ToolResult:
     """Roll a dice with the given number of sides (default 6)."""
     result = random.randint(1, sides)
     return ToolResult.success(f"Rolled a {result}!", data={"result": result, "sides": sides})
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.READONLY)  # tier: pure random string, no side effects
 def generate_password(length: int = 16) -> ToolResult:
     """Generate a random secure password of the given length (default 16)."""
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -86,7 +86,7 @@ def generate_password(length: int = 16) -> ToolResult:
     return ToolResult.success(f"Password generated: {password}", data={"password": password})
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.READONLY)  # tier: returns text suggestion, no side effects
 def mood_response(mood: str = "") -> ToolResult:
     """Respond to the user's mood. Say 'bored', 'sad', 'happy', etc."""
     mood = mood.strip().lower()

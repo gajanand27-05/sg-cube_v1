@@ -72,5 +72,11 @@ class Settings(BaseSettings):
     wake_capture_seconds: float = 2.5
     wake_device: int | None = None  # mic device index; None = system default
 
+    # ── Capability tier gate (Phase 0 Part B) ──
+    # When true, Guardian passes SYSTEM_WRITE tools without prompting the
+    # user. DESTRUCTIVE tier ignores this flag — power state, deletion,
+    # shell exec, external messages ALWAYS require confirmation.
+    auto_confirm_system_write: bool = False
+
 
 settings = Settings()

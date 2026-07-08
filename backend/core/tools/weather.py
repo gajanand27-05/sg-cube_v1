@@ -6,7 +6,7 @@
 """
 import httpx
 
-from backend.core.tools.registry import ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, ToolResult, tool
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
@@ -83,7 +83,7 @@ def _describe(code: int) -> str:
 _LOCATION_DEFAULT_ALIASES = {"", "current", "current location", "my location", "here", "now", "default"}
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: Open-Meteo HTTP GET, no side effects
 def get_weather(location: str = "") -> ToolResult:
     """Get current weather for `location` (a city name). If `location` is
     empty, omitted, or "current"/"here", infers from your IP. Returns
@@ -140,7 +140,7 @@ def _fetch_current(location: str) -> ToolResult:
     )
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: Open-Meteo forecast HTTP GET, no side effects
 def get_weather_forecast(location: str = "", days: int = 3) -> ToolResult:
     """Get a daily forecast for the next `days` days (default 3, max 7).
     `location` is a city name; empty defaults to your IP-detected location."""

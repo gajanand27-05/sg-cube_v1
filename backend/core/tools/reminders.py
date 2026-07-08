@@ -10,7 +10,7 @@ import time
 from collections import OrderedDict
 from typing import Any
 
-from backend.core.tools.registry import tool
+from backend.core.tools.registry import CapabilityTier, tool
 
 _reminders: "OrderedDict[int, dict[str, Any]]" = OrderedDict()
 _next_id: int = 1
@@ -54,7 +54,7 @@ def _schedule(delay_seconds: float, message: str, kind: str) -> int:
     return rid
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: schedules background timer, reversible via cancel
 def set_reminder(minutes: int, message: str) -> dict:
     """Schedule a spoken reminder. After `minutes` minutes, SG_CUBE will say
     "Reminder: <message>" aloud. Use for "remind me in 10 minutes to ..."."""
@@ -68,7 +68,7 @@ def set_reminder(minutes: int, message: str) -> dict:
     }
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: schedules background timer, reversible via cancel
 def set_timer(seconds: int, label: str = "") -> dict:
     """Start a countdown timer. After `seconds` seconds, SG_CUBE will say
     "Timer done" (with the optional label) aloud."""
@@ -83,7 +83,7 @@ def set_timer(seconds: int, label: str = "") -> dict:
     }
 
 
-@tool
+@tool(tier=CapabilityTier.READONLY)  # tier: lists scheduled entries, no side effects
 def list_reminders() -> dict:
     """List active reminders and timers with their remaining time."""
     now = time.time()
@@ -105,7 +105,7 @@ def list_reminders() -> dict:
     return {"status": "success", "message": summary, "args": {"reminders": items}}
 
 
-@tool
+@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: cancels scheduled timer, reversible by re-scheduling
 def cancel_reminder(id: int) -> dict:
     """Cancel a scheduled reminder or timer by its id (from list_reminders)."""
     with _lock:

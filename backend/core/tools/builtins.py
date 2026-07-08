@@ -9,10 +9,10 @@ backend.core.agent.agent imports it eagerly at boot.
 """
 from backend.core.orchestrator.llm_layer import Intent
 from backend.core.safe_executor import command_whitelist as cw
-from backend.core.tools.registry import SecurityLevel, ToolResult, tool
+from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.READONLY)  # tier: produces final spoken output only, no state change
 def respond(text: str) -> ToolResult:
     """Speak `text` as the final answer to the user. Use this to end the
     conversation after other tools have run, or to answer factual questions
@@ -20,7 +20,7 @@ def respond(text: str) -> ToolResult:
     return ToolResult.success(text)
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: launches process, reversible by closing app
 def open_app(name: str, profile: str = "") -> ToolResult:
     """Open a desktop application by name. ANY installed app works
     (notepad, chrome, firefox, spotify, discord, whatsapp, vscode, vlc, ...).
@@ -40,7 +40,7 @@ def open_app(name: str, profile: str = "") -> ToolResult:
     )
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: terminates process, reversible by reopening (may lose unsaved state)
 def close_app(name: str) -> ToolResult:
     """Close a running desktop application by name."""
     res = cw.handle_close_app(Intent(action="close_app", target=name))
@@ -52,7 +52,7 @@ def close_app(name: str) -> ToolResult:
     )
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: opens browser + starts media, reversible
 def play_youtube(query: str) -> ToolResult:
     """Play the FIRST YouTube search result for `query` in the default
     browser. Use this whenever the user says "play <something>" — it's the
@@ -66,7 +66,7 @@ def play_youtube(query: str) -> ToolResult:
     )
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: opens browser tab, reversible
 def search_web(query: str, engine: str = "google") -> ToolResult:
     """Open a web search for `query` in the default browser.
     `engine` is "google" (default) or "youtube"."""
@@ -82,7 +82,7 @@ def search_web(query: str, engine: str = "google") -> ToolResult:
     )
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: opens browser tab, reversible
 def open_url(url: str) -> ToolResult:
     """Open a URL or domain (e.g. "github.com" or "https://example.com")
     in the default browser."""
@@ -95,7 +95,7 @@ def open_url(url: str) -> ToolResult:
     )
 
 
-@tool(security=SecurityLevel.SAFE)
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.READONLY)  # tier: reads system clock, no side effects
 def get_time() -> ToolResult:
     """Return the current local time, formatted for speaking aloud."""
     res = cw.handle_get_time(Intent(action="get_time", target=""))
