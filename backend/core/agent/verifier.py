@@ -48,7 +48,12 @@ def _is_malicious(args: dict) -> str | None:
 
 
 async def _secondary_check(user_query: str, tool_name: str, tool_args: dict, reasoning: str) -> bool:
-    """Ask a smaller, faster model (phi3) if this tool call makes sense."""
+    """Ask a smaller, faster model (phi3) if this tool call makes sense.
+
+    Routes via TaskType.VERIFICATION → Ollama (phi3) per routing policy.
+    Returns True when the model verifies the call, False on rejection or
+    on any exception (fail-closed).
+    """
     llm = get_provider()
     prompt = f"""You are a safety and logic verifier for an AI Operating System.
 User Query: "{user_query}"
@@ -60,7 +65,7 @@ Reply with a single JSON object: {{"verified": true}} or {{"verified": false, "r
     try:
         response = await llm.generate(
             prompt,
-            task=TaskType.CLASSIFICATION,
+            task=TaskType.VERIFICATION,
             json_mode=True,
             temperature=0.0,
         )
@@ -155,7 +160,10 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
 
     if needs_deep_verification:
         log.info(f"Triggering deep verification for {resolved!r} (conf={conf_score}, multi={is_multi_step}, tier={tier.value})")
-        if not _secondary_check(user_query, resolved, args, reasoning):
+        # `_secondary_check` is async — call it with await. Previously this was
+        # `if not _secondary_check(...)` which tested a coroutine for truthiness
+        # (always True) and silently disabled the rejection path.
+        if not await _secondary_check(user_query, resolved, args, reasoning):
             obs_engine.report_ai_quality(request_id, 20.0, "Secondary check failed")
             return VerificationResult(
                 False,
