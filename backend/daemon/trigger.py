@@ -160,12 +160,17 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
 
     print(f"[ai] response: {response.spoken_text} (latency: {response.latency_ms}ms, tools: {len(response.tool_calls)})")
     
-    # Publish execution events for each tool call
+    # Publish execution events for each tool call. `response.tool_calls`
+    # is a list[ToolCall] (dataclass, see brain.py) — attribute access,
+    # not dict.get. Prefer the ToolResult's own .message string, fall back
+    # to str(result) or "ok" when neither is present.
     for tool_call in response.tool_calls:
+        res = tool_call.result
+        msg = (getattr(res, "message", None) or str(res)) if res is not None else "ok"
         exec_event = Executed(
             command=command,
-            status="success",
-            message=str(tool_call.get("result", "ok")),
+            status=getattr(tool_call, "status", "success"),
+            message=msg,
             latency_ms=response.latency_ms,
             confidence=100.0,
             confidence_reason=[]
