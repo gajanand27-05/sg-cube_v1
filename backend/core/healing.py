@@ -83,12 +83,31 @@ class SelfHealer:
         if "no element matching" in err or "no editable target" in err or "tab_id" in err and "not found" in err:
             return RecoveryPath.PIVOT
 
-        # ── 9. Tool-Specific Failure (PIVOT) ─────────────────────────
+        # ── 9. Phase 3 canvas: schema validation failure (ABORT) ─────
+        # If the model produced a widget layout the schema rejects, retrying
+        # rarely helps — the model needs a hint from the surfaced error, not
+        # another blind attempt.
+        if "canvas schema invalid" in err or "canvas map widget rejected" in err:
+            return RecoveryPath.ABORT
+
+        # ── 10. Phase 3 data-source: provider rate-limited (PIVOT) ───
+        # Do NOT retry-hammer. Serve cached (the tool already tried) or ask
+        # the assistant to try an alternate data source.
+        if "rate limit" in err or "rate-limited" in err or "too many requests" in err or "http 429" in err:
+            return RecoveryPath.PIVOT
+
+        # ── 11. Phase 3 data-source: not configured (ESCALATE) ───────
+        # An optional keyed provider was chosen but the API key is missing.
+        # Only the user can set it.
+        if "not configured" in err or "api_key" in err or "api key" in err:
+            return RecoveryPath.ESCALATE
+
+        # ── 12. Tool-Specific Failure (PIVOT) ────────────────────────
         # e.g. "no window matching" -> re-list windows and retry match.
         if "not found" in err or "no matches" in err or "no window matching" in err:
             return RecoveryPath.PIVOT
 
-        # ── 10. Unknown/Repeat Failure (ESCALATE) ────────────────────
+        # ── 13. Unknown/Repeat Failure (ESCALATE) ────────────────────
         return RecoveryPath.ESCALATE
 
     def get_instruction(self, path: RecoveryPath, tool_name: str, error: str) -> str:

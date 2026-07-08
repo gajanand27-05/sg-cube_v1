@@ -1,12 +1,13 @@
 import { NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import {
-  LayoutDashboard, MessageSquare, Database, Bot, FileText, Settings, Power
+  LayoutDashboard, MessageSquare, LayoutGrid, Database, Bot, FileText, Settings, Power
 } from 'lucide-react'
 
 const links = [
   { to: "/", icon: LayoutDashboard, title: "Dashboard" },
   { to: "/chat", icon: MessageSquare, title: "Chat" },
+  { to: "/canvas", icon: LayoutGrid, title: "Canvas" },
   { to: "/memory", icon: Database, title: "Memory" },
   { to: "/agents", icon: Bot, title: "Agents" },
   { to: "/files", icon: FileText, title: "Files" },

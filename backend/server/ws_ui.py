@@ -13,6 +13,7 @@ from backend.daemon.ui_events import (
     AgentReasoningEvent,
     AgentThinkingEvent,
     AgentToolCallEvent,
+    CanvasUpdateEvent,
     ClipboardChangedEvent,
     CommandTranscribed,
     ConfidenceEvent,
@@ -58,6 +59,7 @@ TYPE_MAP: dict[type, str] = {
     ToolFinishedEvent: "tool_finished",
     MemoryHitEvent: "memory_hit",
     VisionUpdateEvent: "vision_update",
+    CanvasUpdateEvent: "canvas_update",
 }
 
 EVENT_TYPES = list(TYPE_MAP.keys())

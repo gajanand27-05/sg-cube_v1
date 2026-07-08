@@ -90,5 +90,15 @@ class Settings(BaseSettings):
     browser_nav_timeout_ms: int = 30_000
     browser_action_timeout_ms: int = 10_000
 
+    # ── Phase 3: data-source providers (all no-key by default) ──
+    # If a provider is set to a keyed variant and the key is missing, the
+    # tool returns a structured "not configured" result — never crashes.
+    # Defaults use free public APIs so a fresh clone runs test-clean.
+    stock_provider: str = "yahoo"      # "yahoo" (no key) | "finnhub"
+    finnhub_api_key: str = ""
+    weather_provider: str = "open-meteo"  # "open-meteo" (no key) | "openweather"
+    openweather_api_key: str = ""
+    news_api_key: str = ""             # optional; RSS default needs no key
+
 
 settings = Settings()

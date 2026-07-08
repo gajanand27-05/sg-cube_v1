@@ -4,6 +4,7 @@ import { useChatStore } from './chatStore'
 import { useSystemStore } from './systemStore'
 import { useVisionStore } from './visionStore'
 import { useMemoryStore } from './memoryStore'
+import { useCanvasStore } from './canvasStore'
 
 export interface WsEvent {
   type: string
@@ -64,6 +65,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         useSystemStore.getState().updateFromWs(data.type, data.payload)
         useVisionStore.getState().updateFromWs(data.type, data.payload)
         useMemoryStore.getState().updateFromWs(data.type, data.payload)
+        useCanvasStore.getState().updateFromWs(data.type, data.payload)
       } catch {
         /* ignore */
       }

@@ -199,3 +199,14 @@ class TTSChunkEvent:
 @dataclass
 class TTSEndEvent:
     text: str
+
+
+@dataclass
+class CanvasUpdateEvent:
+    """Phase 3: assistant populated the canvas via render_canvas.
+
+    `widgets` is a validated list of widget dicts (metric/list/map/chart/text)
+    that already passed the strict server-side schema. Frontend maps each
+    entry's `type` to a typed React component and renders props as plain
+    text (no dangerouslySetInnerHTML)."""
+    widgets: list
