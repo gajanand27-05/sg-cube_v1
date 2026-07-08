@@ -3,6 +3,8 @@ import logging
 import os
 import sys
 import threading
+from datetime import datetime, timezone
+from typing import Callable
 
 # Force UTF-8 stdout/stderr before importing anything that prints unicode.
 try:
@@ -14,11 +16,59 @@ except Exception:
 log = logging.getLogger(__name__)
 
 
+# ── Service health tracking ─────────────────────────────────────────────
+# One entry per service. State is:
+#   - "started"  — start() returned without raising
+#   - "disabled" — ENABLE_* flag was false; never attempted
+#   - "failed"   — start() raised; error text captured
+# This is the canonical health surface — the /system/services endpoint
+# reads from it. Populated by start_services, cleared on next boot.
+SERVICE_STATUS: dict[str, dict] = {}
+
+
+def get_service_status() -> dict:
+    """Snapshot of per-service startup status. Safe for JSON serialization."""
+    return {name: dict(entry) for name, entry in SERVICE_STATUS.items()}
+
+
+def _record(name: str, status: str, error: str | None = None) -> None:
+    SERVICE_STATUS[name] = {
+        "status": status,
+        "error": error,
+        "started_at": datetime.now(timezone.utc).isoformat() if status == "started" else None,
+    }
+
+
+def _start_one(name: str, enabled: bool, starter: Callable[[], None]) -> None:
+    """Boot one service with error isolation.
+
+    A failed start is logged at ERROR level with the traceback and recorded
+    to SERVICE_STATUS. Never re-raises — the caller keeps going with the
+    other services. A disabled service reports "disabled", never "failed".
+    """
+    if not enabled:
+        _record(name, "disabled")
+        return
+    try:
+        starter()
+        _record(name, "started")
+        log.info("Service %s started", name)
+    except Exception as e:
+        # log.exception writes the traceback at ERROR level.
+        log.exception("Service %s failed to start", name)
+        _record(name, "failed", error=str(e))
+
+
 def start_services(settings) -> dict:
     """Boot the background daemon services according to feature flags.
 
     Called from server/main.py's lifespan so `uvicorn backend.server.main:app`
     launches the full stack. Also called from the daemon CLI wrapper below.
+
+    Each service starts in its own try/except so one bad service (missing
+    model, no mic, permission denied) does not prevent the others from
+    booting or crash the whole server. Per-service outcomes are queryable
+    via GET /system/services.
 
     Returns an opaque handle for stop_services().
     """
@@ -30,18 +80,20 @@ def start_services(settings) -> dict:
     from backend.daemon.telemetry import telemetry_loop
     from backend.core.agents.watcher import watcher as watcher_agent
 
+    SERVICE_STATUS.clear()
     handle: dict = {"listener": None, "listener_thread": None}
 
-    if settings.enable_clipboard:
-        cb_watcher.start()
-    if settings.enable_vision:
-        vision_loop.start()
-    if settings.enable_watcher:
-        watcher_agent.start()
-    if settings.enable_telemetry:
-        telemetry_loop.start()
+    _start_one("clipboard", settings.enable_clipboard, cb_watcher.start)
+    _start_one("vision",    settings.enable_vision,    vision_loop.start)
+    _start_one("watcher",   settings.enable_watcher,   watcher_agent.start)
+    _start_one("telemetry", settings.enable_telemetry, telemetry_loop.start)
 
-    if settings.enable_wake_word:
+    # Wake word is a different shape (spawns a thread we need to track for
+    # stop_services) so it doesn't fit the plain _start_one() lambda pattern.
+    # Same try/except semantics though — record success/failure, never crash.
+    if not settings.enable_wake_word:
+        _record("wake_word", "disabled")
+    else:
         try:
             listener = WakeWordListener(
                 on_wake=handle_wake,
@@ -54,11 +106,11 @@ def start_services(settings) -> dict:
             t.start()
             handle["listener"] = listener
             handle["listener_thread"] = t
+            _record("wake_word", "started")
+            log.info("Service wake_word started")
         except Exception as e:
-            # ponytail: headless / no-mic machines should not crash the server.
-            # Ceiling: silently continues without wake word. Upgrade path: expose
-            # the failure via /health so the UI can show a "wake word disabled" pill.
-            log.warning("Wake-word listener disabled: %s", e)
+            log.exception("Service wake_word failed to start")
+            _record("wake_word", "failed", error=str(e))
 
     return handle
 
@@ -80,10 +132,17 @@ def stop_services(handle: dict) -> None:
     if listener_thread is not None:
         listener_thread.join(timeout=2.0)
 
-    telemetry_loop.stop()
-    watcher_agent.stop()
-    vision_loop.stop()
-    cb_watcher.stop()
+    # Guard each stop the same way so shutdown never crashes either.
+    for name, stopper in (
+        ("telemetry", telemetry_loop.stop),
+        ("watcher",   watcher_agent.stop),
+        ("vision",    vision_loop.stop),
+        ("clipboard", cb_watcher.stop),
+    ):
+        try:
+            stopper()
+        except Exception as e:
+            log.debug("Service %s stop failed: %s", name, e)
 
 
 def main() -> None:

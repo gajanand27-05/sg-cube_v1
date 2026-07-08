@@ -3,6 +3,8 @@ import logging
 import psutil
 from fastapi import APIRouter
 
+from backend.daemon.main import get_service_status
+
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/system", tags=["system"])
 
@@ -29,3 +31,13 @@ def system_stats():
     except Exception as e:
         log.warning(f"System stats failed: {e}")
         return {"error": str(e)}
+
+
+@router.get("/services")
+def services_health():
+    """Per-service startup outcome from the last boot.
+
+    Each entry: {status: started|disabled|failed, error: str|None, started_at: iso|None}.
+    Populated by start_services() at server lifespan startup.
+    """
+    return {"services": get_service_status()}
