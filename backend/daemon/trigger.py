@@ -167,10 +167,15 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
     for tool_call in response.tool_calls:
         res = tool_call.result
         msg = (getattr(res, "message", None) or str(res)) if res is not None else "ok"
+        # ToolResult carries a .reason field on blocked/error outcomes;
+        # Executed requires the field (no default), so surface it through
+        # or fall back to None for successful runs.
+        reason = getattr(res, "reason", None) if res is not None else None
         exec_event = Executed(
             command=command,
             status=getattr(tool_call, "status", "success"),
             message=msg,
+            reason=reason,
             latency_ms=response.latency_ms,
             confidence=100.0,
             confidence_reason=[]
