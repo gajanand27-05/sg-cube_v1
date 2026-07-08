@@ -140,55 +140,48 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
 
     obs_engine.report_ai_quality(request_id, conf_score * 100.0, "Self-reported confidence")
 
-    # Tier: Phase 0 capability gate. Missing/unknown → DESTRUCTIVE (fail closed).
+    # Tier: capability gate. Missing/unknown → DESTRUCTIVE (fail closed).
     tier = getattr(tool_obj, "tier", CapabilityTier.DESTRUCTIVE)
     if not isinstance(tier, CapabilityTier):
         tier = CapabilityTier.DESTRUCTIVE
 
-    # ── 3. Conditional Verifier Model ────────────────────────────────
-    # Trigger the secondary LLM check when the tool changes state, the LLM
-    # is low-confidence, or the plan is multi-step. Keying off tier keeps
-    # deep verification firing on state-changing calls even though the
-    # legacy SecurityLevel column may not have been updated on new tools.
-    needs_deep_verification = (
-        conf_score < 0.80 or
-        tier in (CapabilityTier.SYSTEM_WRITE, CapabilityTier.DESTRUCTIVE) or
-        tool_obj.security in [SecurityLevel.CAUTION, SecurityLevel.CRITICAL] or
-        is_multi_step
-    )
+    # ── 3. Fast paths — skip BOTH deep check and confirmation (Phase 0.7) ─
+    # Everything above this point is cheap and local (hallucination /
+    # schema / injection / confidence). Those already ran on ALL tools
+    # including the ones about to short-circuit here — a bad argument on
+    # a trusted tool is still rejected. Only the LLM/Ollama secondary
+    # check (below) is being bypassed for these branches.
+    if tier == CapabilityTier.READONLY:
+        return VerificationResult(True, reasoning=reasoning)
 
-    if needs_deep_verification:
-        log.info(f"Triggering deep verification for {resolved!r} (conf={conf_score}, multi={is_multi_step}, tier={tier.value})")
-        # `_secondary_check` is async — call it with await. Previously this was
-        # `if not _secondary_check(...)` which tested a coroutine for truthiness
-        # (always True) and silently disabled the rejection path.
-        if not await _secondary_check(user_query, resolved, args, reasoning):
-            obs_engine.report_ai_quality(request_id, 20.0, "Secondary check failed")
-            return VerificationResult(
-                False,
-                error="Action rejected by secondary verifier: logic or relevance mismatch."
-            )
-        obs_engine.report_ai_quality(request_id, 100.0, "Secondary check passed")
+    is_trusted = bool(getattr(tool_obj, "trusted", False))
+    if tier == CapabilityTier.SYSTEM_WRITE and is_trusted:
+        obs_engine.report_ai_quality(request_id, 100.0, "System-write on trusted allowlist")
+        return VerificationResult(True, reasoning=reasoning)
 
-    # ── 4. Capability tier gate ──────────────────────────────────────
-    # Keys off tier + per-tool trusted flag (Phase 0.6). Sandbox.py's
-    # own SecurityLevel-based check is a separate, deeper layer that
-    # fires at actual execution time.
+    # ── 4. Deep verifier (LLM secondary check) ───────────────────────
+    # Reached only for untrusted SYSTEM_WRITE and DESTRUCTIVE — both
+    # unconditionally trigger the deep check. Confidence, multi-step,
+    # and legacy SecurityLevel conditions used to gate this earlier;
+    # tier now dominates. Trusted tools never get here.
+    log.info(f"Triggering deep verification for {resolved!r} (conf={conf_score}, multi={is_multi_step}, tier={tier.value})")
+    if not await _secondary_check(user_query, resolved, args, reasoning):
+        obs_engine.report_ai_quality(request_id, 20.0, "Secondary check failed")
+        return VerificationResult(
+            False,
+            error="Action rejected by secondary verifier: logic or relevance mismatch."
+        )
+    obs_engine.report_ai_quality(request_id, 100.0, "Secondary check passed")
+
+    # ── 5. Confirmation gate for state-changing tools ────────────────
+    # Sandbox.py's SecurityLevel-based check is a separate, deeper layer
+    # that fires at actual execution time. The registry decorator also
+    # refuses to set trusted=True on a destructive tool, so is_critical
+    # here is always safe to assert.
     if tier == CapabilityTier.DESTRUCTIVE:
         obs_engine.report_ai_quality(request_id, 100.0, "Destructive tier — always confirm")
-        # No flag can silence this — matches the Phase 0 contract.
-        # The registry decorator also refuses to set trusted=True on a
-        # destructive tool, so even a misdeclared tool ends up here.
         return VerificationResult(True, reasoning=reasoning, needs_confirmation=True, is_critical=True)
 
-    if tier == CapabilityTier.SYSTEM_WRITE:
-        # Trusted allowlist entry — bypasses the confirmation prompt.
-        # Untrusted SYSTEM_WRITE still requires explicit user consent.
-        if getattr(tool_obj, "trusted", False):
-            obs_engine.report_ai_quality(request_id, 100.0, "System-write on trusted allowlist")
-            return VerificationResult(True, reasoning=reasoning)
-        obs_engine.report_ai_quality(request_id, 100.0, "System-write tier — confirm")
-        return VerificationResult(True, reasoning=reasoning, needs_confirmation=True)
-
-    # READONLY — pass through, no confirmation needed.
-    return VerificationResult(True, reasoning=reasoning)
+    # Untrusted SYSTEM_WRITE — READONLY and trusted paths already returned above.
+    obs_engine.report_ai_quality(request_id, 100.0, "System-write tier — confirm")
+    return VerificationResult(True, reasoning=reasoning, needs_confirmation=True)

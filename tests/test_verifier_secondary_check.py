@@ -1,19 +1,23 @@
-"""Phase 0.5 — the deep verifier's `_secondary_check` actually runs now.
+"""Phase 0.5 + 0.7 — the deep verifier runs on state-changing tools,
+but trusted SYSTEM_WRITE tools skip it for latency.
 
-Before the fix, `verify()` called `_secondary_check` without `await`. The
-result was a coroutine object — always truthy — so `not <coroutine>` was
-always False and the rejection path was dead code. Every state-changing
-call quietly bypassed the deep safety check.
+Phase 0.5 fixed the "coroutine never awaited" no-op so the deep check
+would actually reject bad plans. Phase 0.7 keeps that rejection path
+alive for untrusted SYSTEM_WRITE and DESTRUCTIVE, but short-circuits it
+for READONLY and trusted SYSTEM_WRITE — the Ollama round-trip was
+undercutting the whole point of the trusted allowlist ("open chrome"
+should feel instant).
 
 Contract under test:
 
-1. `_secondary_check` is genuinely invoked when the trigger conditions
-   are met (SYSTEM_WRITE/DESTRUCTIVE tier, low confidence, multi-step, or
-   legacy CAUTION/CRITICAL security level).
-2. When it returns True → verification proceeds normally.
-3. When it returns False → verification rejects with the "secondary
-   verifier" error.
-4. It's actually awaited — no "coroutine was never awaited" warnings.
+1. `_secondary_check` IS awaited and invoked for untrusted SYSTEM_WRITE.
+2. `_secondary_check` IS awaited and invoked for DESTRUCTIVE.
+3. `_secondary_check` is NOT invoked for READONLY.
+4. `_secondary_check` is NOT invoked for trusted SYSTEM_WRITE.
+5. When it returns False on an untrusted call, verify() rejects with the
+   expected error text.
+6. Cheap local schema validation still runs on trusted tools — a
+   missing required arg is rejected BEFORE any short-circuit kicks in.
 """
 import asyncio
 import sys
@@ -30,8 +34,8 @@ def _run(coro):
 
 
 def _register_stub(name: str, tier, trusted: bool = False):
-    """Register a minimal tool with the given tier + trust so `verify()`
-    can find it."""
+    """Register a minimal (no-arg) tool with the given tier + trust so
+    `verify()` can find it."""
     from backend.core.tools.registry import REGISTRY, tool, ToolResult
 
     @tool(tier=tier, trusted=trusted)
@@ -66,33 +70,31 @@ class _SpyCheck:
 
 
 def _install_spy(spy):
-    """Swap the module-level _secondary_check for our spy. Return restore fn."""
+    """Swap the module-level _secondary_check for our spy. Returns rollback fn."""
     from backend.core.agent import verifier as v
     original = v._secondary_check
     v._secondary_check = spy  # type: ignore[assignment]
     return lambda: setattr(v, "_secondary_check", original)
 
 
-def test_secondary_check_is_actually_awaited_and_called():
+# ── Phase 0.5 core: deep check is genuinely awaited on untrusted state changes ──
+
+def test_secondary_check_is_actually_awaited_on_untrusted_system_write():
     """The load-bearing assertion: the spy must have been invoked.
 
-    Prior to the fix, patching _secondary_check made no difference because
-    the coroutine it returned was never awaited — the truthiness check
-    always passed and no assertion could tell that from a normal pass.
-    Requiring the spy to record a call closes that gap.
+    Prior to Phase 0.5, patching _secondary_check made no difference —
+    the coroutine it returned was never awaited, so the check was dead
+    code. Elevating "coroutine was never awaited" to an error catches
+    any regression to the bare-call pattern.
     """
     from backend.core.agent.verifier import verify
     from backend.core.tools.registry import CapabilityTier, REGISTRY
 
-    name = _register_stub("_phase05_stub_calls_check", CapabilityTier.SYSTEM_WRITE)
+    name = _register_stub("_phase05_stub_untrusted", CapabilityTier.SYSTEM_WRITE, trusted=False)
     spy = _SpyCheck(return_value=True)
     restore = _install_spy(spy)
     try:
-        # SYSTEM_WRITE tier triggers deep verification regardless of confidence.
         with warnings.catch_warnings():
-            # If the fix regressed and we're back to a bare coroutine call,
-            # this warning would fire. Elevate it to an error so the test
-            # catches the regression instead of silently passing.
             warnings.filterwarnings("error", message="coroutine .* was never awaited")
             res = _run(verify(user_query="do the thing", call=_make_call(name)))
 
@@ -102,32 +104,9 @@ def test_secondary_check_is_actually_awaited_and_called():
         assert tool_name == name
         assert reasoning == "test fixture"
         assert res.is_valid is True
-        print("  [PASS] _secondary_check was invoked (proved by spy) and awaited")
-    finally:
-        REGISTRY.pop(name, None)
-        restore()
-
-
-def test_secondary_check_pass_lets_verification_proceed():
-    """When the deep check returns True → tier gate applies normally."""
-    from backend.core.agent.verifier import verify
-    from backend.core.tools.registry import CapabilityTier, REGISTRY
-
-    # Register as trusted so the tier gate passes through cleanly after
-    # the deep check approves — keeps the assertion unambiguous.
-    # (Phase 0.6 retired the global auto_confirm flag in favor of this
-    # per-tool trust flag.)
-    name = _register_stub("_phase05_stub_pass", CapabilityTier.SYSTEM_WRITE, trusted=True)
-    spy = _SpyCheck(return_value=True)
-    restore = _install_spy(spy)
-
-    try:
-        res = _run(verify(user_query="test", call=_make_call(name)))
-        assert len(spy.calls) == 1
-        assert res.is_valid is True
-        assert res.needs_confirmation is False
-        assert res.error == ""
-        print("  [PASS] secondary check True → verification proceeds")
+        # Untrusted SYSTEM_WRITE → confirmation required after deep check passes.
+        assert res.needs_confirmation is True
+        print("  [PASS] deep check awaited + invoked on untrusted SYSTEM_WRITE")
     finally:
         REGISTRY.pop(name, None)
         restore()
@@ -142,7 +121,7 @@ def test_secondary_check_fail_rejects_verification():
     from backend.core.agent.verifier import verify
     from backend.core.tools.registry import CapabilityTier, REGISTRY
 
-    name = _register_stub("_phase05_stub_fail", CapabilityTier.SYSTEM_WRITE)
+    name = _register_stub("_phase05_stub_fail", CapabilityTier.SYSTEM_WRITE, trusted=False)
     spy = _SpyCheck(return_value=False)
     restore = _install_spy(spy)
     try:
@@ -156,30 +135,110 @@ def test_secondary_check_fail_rejects_verification():
         restore()
 
 
+# ── Phase 0.7 fast paths: READONLY and trusted SYSTEM_WRITE skip the deep check ──
+
 def test_readonly_tools_skip_secondary_check():
-    """READONLY tier does NOT trigger deep verification — proves the trigger
-    conditions are still correct and we didn't over-fire the check."""
+    """READONLY exits before the LLM call — has no side effect to guard."""
     from backend.core.agent.verifier import verify
     from backend.core.tools.registry import CapabilityTier, REGISTRY
 
-    name = _register_stub("_phase05_stub_readonly", CapabilityTier.READONLY)
+    name = _register_stub("_phase07_stub_readonly", CapabilityTier.READONLY)
     spy = _SpyCheck(return_value=False)  # would reject if called
     restore = _install_spy(spy)
     try:
-        # High confidence + READONLY + single step + SAFE security → all
-        # trigger conditions false → deep check must be skipped.
         res = _run(verify(user_query="test", call=_make_call(name, confidence=0.99)))
         assert len(spy.calls) == 0, "READONLY tools must not trigger the secondary check"
         assert res.is_valid is True
-        print("  [PASS] READONLY tools skip the deep check (trigger conditions intact)")
+        assert res.needs_confirmation is False
+        print("  [PASS] READONLY skips the deep check")
+    finally:
+        REGISTRY.pop(name, None)
+        restore()
+
+
+def test_trusted_system_write_skips_secondary_check():
+    """The Phase 0.7 win: a trusted SYSTEM_WRITE tool does NOT incur an
+    Ollama round-trip. This is the "open chrome should feel instant"
+    contract — trust means both no prompt AND no LLM latency."""
+    from backend.core.agent.verifier import verify
+    from backend.core.tools.registry import CapabilityTier, REGISTRY
+
+    name = _register_stub("_phase07_stub_sw_trusted", CapabilityTier.SYSTEM_WRITE, trusted=True)
+    spy = _SpyCheck(return_value=False)  # would reject if called
+    restore = _install_spy(spy)
+    try:
+        res = _run(verify(user_query="test", call=_make_call(name)))
+        assert len(spy.calls) == 0, "trusted SYSTEM_WRITE must not trigger the secondary check"
+        assert res.is_valid is True
+        assert res.needs_confirmation is False, "trusted → no confirmation prompt either"
+        print("  [PASS] trusted SYSTEM_WRITE skips the deep check AND the prompt")
+    finally:
+        REGISTRY.pop(name, None)
+        restore()
+
+
+def test_destructive_still_invokes_secondary_check():
+    """DESTRUCTIVE keeps the deep check — the registration guard already
+    scrubbed trusted=True on destructive, so this branch is unaffected
+    by the Phase 0.7 short-circuit."""
+    from backend.core.agent.verifier import verify
+    from backend.core.tools.registry import CapabilityTier, REGISTRY
+
+    name = _register_stub("_phase07_stub_destructive", CapabilityTier.DESTRUCTIVE)
+    spy = _SpyCheck(return_value=True)
+    restore = _install_spy(spy)
+    try:
+        res = _run(verify(user_query="test", call=_make_call(name)))
+        assert len(spy.calls) == 1, f"DESTRUCTIVE must invoke the deep check; got {len(spy.calls)}"
+        assert res.is_valid is True
+        assert res.needs_confirmation is True
+        assert res.is_critical is True
+        print("  [PASS] DESTRUCTIVE still invokes the deep check")
+    finally:
+        REGISTRY.pop(name, None)
+        restore()
+
+
+# ── Guardrail: cheap validation still runs even on trusted tools ────────
+
+def test_cheap_local_validation_runs_on_trusted_tools():
+    """A trusted tool with a missing required arg must be rejected by the
+    cheap schema check BEFORE the fast-path exit. The point of the
+    guardrail: skipping the LLM verifier must not also skip the free
+    hallucinated-args guard that already runs on the fast path."""
+    from backend.core.agent.verifier import verify
+    from backend.core.tools.registry import CapabilityTier, REGISTRY, tool, ToolResult
+
+    # Register a trusted SYSTEM_WRITE tool with a REQUIRED string arg.
+    # If schema validation is bypassed the deep check would be too (both
+    # are gated by trust), so the spy count doubles as an "all guards
+    # were skipped" alarm.
+    @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)
+    def _phase07_stub_needs_arg(target: str) -> ToolResult:  # pragma: no cover
+        return ToolResult.success(f"handled {target}")
+
+    name = "_phase07_stub_needs_arg"
+    spy = _SpyCheck(return_value=True)
+    restore = _install_spy(spy)
+    try:
+        # Call without the required `target` argument.
+        res = _run(verify(user_query="test", call={
+            "name": name, "args": {}, "reasoning": "test", "confidence": 1.0,
+        }))
+        assert res.is_valid is False, "cheap schema check must still reject missing required arg"
+        assert "target" in (res.error or ""), f"error should name the missing arg: {res.error!r}"
+        assert len(spy.calls) == 0, "deep check must not run when schema check already rejected"
+        print("  [PASS] trusted tool with missing arg → rejected by cheap check, deep check skipped")
     finally:
         REGISTRY.pop(name, None)
         restore()
 
 
 if __name__ == "__main__":
-    test_secondary_check_is_actually_awaited_and_called()
-    test_secondary_check_pass_lets_verification_proceed()
+    test_secondary_check_is_actually_awaited_on_untrusted_system_write()
     test_secondary_check_fail_rejects_verification()
     test_readonly_tools_skip_secondary_check()
-    print("All Phase 0.5 verifier tests passed.")
+    test_trusted_system_write_skips_secondary_check()
+    test_destructive_still_invokes_secondary_check()
+    test_cheap_local_validation_runs_on_trusted_tools()
+    print("All Phase 0.5 + 0.7 verifier tests passed.")
