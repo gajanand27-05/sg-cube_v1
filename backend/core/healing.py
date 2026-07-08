@@ -44,7 +44,14 @@ class SelfHealer:
         if "closed mid-operation" in err or "window closed" in err or "no longer exists" in err:
             return RecoveryPath.RETRY if attempt < 2 else RecoveryPath.ABORT
 
-        # ── 3. Transient (RETRY) ─────────────────────────────────────
+        # ── 3. Browser: navigation timeout (RETRY once, then ABORT) ──
+        # Phase 2: fires BEFORE the generic transient-signals RETRY block
+        # below, because "timeout" is a substring of "navigation timeout"
+        # and would otherwise get up-to-3 retries. Nav timeout gets one.
+        if "navigation timeout" in err:
+            return RecoveryPath.RETRY if attempt < 2 else RecoveryPath.ABORT
+
+        # ── 4. Transient (RETRY) ─────────────────────────────────────
         transient_signals = ["timeout", "connection", "503", "504", "temporary", "busy"]
         if any(sig in err for sig in transient_signals) and attempt < 3:
             return RecoveryPath.RETRY
@@ -60,12 +67,28 @@ class SelfHealer:
         if "access denied" in err or "elevated" in err:
             return RecoveryPath.ESCALATE
 
-        # ── 6. Tool-Specific Failure (PIVOT) ─────────────────────────
+        # ── 6. Browser: launch failed (ESCALATE) ─────────────────────
+        # Phase 2: Playwright's chromium didn't start. Recovery requires
+        # `playwright install chromium` or fixing the profile dir — user
+        # action, not something the agent loop can retry.
+        if "browser unavailable" in err or "chromium launch failed" in err:
+            return RecoveryPath.ESCALATE
+
+        # ── 7 (was): browser navigation timeout moved to section 3 to fire
+        # before the generic transient "timeout" match.
+
+        # ── 8. Browser: element resolution / not-found (PIVOT) ───────
+        # Phase 2: click/type target didn't resolve — re-read page, retry
+        # match with a more specific description.
+        if "no element matching" in err or "no editable target" in err or "tab_id" in err and "not found" in err:
+            return RecoveryPath.PIVOT
+
+        # ── 9. Tool-Specific Failure (PIVOT) ─────────────────────────
         # e.g. "no window matching" -> re-list windows and retry match.
         if "not found" in err or "no matches" in err or "no window matching" in err:
             return RecoveryPath.PIVOT
 
-        # ── 7. Unknown/Repeat Failure (ESCALATE) ─────────────────────
+        # ── 10. Unknown/Repeat Failure (ESCALATE) ────────────────────
         return RecoveryPath.ESCALATE
 
     def get_instruction(self, path: RecoveryPath, tool_name: str, error: str) -> str:

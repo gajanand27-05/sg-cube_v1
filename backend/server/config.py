@@ -79,5 +79,16 @@ class Settings(BaseSettings):
     # model_config extra="ignore" — no auto-approve happens on the
     # untrusted state-changing tools anymore.
 
+    # ── Phase 2: Playwright browser automation ──
+    # ENABLE_BROWSER gates whether the browser_* tools register at all.
+    # If false, browser tools are absent from REGISTRY; the one-shot
+    # open_url / read_webpage still work. Browser is LAZY — the actual
+    # Chromium process only launches on the first tool call.
+    enable_browser: bool = True
+    browser_headless: bool = False  # visible window by default — desktop assistant, user wants to see it
+    browser_profile_dir: str = "~/sg_cube/browser_profile"  # persistent context; outside repo
+    browser_nav_timeout_ms: int = 30_000
+    browser_action_timeout_ms: int = 10_000
+
 
 settings = Settings()

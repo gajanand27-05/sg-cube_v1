@@ -43,6 +43,7 @@ class _FakeSettings:
     enable_watcher = True
     enable_telemetry = True
     enable_wake_word = False
+    enable_browser = True  # Phase 2 — lazy, no actual Chromium during tests
     wake_phrase = "onyx"
     wake_capture_seconds = 2.5
     wake_device = None
@@ -136,12 +137,13 @@ def test_disabled_never_reports_failed():
         enable_watcher = False
         enable_telemetry = False
         enable_wake_word = False
+        enable_browser = False
 
     try:
         dm.start_services(AllDisabled())
         status = dm.get_service_status()
 
-        for name in ("clipboard", "vision", "watcher", "telemetry", "wake_word"):
+        for name in ("clipboard", "vision", "watcher", "telemetry", "wake_word", "browser"):
             assert status[name]["status"] == "disabled", (name, status[name])
             assert status[name]["error"] is None, (name, status[name])
             assert status[name]["started_at"] is None, (name, status[name])
@@ -167,6 +169,8 @@ def test_all_services_start_when_all_succeed():
             assert status[name]["started_at"] is not None
 
         assert status["wake_word"]["status"] == "disabled"
+        # Phase 2 browser: enabled but lazy → "started" with a lazy note.
+        assert status["browser"]["status"] == "started"
         print("  [PASS] happy path: all enabled services report 'started'")
     finally:
         rollback()

@@ -88,6 +88,16 @@ def start_services(settings) -> dict:
     _start_one("watcher",   settings.enable_watcher,   watcher_agent.start)
     _start_one("telemetry", settings.enable_telemetry, telemetry_loop.start)
 
+    # Phase 2 browser: LAZY. We don't launch Chromium here — we just
+    # record the availability so /system/services can report "ready"
+    # (registered but not launched) vs "disabled" (feature flag off).
+    # The actual launch happens on first browser tool call. Shutdown
+    # hook lives in stop_services below.
+    if settings.enable_browser:
+        _record("browser", "started", error="lazy: launches on first browser tool call")
+    else:
+        _record("browser", "disabled")
+
     # Wake word is a different shape (spawns a thread we need to track for
     # stop_services) so it doesn't fit the plain _start_one() lambda pattern.
     # Same try/except semantics though — record success/failure, never crash.
@@ -117,6 +127,7 @@ def start_services(settings) -> dict:
 
 def stop_services(handle: dict) -> None:
     """Stop everything start_services booted. Safe to call with a partial handle."""
+    import asyncio
     from backend.daemon.clipboard_watcher import watcher as cb_watcher
     from backend.daemon.vision_loop import vision_loop
     from backend.daemon.telemetry import telemetry_loop
@@ -143,6 +154,30 @@ def stop_services(handle: dict) -> None:
             stopper()
         except Exception as e:
             log.debug("Service %s stop failed: %s", name, e)
+
+    # Phase 2: browser close is async (Playwright). Only fires if the
+    # browser was actually launched during runtime — lazy-start means
+    # most sessions don't need this. Best-effort: if a loop is running
+    # (server lifespan on shutdown), schedule and don't wait. Otherwise
+    # run a fresh loop synchronously so a CLI-driven shutdown still cleans up.
+    try:
+        from backend.core.browser.manager import browser_manager
+        if browser_manager.is_launched:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(browser_manager.close())
+                else:
+                    loop.run_until_complete(browser_manager.close())
+            except RuntimeError:
+                # No running loop and get_event_loop() refused — make a fresh one.
+                new_loop = asyncio.new_event_loop()
+                try:
+                    new_loop.run_until_complete(browser_manager.close())
+                finally:
+                    new_loop.close()
+    except Exception as e:
+        log.debug("Browser close failed: %s", e)
 
 
 def main() -> None:

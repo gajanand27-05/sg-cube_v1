@@ -56,6 +56,15 @@ pyautogui==0.9.54
 # across multi-monitor DPI, which is exactly what Phase 1 needed pywin32 for.
 pywin32==308
 
+# ── Phase 2: live browser automation ──
+# Playwright drives the persistent Chromium context that browser_open /
+# browser_read / browser_click / browser_type / browser_screenshot use.
+# The pip install brings the driver runtime; the actual browser binary
+# needs a separate step:
+#     playwright install chromium
+# LAZY — Chromium only launches on first browser tool call, not at boot.
+playwright==1.48.0
+
 # ── Phase 11d: information feeds (RSS only — stocks/crypto/weather hit JSON APIs directly) ──
 feedparser==6.0.11
 
