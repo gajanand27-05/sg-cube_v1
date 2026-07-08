@@ -292,51 +292,110 @@ if settings.enable_browser:
     async def _resolve_click_target(page: Any, target: str) -> tuple[list, str]:
         """Return (candidates, method).
 
-        Resolution order:
-          1. Looks like a CSS selector (`#id`, `.class`, `[attr=`, `//xpath`) → locator
-          2. Accessible role+name (button/link)
-          3. Visible text match
-          4. Label / placeholder match
-        Ambiguity is preserved — caller must NOT guess when >1 candidate."""
+        Phase 2.1 order (exact wins, partial only catches what exact missed;
+        the never-guess guarantee is preserved — multi-candidate results
+        from ANY tier route through the ambiguous-candidates path):
+
+          1. CSS/xpath selector — literal.
+          2. get_by_role(role, name=t, EXACT=True) for role ∈ (button, link, menuitem)
+             — strict accessible-name match; exact wins first.
+          3. get_by_role(role, name=t) default substring — role-scoped
+             substring on accessible name.
+          4. get_by_role(role).filter(has_text=t) for role ∈ (link, button)
+             — text content inside actionable role. Catches the ellipsis
+             case where accessible name is "More information..." but
+             innerText contains "More information".
+          5. get_by_role(role, name=<case-insensitive regex>) for role ∈
+             (button, link, menuitem) — final actionable-role fallback.
+          6. get_by_label(t) — form label. Placed BEFORE generic text so
+             the tier returns the associated <input> instead of a generic
+             text-node hit on the label element itself.
+          7. get_by_text(t, exact=False) — generic text (may match <p>).
+        """
+        import re as _re
         t = (target or "").strip()
         if not t:
             return [], "empty"
 
+        async def _first_n(loc: Any, cap: int = 5) -> list:
+            n = await loc.count()
+            if not n:
+                return []
+            return [await loc.nth(i).element_handle() for i in range(min(n, cap))]
+
         # 1. CSS-ish selector
         if t.startswith(("#", ".", "[", "//", "*[")):
             try:
-                loc = page.locator(t)
-                n = await loc.count()
-                if n:
-                    return [await loc.nth(i).element_handle() for i in range(min(n, 5))], "selector"
+                got = await _first_n(page.locator(t))
+                if got:
+                    return got, "selector"
             except Exception:
                 pass
 
-        # 2. Accessible name for common actionable roles
+        # 2. EXACT accessible-name in actionable roles — exact wins.
         for role in ("button", "link", "menuitem"):
             try:
-                loc = page.get_by_role(role, name=t)
-                n = await loc.count()
-                if n:
-                    return [await loc.nth(i).element_handle() for i in range(min(n, 5))], f"role={role}"
+                got = await _first_n(page.get_by_role(role, name=t, exact=True))
+                if got:
+                    return got, f"role={role}/exact"
             except Exception:
                 continue
 
-        # 3. Text
+        # 3. Substring accessible-name in actionable roles (Playwright default).
+        for role in ("button", "link", "menuitem"):
+            try:
+                got = await _first_n(page.get_by_role(role, name=t))
+                if got:
+                    return got, f"role={role}/substring"
+            except Exception:
+                continue
+
+        # 4. NEW — text content in actionable role. Handles the ellipsis
+        #    case: <a>More information...</a> has accessible name including
+        #    the ellipsis, which some Playwright builds don't substring-
+        #    match. `has_text` searches innerText, which does.
+        for role in ("link", "button"):
+            try:
+                got = await _first_n(page.get_by_role(role).filter(has_text=t))
+                if got:
+                    return got, f"role={role}/has-text"
+            except Exception:
+                continue
+
+        # 5. NEW — case-insensitive regex on accessible name as a final
+        #    actionable-role attempt. Belt-and-suspenders for accessibility-
+        #    tree quirks (unicode ellipsis, wrapping whitespace, etc.).
         try:
-            loc = page.get_by_text(t, exact=False)
-            n = await loc.count()
-            if n:
-                return [await loc.nth(i).element_handle() for i in range(min(n, 5))], "text"
+            pattern = _re.compile(_re.escape(t), _re.IGNORECASE)
+        except _re.error:
+            pattern = None
+        if pattern is not None:
+            for role in ("button", "link", "menuitem"):
+                try:
+                    got = await _first_n(page.get_by_role(role, name=pattern))
+                    if got:
+                        return got, f"role={role}/regex"
+                except Exception:
+                    continue
+
+        # 6. Form label — placed BEFORE generic text so the tier returns
+        #    the associated <input> instead of a generic-text hit on the
+        #    <label> element itself. (Live-DOM test proved the ordering
+        #    matters — with text first, "Username" hit the label element
+        #    which has no id, breaking the "returns the input" contract.)
+        try:
+            got = await _first_n(page.get_by_label(t))
+            if got:
+                return got, "label"
         except Exception:
             pass
 
-        # 4. Form label
+        # 7. Generic text — may match <p>. Actionable roles and form
+        #    labels above are preferred; this is the last resort.
         try:
-            loc = page.get_by_label(t)
-            n = await loc.count()
-            if n:
-                return [await loc.nth(i).element_handle() for i in range(min(n, 5))], "label"
+            got = await _first_n(page.get_by_text(t, exact=False))
+            if got:
+                return got, "text"
         except Exception:
             pass
 

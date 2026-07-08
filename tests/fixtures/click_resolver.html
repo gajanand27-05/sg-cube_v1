@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Click Resolver Fixture</title>
+</head>
+<body>
+  <!-- ─── Case 1: the ellipsis case (real bug from live smoke) ─────────
+       Live example.com has <a>More information...</a> whose accessible
+       name Playwright's default get_by_role(link, name="More information")
+       missed. Tier 4 (has_text on role=link) is what should catch this. -->
+  <a href="/more" id="link-more">More information...</a>
+
+  <!-- ─── Case 2: exact wins over partial ─────────────────────────────
+       Query "Home" must resolve to <a>Home</a>, NOT <a>Home page</a>,
+       even though both substring-match. Tier 2 (exact) must fire before
+       tier 3 (substring) can catch both. -->
+  <a href="/home-exact" id="link-home-exact">Home</a>
+  <a href="/home-page" id="link-home-partial">Home page</a>
+
+  <!-- ─── Case 3: ambiguity still routes through candidates ────────────
+       Query "Sign" — no exact match, but two links substring-match.
+       Resolver must return 2 candidates so the tool blocks with the
+       ambiguous-candidates payload; must NOT guess one. -->
+  <a href="/signin-here"  id="link-sign-a">Sign in here</a>
+  <a href="/signin-there" id="link-sign-b">Sign in there</a>
+
+  <!-- ─── Case 4: role preference — actionable beats generic text ───
+       Query "Confirm" — <button> and <p> both contain the word.
+       Tier 2 exact-name on role=button hits the button first, so the
+       generic text tier never fires. Assert we pick the button, not the p. -->
+  <button id="btn-confirm">Confirm</button>
+  <p id="p-confirm">Confirm</p>
+
+  <!-- ─── Case 5: form label unchanged ─────────────────────────────────
+       Just proves we didn't break the tier that already worked. -->
+  <label for="username">Username</label>
+  <input id="username" type="text">
+
+  <!-- ─── Case 6: password field (browser_type guard) ─────────────────
+       Not resolver-specific, but here so the guard test can use the
+       same fixture. -->
+  <input id="password" type="password">
+</body>
+</html>
