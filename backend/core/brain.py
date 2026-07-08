@@ -96,7 +96,7 @@ class Brain:
         sentence_buffer = ""
         tts_started = False
 
-        async for chunk in self._run_commander_stream(request.input_text, conversation, request.user_id):
+        async for chunk in self.commander.run_stream(request.input_text, conversation, request.user_id):
             if chunk.type == "token":
                 sentence_buffer += chunk.content
                 yield BrainChunk(type="token", content=chunk.content)

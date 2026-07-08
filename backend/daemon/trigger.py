@@ -12,6 +12,7 @@ import sounddevice as sd
 
 from backend.ai_modules.speech.stt_whisper import transcribe_array, transcribe_stream
 from backend.ai_modules.speech.tts_piper import speak, stop_speech, speak_stream, is_speaking
+from backend.core.agents.commander import commander
 from backend.core.brain import brain, BrainRequest
 from backend.core.events import get_bus, Priority
 from backend.core.state import AssistantState, manager as state_manager
