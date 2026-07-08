@@ -453,16 +453,6 @@ def list_windows() -> ToolResult:
     )
 
 
-# Backward-compat alias for anything that referenced the old name.
-# Points to the same registered tool via a second REGISTRY entry.
-try:
-    from backend.core.tools.registry import REGISTRY as _REG
-    if "list_windows" in _REG and "list_open_windows" not in _REG:
-        _REG["list_open_windows"] = _REG["list_windows"]
-except Exception:
-    pass
-
-
 @tool(tier=CapabilityTier.READONLY)  # tier: reads monitor geometry, no side effects
 def get_monitors() -> ToolResult:
     """List each display: index, primary flag, work-area rect [x,y,w,h] (which
