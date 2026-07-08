@@ -49,6 +49,13 @@ screen-brightness-control==0.24.0
 pygetwindow==0.0.9
 pyautogui==0.9.54
 
+# ── Phase 1: window management + grid snapping ──
+# pywin32 drives EnumWindows, GetWindowRect, SetWindowPos, EnumDisplayMonitors,
+# and GetDpiForMonitor for windowing.py. pygetwindow above stays for the
+# legacy focus_window / minimize_all path — it's convenient but unreliable
+# across multi-monitor DPI, which is exactly what Phase 1 needed pywin32 for.
+pywin32==308
+
 # ── Phase 11d: information feeds (RSS only — stocks/crypto/weather hit JSON APIs directly) ──
 feedparser==6.0.11
 

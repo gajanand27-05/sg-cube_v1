@@ -36,22 +36,36 @@ class SelfHealer:
         if "dangerous" in err or "blocked" in err or "permission denied" in err:
             return RecoveryPath.ABORT
 
-        # ── 2. Transient (RETRY) ─────────────────────────────────────
-        # If it's a timeout or connection issue, try again up to 3 times
+        # ── 2. Window closed mid-op (RETRY once, then ABORT) ────────
+        # Phase 1: windowing.py raises this when SetWindowPos hits the
+        # target after the user closed it. One retry catches the "user
+        # tapped X while I was mid-move" case; a second failure means
+        # the target is genuinely gone.
+        if "closed mid-operation" in err or "window closed" in err or "no longer exists" in err:
+            return RecoveryPath.RETRY if attempt < 2 else RecoveryPath.ABORT
+
+        # ── 3. Transient (RETRY) ─────────────────────────────────────
         transient_signals = ["timeout", "connection", "503", "504", "temporary", "busy"]
         if any(sig in err for sig in transient_signals) and attempt < 3:
             return RecoveryPath.RETRY
 
-        # ── 3. Malformed/Schema (FIX) ────────────────────────────────
+        # ── 4. Malformed/Schema (FIX) ────────────────────────────────
         if "missing argument" in err or "type mismatch" in err or "hallucinated" in err:
             return RecoveryPath.FIX
 
-        # ── 4. Tool-Specific Failure (PIVOT) ─────────────────────────
-        # e.g. "app not found" -> pivot to "search_web"
-        if "not found" in err or "no matches" in err:
+        # ── 5. Elevated / access-denied window (ESCALATE with context) ─
+        # Phase 1: SetWindowPos on an admin-elevated window fails with
+        # ERROR_ACCESS_DENIED. Non-elevated SG_CUBE cannot recover this;
+        # the user has to move it themselves or run us elevated.
+        if "access denied" in err or "elevated" in err:
+            return RecoveryPath.ESCALATE
+
+        # ── 6. Tool-Specific Failure (PIVOT) ─────────────────────────
+        # e.g. "no window matching" -> re-list windows and retry match.
+        if "not found" in err or "no matches" in err or "no window matching" in err:
             return RecoveryPath.PIVOT
 
-        # ── 5. Unknown/Repeat Failure (ESCALATE) ─────────────────────
+        # ── 7. Unknown/Repeat Failure (ESCALATE) ─────────────────────
         return RecoveryPath.ESCALATE
 
     def get_instruction(self, path: RecoveryPath, tool_name: str, error: str) -> str:
