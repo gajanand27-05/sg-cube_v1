@@ -62,16 +62,43 @@ class SelfHealer:
         if "execution timed out" in err or "execution timeout" in err:
             return RecoveryPath.RETRY if attempt < 2 else RecoveryPath.ABORT
 
+        # ── 3c. Phase 5D: user-initiated cancellation (ABORT) ────────
+        # runtime.py catches asyncio.CancelledError and returns
+        # "Task was cancelled". Retrying a user-cancelled operation is
+        # exactly the wrong response — they told us to stop. Fires
+        # before the transient block because "cancelled" would otherwise
+        # not match anything and fall through to ESCALATE (bad UX).
+        if "task was cancelled" in err or "user cancelled" in err:
+            return RecoveryPath.ABORT
+
         # ── 4. Transient (RETRY) ─────────────────────────────────────
         # "timeout" removed from this list in Phase 5A — all tool-execution
-        # timeouts now hit rule 3b above (retry once then ABORT). Nav timeout
-        # hits rule 3. Anything else here is a transport blip.
-        transient_signals = ["connection", "503", "504", "temporary", "busy"]
+        # timeouts now hit rule 3b above. Phase 5D widened HTTP 5xx match
+        # (503/504 → any 5xx) and added network-layer error phrases surfaced
+        # by data_sources.py (fetch failed / network error).
+        transient_signals = [
+            "connection", "temporary", "busy",
+            "http 500", "http 501", "http 502", "http 503", "http 504",
+            "network error", "fetch failed",
+        ]
         if any(sig in err for sig in transient_signals) and attempt < 3:
             return RecoveryPath.RETRY
 
-        # ── 4. Malformed/Schema (FIX) ────────────────────────────────
-        if "missing argument" in err or "type mismatch" in err or "hallucinated" in err:
+        # ── 4b. Phase 5D: bad/missing arg or unknown tool (FIX) ─────
+        # Widened from the pre-Phase-5D rule (which only caught the
+        # exact phrases "missing argument", "type mismatch",
+        # "hallucinated"). Now also covers:
+        #   - "empty symbol"/"empty location" from data_sources.py:
+        #     the LLM passed a required arg as empty string.
+        #   - "unknown tool: 'x'" from registry.py::call: the LLM
+        #     invented a tool name.
+        #   - "parse failed" from data_sources.py: response body wasn't
+        #     the shape we expected — a retry with fresh args often works.
+        if ("missing argument" in err or "type mismatch" in err
+                or "hallucinated" in err
+                or "empty symbol" in err or "empty location" in err
+                or "unknown tool" in err
+                or "parse failed" in err):
             return RecoveryPath.FIX
 
         # ── 5. Elevated / access-denied window (ESCALATE with context) ─
@@ -118,10 +145,28 @@ class SelfHealer:
 
         # ── 12. Tool-Specific Failure (PIVOT) ────────────────────────
         # e.g. "no window matching" -> re-list windows and retry match.
-        if "not found" in err or "no matches" in err or "no window matching" in err:
+        # Phase 5D added:
+        #   - "no price returned" / "no headlines" from data_sources.py:
+        #     the query resolved but the provider had no data. PIVOT
+        #     nudges the Planner to try a different symbol / topic
+        #     rather than escalate ("didn't work, try again with what?").
+        #   - "could not geocode" from data_sources.py: bad location
+        #     name — PIVOT so the Planner picks a canonical form
+        #     (e.g. "SF" → "San Francisco") instead of asking the user.
+        if ("not found" in err or "no matches" in err
+                or "no window matching" in err
+                or "no price returned" in err or "no headlines" in err
+                or "could not geocode" in err):
             return RecoveryPath.PIVOT
 
-        # ── 13. Unknown/Repeat Failure (ESCALATE) ────────────────────
+        # ── 13. Unknown/Repeat Failure (ESCALATE) — safe default ─────
+        # Phase 5D audit: this is the explicit safe default. Reached only
+        # when none of the specific rules above match. ESCALATE surfaces
+        # the error to the user with a request for clarification — never
+        # silent, never infinite-loops (each Healer call has an `attempt`
+        # bound tracked by the caller; ESCALATE simply exits the loop).
+        # If new tools introduce new error shapes, prefer adding a
+        # specific rule ABOVE this one over relying on the default.
         return RecoveryPath.ESCALATE
 
     def get_instruction(self, path: RecoveryPath, tool_name: str, error: str) -> str:
