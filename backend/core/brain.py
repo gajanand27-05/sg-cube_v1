@@ -94,16 +94,16 @@ class Brain:
         # Run Commander pipeline with streaming
         tool_records = []
         sentence_buffer = ""
-        tts_started = False
 
         async for chunk in self.commander.run_stream(request.input_text, conversation, request.user_id):
             if chunk.type == "token":
                 sentence_buffer += chunk.content
                 yield BrainChunk(type="token", content=chunk.content)
-                
-                # Check for sentence boundary to start TTS early
-                if not tts_started and self._is_sentence_complete(sentence_buffer):
-                    tts_started = True
+
+                # Phase 4B: emit tts_ready every time a sentence completes,
+                # not just the first. Downstream drains a per-sentence queue
+                # so time-to-first-audio drops while later sentences arrive.
+                if self._is_sentence_complete(sentence_buffer):
                     yield BrainChunk(type="tts_ready", content=sentence_buffer.strip())
                     sentence_buffer = ""
             

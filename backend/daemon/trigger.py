@@ -12,8 +12,9 @@ import sounddevice as sd
 
 from backend.ai_modules.speech.stt_whisper import transcribe_array, transcribe_stream
 from backend.ai_modules.speech.tts_piper import speak, stop_speech, speak_stream, is_speaking
+from backend.ai_modules.speech.tts_queue import get_sentence_queue
 from backend.core.agents.commander import commander
-from backend.core.brain import brain, BrainRequest
+from backend.core.brain import brain, BrainRequest, BrainResponse
 from backend.core.events import get_bus, Priority
 from backend.core.state import AssistantState, manager as state_manager
 from backend.core.dogfooding import ledger as dogfooding_ledger
@@ -88,6 +89,9 @@ def on_wake_detected(emit: EmitFn | None = None) -> None:
     """Fires the instant the wake phrase is recognised."""
     # Phase C2: Interrupt any in-progress speech immediately
     stop_speech()
+    # Phase 4B: drain any queued sentences so they don't resume speaking
+    # after the interrupt.
+    get_sentence_queue().interrupt()
     commander.interrupt()
 
     state_manager.transition_to(AssistantState.LISTENING)
@@ -100,11 +104,14 @@ def on_wake_detected(emit: EmitFn | None = None) -> None:
 def on_barge_in(rms: float, emit: EmitFn | None = None) -> None:
     """Phase 4A: user spoke while TTS was playing — interrupt and start capturing.
 
-    Same fast-path as on_wake_detected (stop TTS, transition to LISTENING,
-    chime) plus a distinct SpeechInterruptedEvent so the frontend can
-    reflect the "I cut you off" transition, not just a neutral wake.
+    Same fast-path as on_wake_detected (stop TTS, drain queue, transition
+    to LISTENING, chime) plus a distinct SpeechInterruptedEvent so the
+    frontend can reflect the "I cut you off" transition, not just a
+    neutral wake.
     """
     stop_speech()
+    # Phase 4B: drain queued sentences too.
+    get_sentence_queue().interrupt()
     commander.interrupt()
 
     state_manager.transition_to(AssistantState.LISTENING)
@@ -157,9 +164,17 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         session_id=None,
         metadata={"peak": peak, "device_id": device_id},
     )
-    
+
+    # Phase 4B: for local playback, drain sentences via the queue as
+    # brain.run_stream produces them — cuts perceived time-to-first-audio.
+    # For remote (device_id set) we keep the old collect-then-broadcast
+    # path since streaming audio bytes to a remote device would require
+    # a different transport protocol than what's currently wired.
     try:
-        response = await brain.run(brain_request)
+        if device_id:
+            response = await brain.run(brain_request)
+        else:
+            response = await _run_brain_streaming(brain_request)
     except Exception as e:
         try:
             dogfooding_ledger.record_crash()
@@ -208,8 +223,19 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
 
     reply = response.spoken_text
 
-    state_manager.transition_to(AssistantState.SPEAKING)
-    await _speak_selective(reply, device_id)
+    # For remote device or non-streaming paths, still call _speak_selective.
+    # For local streaming, run_brain_streaming already dispatched the reply
+    # sentence-by-sentence — but if the response never yielded any tts_ready
+    # chunks (short text, no sentence boundary, tool-call-only turn), we
+    # still need to speak the reply here as a fallback.
+    if device_id:
+        state_manager.transition_to(AssistantState.SPEAKING)
+        await _speak_selective(reply, device_id)
+    else:
+        # If streaming already spoke everything, skip. Otherwise fall back.
+        if not get_sentence_queue().spoke_anything and reply.strip():
+            state_manager.transition_to(AssistantState.SPEAKING)
+            await _speak_selective(reply, device_id)
 
     spoken_event = SpokenResponse(text=reply)
     get_bus().publish(spoken_event, priority=Priority.NORMAL)
@@ -217,6 +243,47 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
 
     state_manager.transition_to(AssistantState.IDLE)
     return True
+
+
+async def _run_brain_streaming(brain_request: BrainRequest) -> BrainResponse:
+    """Phase 4B: drain brain.run_stream() into per-sentence TTS as chunks
+    arrive. Returns the final BrainResponse when the stream completes.
+
+    * `tts_ready` → enqueue sentence for TTS immediately.
+    * `final`     → capture the BrainResponse to return.
+    * Anything else (token/tool_start/tool_end/context_ready) is ignored
+      here — token stream is separate WS traffic handled elsewhere.
+    """
+    sq = get_sentence_queue()
+    await sq.start()
+    response: Optional[BrainResponse] = None
+
+    try:
+        async for chunk in brain.run_stream(brain_request):
+            if chunk.type == "tts_ready":
+                # Transition to SPEAKING at first sentence — not eagerly at
+                # stream start, since context_ready may fire before any
+                # spoken tokens (e.g. for tool-call turns).
+                if state_manager.current != AssistantState.SPEAKING:
+                    state_manager.transition_to(AssistantState.SPEAKING)
+                await sq.enqueue(chunk.content)
+            elif chunk.type == "final":
+                response = chunk.content
+    finally:
+        await sq.finish()
+
+    if response is None:
+        # Stream ended without a final chunk — synthesize an empty response
+        # so callers don't hit an attribute error. Matches Brain.run()'s
+        # fallback shape.
+        response = BrainResponse(
+            spoken_text="",
+            intent={},
+            tool_calls=[],
+            execution_trace=[],
+            latency_ms=0,
+        )
+    return response
 
 
 async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
