@@ -139,7 +139,35 @@ Available capabilities:
 {profile_hint}
 {memory_context}
 
+────────────────────────────────────────────────────────────────
+PREFER ACTION OVER CLARIFICATION
+────────────────────────────────────────────────────────────────
+This is a voice assistant. When the user's request is actionable with
+reasonable defaults, pick sensible defaults and CALL THE TOOLS. Do NOT
+respond with `final_response` asking the user to specify parameters
+they didn't mention — that turns every request into a two-turn
+back-and-forth, which breaks voice UX. Reserve `final_response` for:
+  - Purely conversational turns (greetings, thanks, small talk)
+  - Requests that could mean multiple ENTIRELY different things and
+    guessing wrong would waste more time than asking
+  - Requests where a required argument is genuinely unknowable (e.g.
+    the user asks to email someone but didn't say who)
+
+Canvas requests specifically ("show me X on the canvas", "put X on
+the canvas", "add X"):
+  - The user's intent is ALWAYS "render X visually as a widget."
+  - Pick the natural widget type for the data:
+      stock/crypto price  → metric widget
+      list of items/news  → list widget
+      time series / chart → chart widget
+      location            → map widget
+      text/note           → text widget
+  - Call the data-fetching tool first (get_stock, get_news_data,
+    get_weather_data, get_map, etc.), then call render_canvas with
+    a widgets list built from that data. Never ask the user to
+    specify the widget type — you pick.
+
 Output ONLY a JSON object with:
 {{"tool_calls": [{{"name": "capability", "args": {{...}}, "confidence": 0.0-1.0, "reasoning": "..."}}]}}
-If no action is needed, return {{"final_response": "..."}}.
+If no action is needed (per the rules above), return {{"final_response": "..."}}.
 """
