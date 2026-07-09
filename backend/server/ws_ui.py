@@ -24,6 +24,7 @@ from backend.daemon.ui_events import (
     MemoryHitEvent,
     ProactiveEvent,
     SelfHealingEvent,
+    SpeechInterruptedEvent,
     SpokenResponse,
     SystemStatsEvent,
     TokenStreamEvent,
@@ -60,6 +61,7 @@ TYPE_MAP: dict[type, str] = {
     MemoryHitEvent: "memory_hit",
     VisionUpdateEvent: "vision_update",
     CanvasUpdateEvent: "canvas_update",
+    SpeechInterruptedEvent: "speech_interrupted",
 }
 
 EVENT_TYPES = list(TYPE_MAP.keys())

@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     wake_capture_seconds: float = 2.5
     wake_device: int | None = None  # mic device index; None = system default
 
+    # ── Phase 4A: barge-in (interrupt TTS by speaking) ──
+    # Uses RMS thresholding not full VAD because Silero can't distinguish
+    # "TTS bleed through mic" from "user speech" — both look like speech.
+    # RMS + debounce is the honest "good enough in a quiet room" mitigation.
+    # If the speaker is loud and near the mic, expect occasional false-fires.
+    # True acoustic echo cancellation is future work — see docs/OPEN_TICKETS.md.
+    enable_barge_in: bool = True
+    barge_in_rms_threshold: float = 800.0  # int16 amplitude scale; ambient ~50-200, speech ~1500-3000
+    barge_in_debounce_frames: int = 2  # consecutive high-RMS chunks required (~250ms at 125ms/chunk)
+
     # ── Capability tier gate ──
     # Phase 0.6 retired the global AUTO_CONFIRM_SYSTEM_WRITE flag in favor
     # of a per-tool trusted allowlist declared on each @tool. Legacy env

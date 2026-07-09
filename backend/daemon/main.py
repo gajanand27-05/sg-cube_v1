@@ -73,7 +73,7 @@ def start_services(settings) -> dict:
     Returns an opaque handle for stop_services().
     """
     # Deferred imports so this module stays cheap to import from server startup.
-    from backend.daemon.trigger import handle_wake, on_wake_detected
+    from backend.daemon.trigger import handle_wake, on_wake_detected, on_barge_in
     from backend.daemon.wake_word import WakeWordListener
     from backend.daemon.clipboard_watcher import watcher as cb_watcher
     from backend.daemon.vision_loop import vision_loop
@@ -108,6 +108,7 @@ def start_services(settings) -> dict:
             listener = WakeWordListener(
                 on_wake=handle_wake,
                 on_wake_detected=lambda: on_wake_detected(emit=None),
+                on_barge_in=lambda rms: on_barge_in(rms, emit=None),
                 wake_phrase=settings.wake_phrase,
                 capture_seconds=settings.wake_capture_seconds,
                 device=settings.wake_device,

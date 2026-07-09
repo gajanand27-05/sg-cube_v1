@@ -202,6 +202,17 @@ class TTSEndEvent:
 
 
 @dataclass
+class SpeechInterruptedEvent:
+    """Phase 4A: user spoke while TTS was playing → we cut it off (barge-in).
+
+    Distinct from a normal wake-word trigger so the frontend can reflect
+    the specific "you interrupted me" transition (Speaking → Listening)
+    rather than the neutral wake path.
+    """
+    rms: float  # peak RMS of the trigger chunk (int16 amplitude scale)
+
+
+@dataclass
 class CanvasUpdateEvent:
     """Phase 3: assistant populated the canvas via render_canvas.
 

@@ -20,6 +20,7 @@ from backend.core.dogfooding import ledger as dogfooding_ledger
 from backend.daemon.ui_events import (
     CommandTranscribed,
     Executed,
+    SpeechInterruptedEvent,
     SpokenResponse,
     TriggerError,
     WakeHeard,
@@ -93,6 +94,28 @@ def on_wake_detected(emit: EmitFn | None = None) -> None:
     event = WakeHeard(peak=0)
     get_bus().publish(event, priority=Priority.HIGH)
     _emit(emit, event)
+    threading.Thread(target=_play_chime, daemon=True).start()
+
+
+def on_barge_in(rms: float, emit: EmitFn | None = None) -> None:
+    """Phase 4A: user spoke while TTS was playing — interrupt and start capturing.
+
+    Same fast-path as on_wake_detected (stop TTS, transition to LISTENING,
+    chime) plus a distinct SpeechInterruptedEvent so the frontend can
+    reflect the "I cut you off" transition, not just a neutral wake.
+    """
+    stop_speech()
+    commander.interrupt()
+
+    state_manager.transition_to(AssistantState.LISTENING)
+    event = SpeechInterruptedEvent(rms=rms)
+    get_bus().publish(event, priority=Priority.HIGH)
+    _emit(emit, event)
+    # Also emit a WakeHeard so the existing "assistant is now listening"
+    # UI treatments still fire — barge-in IS a wake, just user-initiated.
+    wake_event = WakeHeard(peak=int(rms))
+    get_bus().publish(wake_event, priority=Priority.HIGH)
+    _emit(emit, wake_event)
     threading.Thread(target=_play_chime, daemon=True).start()
 
 

@@ -9,6 +9,8 @@ import sounddevice as sd
 import vosk
 
 from backend.core.dogfooding import ledger as dogfooding_ledger
+from backend.core.state import AssistantState, manager as state_manager
+from backend.server.config import settings
 
 vosk.SetLogLevel(-1)
 
@@ -48,6 +50,7 @@ class WakeWordListener:
         self,
         on_wake: Callable[[bytes], Any],
         on_wake_detected: Optional[Callable[[], None]] = None,
+        on_barge_in: Optional[Callable[[float], None]] = None,
         wake_phrase: str = "onyx",
         capture_seconds: float = 2.5,  # legacy arg, ignored by VAD path
         sample_rate: int = 16000,
@@ -68,15 +71,45 @@ class WakeWordListener:
         self.wake_phrase = wake_phrase.lower()
         self.on_wake = on_wake
         self.on_wake_detected = on_wake_detected
+        self.on_barge_in = on_barge_in
         self.capture_seconds = capture_seconds  # unused; kept for arg compat
         self.sample_rate = sample_rate
         self.device = device
         self.queue: queue.Queue = queue.Queue()
         self._running = False
         self._capturing = False
+        # Phase 4A: consecutive high-RMS chunks while state == SPEAKING;
+        # resets to 0 on any low-RMS chunk. When it reaches
+        # settings.barge_in_debounce_frames, we fire barge-in.
+        self._barge_in_frames = 0
 
     def _cb(self, indata, _frames, _time, _status):
         self.queue.put(bytes(indata))
+
+    def _check_barge_in(self, rms: float) -> bool:
+        """Phase 4A: return True iff RMS during SPEAKING passes the debounce.
+
+        Kept as a separate method so tests can drive the sequence directly
+        without needing a running mic stream. Side effect: mutates
+        `self._barge_in_frames`.
+        """
+        if (
+            not settings.enable_barge_in
+            or state_manager.current != AssistantState.SPEAKING
+        ):
+            # Outside SPEAKING or disabled — always reset so partial debounce
+            # doesn't leak across a state transition.
+            self._barge_in_frames = 0
+            return False
+        if rms > settings.barge_in_rms_threshold:
+            self._barge_in_frames += 1
+            if self._barge_in_frames >= settings.barge_in_debounce_frames:
+                self._barge_in_frames = 0
+                return True
+            return False
+        # RMS below threshold — reset debounce.
+        self._barge_in_frames = 0
+        return False
 
     def _drain(self) -> None:
         while not self.queue.empty():
@@ -229,6 +262,7 @@ class WakeWordListener:
                 in_followup = now < followup_until
 
                 trigger = False
+                is_barge_in = False
                 initial_audio: list[bytes] = []
                 trigger_label = ""
 
@@ -255,12 +289,31 @@ class WakeWordListener:
                 except Exception:
                     continue
 
+                # Phase 4A: barge-in — if the user speaks WHILE TTS is playing,
+                # interrupt playback and treat the utterance as a new command.
+                # RMS + debounce is a coarse mitigation for TTS-bleeding-into-
+                # mic false-fires; a loud speaker close to the mic will still
+                # false-fire (out of scope — future AEC work).
+                if not trigger and self._check_barge_in(rms):
+                    trigger = True
+                    is_barge_in = True
+                    trigger_label = f"barge-in (rms={rms:.0f})"
+                    initial_audio = [data]
+
                 if not trigger:
                     continue
 
                 print(f"[wake] heard {trigger_label}")
                 self._capturing = True
-                if self.on_wake_detected is not None:
+                # Route the pre-capture callback: barge-in gets its own hook
+                # (so the trigger can also publish SpeechInterruptedEvent),
+                # falling back to on_wake_detected for the normal wake path.
+                if is_barge_in and self.on_barge_in is not None:
+                    try:
+                        self.on_barge_in(rms)
+                    except Exception as e:
+                        print(f"[wake] on_barge_in raised: {e}")
+                elif self.on_wake_detected is not None:
                     try:
                         self.on_wake_detected()
                     except Exception as e:
