@@ -30,7 +30,9 @@ if str(_project_root) not in sys.path:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro) if not asyncio.get_event_loop().is_running() else asyncio.run(coro)
+    # asyncio.run creates a fresh loop per call — safe under pytest where
+    # earlier tests may have closed the shared default loop.
+    return asyncio.run(coro)
 
 
 def _register_stub(name: str, tier, trusted: bool = False):

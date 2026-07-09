@@ -31,7 +31,9 @@ if str(_project_root) not in sys.path:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro) if not asyncio.get_event_loop().is_running() else asyncio.run(coro)
+    # asyncio.run creates a fresh loop per call — safe under pytest where
+    # earlier tests may have closed the shared default loop.
+    return asyncio.run(coro)
 
 
 # ── Test 1: on_wake_detected resolves every symbol it touches ───────────
@@ -141,11 +143,20 @@ def test_trigger_process_handles_toolcall_dataclass():
     async def _mock_brain_run(_req):
         return fake_response
 
+    async def _mock_brain_run_stream(_req):
+        """Phase 4B: local path now iterates brain.run_stream. Emit only
+        a `final` chunk so _run_brain_streaming doesn't try to enqueue
+        sentences into the real TTS queue — the existing _speak_selective
+        no-op patch covers the fallback."""
+        from backend.core.brain import BrainChunk
+        yield BrainChunk(type="final", content=fake_response)
+
     with patch.object(tr, "brain") as mock_brain, \
          patch.object(tr, "_speak_selective", side_effect=_no_speak), \
          patch.object(tr.state_manager, "transition_to"), \
          patch.object(tr, "get_bus", return_value=_CapBus()):
         mock_brain.run = _mock_brain_run
+        mock_brain.run_stream = _mock_brain_run_stream
 
         ok = _run(tr._process_and_execute(
             command="what windows are open",
