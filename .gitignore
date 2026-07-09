@@ -53,6 +53,9 @@ Thumbs.db
 .claude/
 GEMINI.md
 
+# Personal test checklist — stays local, not for the repo
+resources/TOMORROW_MANUAL_TEST.md
+
 # opencode local config — not for the repo
 .opencode/
 AGENTS.md
