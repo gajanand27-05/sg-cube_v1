@@ -202,6 +202,21 @@ class TTSEndEvent:
 
 
 @dataclass
+class ProviderDegradedEvent:
+    """Phase 5B: an LLM provider hit a transient failure (429 / 5xx / timeout).
+
+    Fired whenever the resilient LLMProvider wrapper retries or falls
+    over to a backup backend. The UI can render "Planner provider
+    rate-limited, retrying" or "Falling over to <backup>" instead of
+    the user seeing a silent hang or a generic error.
+    """
+    backend: str          # e.g. "gemini"
+    reason: str           # short human string, e.g. "429 rate-limited"
+    action: str           # "retry" | "fallback" | "gave_up"
+    fallback: str = ""    # backend name we fell over to, if action=="fallback"
+
+
+@dataclass
 class SpeechInterruptedEvent:
     """Phase 4A: user spoke while TTS was playing → we cut it off (barge-in).
 

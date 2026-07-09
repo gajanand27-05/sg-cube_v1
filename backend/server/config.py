@@ -100,6 +100,17 @@ class Settings(BaseSettings):
     browser_nav_timeout_ms: int = 30_000
     browser_action_timeout_ms: int = 10_000
 
+    # ── Phase 5B: LLM provider failure resilience ──
+    # 429s + 5xx + timeouts on the primary Planner/chat LLM. Retry with
+    # server-directed backoff (from Retry-After / retry_after_seconds
+    # headers) capped at `llm_max_retries`; on persistent failure fall
+    # over to `llm_fallback_backend` if configured (empty = no fallback,
+    # the caller gets a structured error). See backend/ai_modules/llm/
+    # provider.py + backends/gemini_backend.py + openrouter_client.py.
+    llm_max_retries: int = 3
+    llm_backoff_base_s: float = 2.0  # used only when server doesn't send Retry-After
+    llm_fallback_backend: str = ""  # e.g. "openrouter" — falls over from gemini on 429
+
     # ── Phase 5A: tool execution timeouts (per-tier) ──
     # Every tool call is wrapped in asyncio.wait_for. Tier is derived from
     # the tool's source module in backend/core/tools/ (e.g. data_sources.py
