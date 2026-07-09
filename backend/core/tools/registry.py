@@ -131,10 +131,47 @@ class Tool:
 
     async def __call__(self, request_id: Optional[str] = None, **kwargs) -> ToolResult:
         from backend.core.runtime import runtime
-        return await runtime.run_tool(self.name, self.func, kwargs, request_id=request_id)
+        timeout = _timeout_for_tool(self)
+        return await runtime.run_tool(self.name, self.func, kwargs, timeout=timeout, request_id=request_id)
 
 
 REGISTRY: dict[str, Tool] = {}
+
+
+# ── Phase 5A: tier-based tool execution timeouts ─────────────────────────
+# The tool's source module basename decides its timeout tier. This is the
+# same signal /diagnostics/inspect already uses for category grouping — no
+# per-tool metadata needs adding. Untier'd modules fall back to default.
+#
+# Deliberately module-driven not registry-metadata-driven so a new tool
+# in an existing module inherits the right timeout without touching the
+# @tool decorator or reading .env.
+_DATA_FETCH_MODULES = frozenset({
+    "data_sources", "finance", "weather", "news",
+})
+_BROWSER_NAV_MODULES = frozenset({
+    "browser", "web_reader",
+})
+_LLM_MODULES = frozenset({
+    "summarize", "translate", "llm_helper",
+})
+
+
+def _timeout_for_tool(tool: "Tool") -> float:
+    """Return the tier-appropriate timeout in seconds for `tool`.
+
+    Deferred settings import — Tool is instantiated at module-import time
+    but settings loads .env at first read, so we do it lazily here.
+    """
+    from backend.server.config import settings
+    module = getattr(tool.func, "__module__", "").rsplit(".", 1)[-1]
+    if module in _DATA_FETCH_MODULES:
+        return settings.tool_timeout_data_fetch_s
+    if module in _BROWSER_NAV_MODULES:
+        return settings.tool_timeout_browser_nav_s
+    if module in _LLM_MODULES:
+        return settings.tool_timeout_llm_s
+    return settings.tool_timeout_default_s
 
 
 _PRIMITIVE_TYPES = {

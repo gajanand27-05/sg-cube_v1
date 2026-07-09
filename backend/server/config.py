@@ -100,6 +100,18 @@ class Settings(BaseSettings):
     browser_nav_timeout_ms: int = 30_000
     browser_action_timeout_ms: int = 10_000
 
+    # ── Phase 5A: tool execution timeouts (per-tier) ──
+    # Every tool call is wrapped in asyncio.wait_for. Tier is derived from
+    # the tool's source module in backend/core/tools/ (e.g. data_sources.py
+    # → data_fetch tier). A tool that hangs past its budget is cancelled,
+    # a structured timeout ToolResult flows up to Healer which routes to
+    # RETRY-once-then-ABORT (see backend/core/healing.py). Untier'd modules
+    # get tool_timeout_default_s.
+    tool_timeout_default_s: float = 30.0
+    tool_timeout_data_fetch_s: float = 10.0   # stock/weather/news/finance/geocode
+    tool_timeout_browser_nav_s: float = 30.0  # browser_*, web_reader, page reads
+    tool_timeout_llm_s: float = 60.0          # summarize/translate/llm_helper (LLM-invoking tools)
+
     # ── Phase 3: data-source providers (all no-key by default) ──
     # If a provider is set to a keyed variant and the key is missing, the
     # tool returns a structured "not configured" result — never crashes.

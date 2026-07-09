@@ -51,8 +51,22 @@ class SelfHealer:
         if "navigation timeout" in err:
             return RecoveryPath.RETRY if attempt < 2 else RecoveryPath.ABORT
 
+        # ── 3b. Phase 5A: tool execution timeout (RETRY once, then ABORT) ──
+        # runtime.py::run_tool wraps every call in asyncio.wait_for and emits
+        # "Execution timed out after Xs" on cancel. A hung tool retried more
+        # than once is almost always a bad-provider or bad-argument case
+        # dressed up as a timeout — cheaper to ABORT and let the user or
+        # the Planner pick a different path than to burn N budgets on it.
+        # Fires BEFORE the generic transient block so "timeout" substring
+        # doesn't fall through into the up-to-3 retry loop.
+        if "execution timed out" in err or "execution timeout" in err:
+            return RecoveryPath.RETRY if attempt < 2 else RecoveryPath.ABORT
+
         # ── 4. Transient (RETRY) ─────────────────────────────────────
-        transient_signals = ["timeout", "connection", "503", "504", "temporary", "busy"]
+        # "timeout" removed from this list in Phase 5A — all tool-execution
+        # timeouts now hit rule 3b above (retry once then ABORT). Nav timeout
+        # hits rule 3. Anything else here is a transport blip.
+        transient_signals = ["connection", "503", "504", "temporary", "busy"]
         if any(sig in err for sig in transient_signals) and attempt < 3:
             return RecoveryPath.RETRY
 
