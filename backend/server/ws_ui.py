@@ -120,6 +120,11 @@ class UIEventManager:
     async def connect(self, ws: WebSocket):
         if not self._loop:
             self._loop = asyncio.get_running_loop()
+        # Ensure bus→WS bridge exists. _broadcast_event was the only
+        # caller and it can't fire until the subscription exists — so this
+        # was the reachable path that actually sets it up.
+        if not self._bridge_setup:
+            self._setup_event_bridge()
         await ws.accept()
         self._connections.append(ws)
         log.info(f"Web UI client connected ({len(self._connections)} total)")

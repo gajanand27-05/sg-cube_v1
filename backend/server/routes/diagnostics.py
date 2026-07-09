@@ -105,6 +105,28 @@ def get_tool_usage():
     }
 
 
+from fastapi import Body
+
+
+@router.post("/emit-canvas")
+def emit_canvas(widgets: list = Body(...)):
+    """Phase 3 smoke-test endpoint: invoke render_canvas with the supplied
+    widget list. Runs the same strict schema validator as any assistant
+    call — an invalid payload is rejected here too, with no WS event
+    emitted. Useful for exercising the frontend deterministically without
+    depending on the LLM to pick the right tool call."""
+    # Deferred import so this module doesn't drag Phase 3 into every request.
+    from backend.core.tools.canvas import render_canvas
+
+    result = render_canvas(widgets)
+    return {
+        "status": result.status.value,
+        "message": result.message,
+        "reason": result.reason,
+        "data": result.data,
+    }
+
+
 @router.get("/inspect")
 def agent_inspector():
     """Agent Inspector — current tool registry state with usage.
