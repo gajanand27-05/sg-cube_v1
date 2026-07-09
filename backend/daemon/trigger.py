@@ -18,6 +18,7 @@ from backend.core.brain import brain, BrainRequest, BrainResponse
 from backend.core.events import get_bus, Priority
 from backend.core.state import AssistantState, manager as state_manager
 from backend.core.dogfooding import ledger as dogfooding_ledger
+from backend.core.latency import TurnLatency, ledger as latency_ledger
 from backend.daemon.ui_events import (
     CommandTranscribed,
     Executed,
@@ -146,14 +147,20 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optio
     return asyncio.run(_handle_wake_async(audio_bytes, emit, device_id))
 
 
-async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
+async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn | None = None, device_id: Optional[str] = None, turn: Optional[TurnLatency] = None) -> bool:
     request_id = str(uuid.uuid4())[:8]
+    if turn is None:
+        # Called without a pre-created TurnLatency (proactive, text path) —
+        # start one now so /diagnostics/latency has something to show for
+        # every turn regardless of entry point.
+        turn = TurnLatency(request_id=request_id, mode="voice")
     event = CommandTranscribed(text=command, peak=peak)
     get_bus().publish(event, priority=Priority.HIGH)
     _emit(emit, event)
 
     if not command:
         state_manager.transition_to(AssistantState.IDLE)
+        latency_ledger().record(turn)
         return False
 
     # Use Brain for unified pipeline
@@ -164,6 +171,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         session_id=None,
         metadata={"peak": peak, "device_id": device_id},
     )
+    turn.mark("orchestrator_route")
 
     # Phase 4B: for local playback, drain sentences via the queue as
     # brain.run_stream produces them — cuts perceived time-to-first-audio.
@@ -174,7 +182,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         if device_id:
             response = await brain.run(brain_request)
         else:
-            response = await _run_brain_streaming(brain_request)
+            response = await _run_brain_streaming(brain_request, turn=turn)
     except Exception as e:
         try:
             dogfooding_ledger.record_crash()
@@ -194,6 +202,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         get_bus().publish(spoken_event, priority=Priority.NORMAL)
         _emit(emit, spoken_event)
         state_manager.transition_to(AssistantState.IDLE)
+        latency_ledger().record(turn)
         return False
 
     print(f"[ai] response: {response.spoken_text} (latency: {response.latency_ms}ms, tools: {len(response.tool_calls)})")
@@ -242,10 +251,11 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
     _emit(emit, spoken_event)
 
     state_manager.transition_to(AssistantState.IDLE)
+    latency_ledger().record(turn)
     return True
 
 
-async def _run_brain_streaming(brain_request: BrainRequest) -> BrainResponse:
+async def _run_brain_streaming(brain_request: BrainRequest, turn: Optional[TurnLatency] = None) -> BrainResponse:
     """Phase 4B: drain brain.run_stream() into per-sentence TTS as chunks
     arrive. Returns the final BrainResponse when the stream completes.
 
@@ -261,6 +271,8 @@ async def _run_brain_streaming(brain_request: BrainRequest) -> BrainResponse:
     try:
         async for chunk in brain.run_stream(brain_request):
             if chunk.type == "tts_ready":
+                if turn is not None:
+                    turn.mark("first_audio_out")
                 # Transition to SPEAKING at first sentence — not eagerly at
                 # stream start, since context_ready may fire before any
                 # spoken tokens (e.g. for tool-call turns).
@@ -269,6 +281,14 @@ async def _run_brain_streaming(brain_request: BrainRequest) -> BrainResponse:
                 await sq.enqueue(chunk.content)
             elif chunk.type == "final":
                 response = chunk.content
+            elif chunk.type == "context_ready" and turn is not None:
+                turn.mark("context_ready")
+            elif chunk.type == "token" and turn is not None:
+                turn.mark("planner_first_token")
+            elif chunk.type == "tool_start" and turn is not None:
+                turn.mark("first_tool_start")
+            elif chunk.type == "tool_end" and turn is not None:
+                turn.mark("first_tool_end")
     finally:
         await sq.finish()
 
@@ -291,9 +311,16 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
 
     Phase C1: Uses `transcribe_stream` for streaming STT with partial results.
     Phase C2: TTS is non-blocking — returns to IDLE immediately after dispatching speech.
+    Phase 4C: creates a TurnLatency at wake-onset that threads through the
+              pipeline so /diagnostics/latency reports a per-stage breakdown.
     """
     t0 = asyncio.get_event_loop().time()
     outcome = False  # ponytail: captured into dogfooding ledger via finally
+
+    # Phase 4C: t=0 is here (wake VAD onset — the earliest observable
+    # moment). Mark `wake` and thread the record through the pipeline.
+    turn = TurnLatency(request_id=str(uuid.uuid4())[:8], mode="voice")
+    turn.mark("wake")
 
     try:
         state_manager.transition_to(AssistantState.THINKING)
@@ -304,6 +331,7 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
         if rms < 200:
             print(f"[trigger] skipping whisper: capture too quiet (rms={rms:.0f})")
             state_manager.transition_to(AssistantState.IDLE)
+            latency_ledger().record(turn)
             return False
 
         # Normalize int16 → float32 for Whisper
@@ -313,6 +341,7 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
             # Use streaming STT - audio_float is already the full captured audio
             # For true streaming, we'd need to refactor wake_word to yield chunks
             stt = transcribe_array(audio_float, SAMPLE_RATE)
+            turn.mark("stt_done")
             command = (stt.get("text") or "").strip()
             print(f"[command] {command!r}")
 
@@ -321,7 +350,7 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
             bus = get_bus()
             bus.publish(STTPartialEvent(text=command, is_final=True), priority=Priority.HIGH)
 
-            outcome = await _process_and_execute(command, peak, t0, emit, device_id)
+            outcome = await _process_and_execute(command, peak, t0, emit, device_id, turn=turn)
             return outcome
         except Exception as e:
             state_manager.transition_to(AssistantState.ERROR)

@@ -127,6 +127,28 @@ def emit_canvas(widgets: list = Body(...)):
     }
 
 
+@router.get("/latency")
+def get_latency(n: int = 20):
+    """Phase 4C: recent per-turn latency breakdowns.
+
+    Returns the last `n` turns from the in-memory ring buffer. Each turn
+    lists per-stage ms since VAD onset (or since text-turn start):
+
+        wake → stt_done → orchestrator_route → context_ready →
+        planner_first_token → first_tool_start → first_tool_end →
+        first_audio_out → total
+
+    Missing stages are omitted (a turn without tool calls won't have
+    first_tool_start), so the response reports what actually happened
+    rather than filling zeros. Reads from backend.core.latency.ledger()
+    — see that module for the shape.
+    """
+    from backend.core.latency import ledger as latency_ledger
+
+    turns = latency_ledger().recent(n=n)
+    return {"turns": turns, "count": len(turns)}
+
+
 @router.get("/inspect")
 def agent_inspector():
     """Agent Inspector — current tool registry state with usage.
