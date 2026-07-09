@@ -127,6 +127,30 @@ def emit_canvas(widgets: list = Body(...)):
     }
 
 
+@router.get("/preflight")
+def get_preflight():
+    """Phase 5C: end-to-end readiness snapshot.
+
+    Runs every preflight check and returns the results as a JSON list plus
+    a per-status summary. Would have caught the Phase 3 dead-WS-bridge
+    bug at boot instead of at manual-test time — the ws_bridge check
+    forces _setup_event_bridge() and verifies the flag flips.
+
+    Callable at boot (log_preflight() in backend/core/preflight.py)
+    AND on-demand via this endpoint. No billable API calls — LLM checks
+    verify registration only, not generation.
+    """
+    from backend.core.preflight import run_preflight, summary
+    checks = run_preflight()
+    return {
+        "summary": summary(checks),
+        "checks": [
+            {"name": c.name, "status": c.status.value, "message": c.message, "detail": c.detail}
+            for c in checks
+        ],
+    }
+
+
 @router.get("/latency")
 def get_latency(n: int = 20):
     """Phase 4C: recent per-turn latency breakdowns.

@@ -45,6 +45,14 @@ async def lifespan(app: FastAPI):
                if getattr(settings, f"enable_{k}")]
     log.info(f"Background services enabled: {enabled or 'none'}")
 
+    # Phase 5C: post-start preflight. Never raises — log-only. Full JSON
+    # readout at /diagnostics/preflight.
+    try:
+        from backend.core.preflight import run_preflight, log_preflight
+        log_preflight(run_preflight())
+    except Exception as e:
+        log.warning("Preflight itself crashed (unexpected): %s", e)
+
     yield
 
     stop_services(service_handle)
