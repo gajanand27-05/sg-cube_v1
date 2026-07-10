@@ -18,11 +18,18 @@ One-line trackers for known bugs / open threads. Longer than a line means it's n
 
 **Fix direction**: cap `context.recent_conversation` to fewer turns (currently `[-5:]`) or drop turns older than a topic switch. Prompt-engineering may also help ("prior turns are for context only — do not let them override the current request").
 
-## T-planner-canvas-chain (opened 2026-07-09)
+## T-planner-canvas-chain (opened 2026-07-09, re-classified 2026-07-10)
 
-**The bug**: On canvas requests, the Planner picks the first natural tool (e.g. `get_stock`) but doesn't chain `render_canvas` afterward. Result: user asks to render a widget, gets a spoken text answer instead.
+**The bug**: On canvas requests, the user asks to render a widget and gets a spoken text answer instead.
 
-**Fix direction**: extend the "PREFER ACTION OVER CLARIFICATION" section of `backend/core/agents/planner.py` with explicit multi-tool chaining language for canvas requests. Small prompt tune, own commit.
+**Classification (from `tools/canvas_chain_probe.py`, 9 runs across 3 phrasings)**:
+- Turn 1 chains fine — V3 emits both data-fetch tools (`get_stock` + `get_news_data`) in one response, 9/9.
+- Turn 2 renders correctly 7/9. The other 2/9 V3 emits `final_response` claiming *"I've displayed on your canvas"* without actually calling `render_canvas`. Silent hallucinated completion, worst failure mode.
+- Root cause is **not** a Planner prompt gap and **not** a planner-loop / chaining gap. It's Commander's iteration-2 instruction at `backend/core/agents/commander.py:172-174`: `"Summarize results for the user."` — that cue shades V3 toward a natural-language summary, which some fraction of the time becomes a fabricated render claim.
+
+**Fix direction**: Commander should detect canvas-intent in the original user query and swap the iteration-2 instruction from `"Summarize results for the user."` to something like `"Now call render_canvas with widgets built from these tool_results. Do NOT emit final_response until render_canvas has actually been called."` Alternatively (or additionally), harden the Planner system prompt: `"Never emit final_response claiming a canvas was rendered unless render_canvas was actually called in this same response."` The Commander change is the tighter fix — the Planner change is a safety net.
+
+**Regression probe**: `tools/canvas_chain_probe.py` (untracked). Reruns cheap. After any fix, target is turn-2 render_canvas at 9/9 across all three phrasings.
 
 ## T-echo-cancellation (Phase 4 out-of-scope, may resurface)
 
