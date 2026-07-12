@@ -7,6 +7,7 @@ import { useMemoryStore } from './memoryStore'
 import { useCanvasStore } from './canvasStore'
 
 export interface WsEvent {
+  id: string
   type: string
   timestamp: string
   payload: Record<string, unknown>
@@ -16,6 +17,7 @@ interface SocketState {
   ws: WebSocket | null
   connected: boolean
   events: WsEvent[]
+  eventCounter: number
   connect: () => void
   disconnect: () => void
 }
@@ -24,6 +26,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   ws: null,
   connected: false,
   events: [],
+  eventCounter: 3800, // Starting at 3800 for the cool #3812 effect quickly
 
   connect: () => {
     const existing = get().ws
@@ -53,11 +56,19 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
     ws.onmessage = (msg) => {
       try {
-        const data: WsEvent = JSON.parse(msg.data)
+        const rawData = JSON.parse(msg.data)
+        const currentCounter = get().eventCounter
+        const data: WsEvent = {
+          id: rawData.id || `#${currentCounter}`,
+          type: rawData.type,
+          timestamp: rawData.timestamp || new Date().toISOString(),
+          payload: rawData.payload || {}
+        }
         set((s) => ({
           events: s.events.length > 500
             ? [...s.events.slice(1), data]
             : [...s.events, data],
+          eventCounter: s.eventCounter + 1
         }))
         // Dispatch to data stores
         useAgentStore.getState().updateFromWs(data.type, data.payload)

@@ -36,12 +36,15 @@ async def generate(
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
-    
-    user_content: list[dict] = [{"type": "text", "text": prompt}]
+
+    # Ollama's /api/chat expects `content` to be a string with images at the
+    # message level (`images: [...]`), not a multimodal content array — the
+    # array form returns 400 "cannot unmarshal array into ... content of type
+    # string" on this Ollama version.
+    user_msg: dict[str, Any] = {"role": "user", "content": prompt}
     if images:
-        for img in images:
-            user_content.append({"type": "image", "image": img})
-    messages.append({"role": "user", "content": user_content})
+        user_msg["images"] = images
+    messages.append(user_msg)
 
     payload: dict[str, Any] = {
         "model": model,
