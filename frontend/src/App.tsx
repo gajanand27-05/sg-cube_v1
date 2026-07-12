@@ -6,7 +6,7 @@ import { CommandCenter } from '@/pages/CommandCenter'
 import { Chat } from '@/pages/Chat'
 import { Canvas } from '@/pages/Canvas'
 import { Vision } from '@/pages/Vision'
-import { Activity } from '@/pages/Activity'
+import { Inspector } from '@/pages/Inspector'
 import { Memory } from '@/pages/Memory'
 import { Settings } from '@/pages/Settings'
 import './App.css'
@@ -41,7 +41,7 @@ function App() {
                 <Route path="/memory" element={<Memory />} />
                 <Route path="/canvas" element={<Canvas />} />
                 <Route path="/vision" element={<Vision />} />
-                <Route path="/activity" element={<Activity />} />
+                <Route path="/inspector" element={<Inspector />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

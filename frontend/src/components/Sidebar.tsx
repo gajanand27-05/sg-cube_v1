@@ -1,14 +1,14 @@
 import { NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import {
-  Mic, Camera, Brain, FolderOpen, Globe, Settings, Plus, LayoutDashboard, Activity
+  Mic, Camera, Brain, FolderOpen, Globe, Settings, Plus, LayoutDashboard, ScrollText
 } from 'lucide-react'
 
 const links = [
   { to: "/", icon: LayoutDashboard, title: "Home" },
   { to: "/chat", icon: Mic, title: "Voice" },
   { to: "/vision", icon: Camera, title: "Vision" },
-  { to: "/activity", icon: Activity, title: "Activity" },
+  { to: "/inspector", icon: ScrollText, title: "Inspector" },
   { to: "/memory", icon: Brain, title: "Memory" },
   { to: "/files", icon: FolderOpen, title: "Files" },
   { to: "/agents", icon: Globe, title: "Network" },
