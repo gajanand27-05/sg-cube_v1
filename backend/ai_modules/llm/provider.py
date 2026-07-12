@@ -6,6 +6,7 @@ provider-level fallback: on persistent failure of the selected backend,
 retry once against `settings.llm_fallback_backend` (empty = no fallback).
 """
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator
 
@@ -64,6 +65,8 @@ class LLMProvider:
     def __init__(self, policy: RoutingPolicy | None = None):
         self.policy = policy or RoutingPolicy()
         self._backends: dict[str, LLMBackend] = {}
+        self._inflight = 0
+        self._calls = 0
 
     def register(self, name: str, backend: LLMBackend) -> None:
         self._backends[name] = backend
@@ -101,21 +104,56 @@ class LLMProvider:
         if primary_name not in self._backends:
             raise RuntimeError(f"Backend '{primary_name}' not registered. Available: {list(self._backends)}")
         primary = self._backends[primary_name]
+        self._inflight += 1
+        self._calls += 1
+        t0 = time.monotonic()
+        model = primary_name
+        result = ""
         try:
-            return await primary.generate(
+            result = await primary.generate(
                 prompt, system=system, temperature=temperature, json_mode=json_mode, **kwargs
             )
         except Exception as e:
             fallback = self._get_fallback_backend(primary_name)
             if fallback is None:
+                self._inflight -= 1
                 raise
             fb_name, fb_backend = fallback
             _emit_fallback(primary_name, fb_name, str(e)[:200])
             log.warning("LLM primary '%s' failed (%s); falling over to '%s'",
                         primary_name, type(e).__name__, fb_name)
-            return await fb_backend.generate(
+            result = await fb_backend.generate(
                 prompt, system=system, temperature=temperature, json_mode=json_mode, **kwargs
             )
+            model = fb_name
+        finally:
+            latency_ms = (time.monotonic() - t0) * 1000
+            self._inflight -= 1
+        self._emit_metrics(model, result, latency_ms)
+        return result
+
+    def _emit_metrics(self, model: str, result: str, latency_ms: float) -> None:
+        """Publish AIMetricsEvent — single source of truth for live telemetry.
+
+        latency_ms is measured; tokens/s is estimated from actual output
+        length (no provider token counts plumbed through yet). queue_depth is
+        the real in-flight count; tool_calls is the cumulative generate count.
+        """
+        try:
+            est_tokens = max(1, len(result) // 4)
+            tps = est_tokens / (latency_ms / 1000) if latency_ms > 0 else 0.0
+            from backend.core.events import get_bus
+            from backend.daemon.ui_events import AIMetricsEvent
+            get_bus().publish(AIMetricsEvent(
+                tokens_per_second=round(tps, 1),
+                latency_ms=round(latency_ms, 1),
+                inference_ms=round(latency_ms, 1),
+                queue_depth=self._inflight,
+                tool_calls=self._calls,
+                active_model=model,
+            ))
+        except Exception:
+            pass
 
     async def chat_stream(
         self,
