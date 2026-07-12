@@ -5,6 +5,7 @@ import { Header } from '@/components/Header'
 import { CommandCenter } from '@/pages/CommandCenter'
 import { Chat } from '@/pages/Chat'
 import { Canvas } from '@/pages/Canvas'
+import { Vision } from '@/pages/Vision'
 import { Memory } from '@/pages/Memory'
 import { Settings } from '@/pages/Settings'
 import './App.css'
@@ -38,6 +39,7 @@ function App() {
                 <Route path="/chat" element={<Chat status={status} />} />
                 <Route path="/memory" element={<Memory />} />
                 <Route path="/canvas" element={<Canvas />} />
+                <Route path="/vision" element={<Vision />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

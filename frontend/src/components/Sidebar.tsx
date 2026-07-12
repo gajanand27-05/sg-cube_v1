@@ -7,7 +7,7 @@ import {
 const links = [
   { to: "/", icon: LayoutDashboard, title: "Home" },
   { to: "/chat", icon: Mic, title: "Voice" },
-  { to: "/canvas", icon: Camera, title: "Vision" },
+  { to: "/vision", icon: Camera, title: "Vision" },
   { to: "/memory", icon: Brain, title: "Memory" },
   { to: "/files", icon: FolderOpen, title: "Files" },
   { to: "/agents", icon: Globe, title: "Network" },
