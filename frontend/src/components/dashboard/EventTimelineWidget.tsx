@@ -40,7 +40,7 @@ export function EventTimelineWidget({ events, onSelectEvent, selectedEventId }: 
 
   return (
     <div className="glass rounded-2xl flex flex-col p-5 min-h-[200px] flex-1">
-      <div className="flex justify-between items-center mb-3 border-b border-sgc-border pb-3">
+      <div className="flex justify-between items-center mb-4 border-b border-sgc-border pb-3">
         <div className="flex items-center gap-2 tp-1">
           <Clock size={16} className="text-sgc-primary drop-shadow-[0_0_8px_rgba(0,243,255,0.35)]" />
           EVENT TIMELINE
