@@ -94,7 +94,15 @@ class VisionLoop:
         try:
             global latest_observation
             latest_observation = {"app": app, "summary": summary, "timestamp": time.time()}
-            get_bus().publish(VisionUpdateEvent(description=summary, windows=[app]), priority=Priority.NORMAL)
+            get_bus().publish(
+                VisionUpdateEvent(
+                    description=summary,
+                    windows=[app],
+                    objects=observation.get("objects"),
+                    ocr=observation.get("ocr"),
+                ),
+                priority=Priority.NORMAL,
+            )
         except Exception:
             pass
 

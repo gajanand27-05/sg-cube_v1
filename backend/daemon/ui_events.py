@@ -166,16 +166,34 @@ class ToolFinishedEvent:
 
 
 @dataclass
+class MemoryHit:
+    """A single retrieval result surfaced by a memory search."""
+    title: str
+    score: float          # 0.0 - 1.0 combined relevance
+    source: str           # e.g. "semantic_memory" | "notes"
+
+
+@dataclass
 class MemoryHitEvent:
     query: str
     source: str
     results_count: int
+    hits: list[MemoryHit] | None = None   # rich results when available
+
+
+@dataclass
+class DetectedObject:
+    """A thing the vision model saw on screen."""
+    label: str
+    confidence: float     # 0.0 - 1.0
 
 
 @dataclass
 class VisionUpdateEvent:
     description: str
     windows: list | None = None
+    objects: list[DetectedObject] | None = None
+    ocr: list[str] | None = None
 
 
 @dataclass
@@ -225,6 +243,17 @@ class SpeechInterruptedEvent:
     rather than the neutral wake path.
     """
     rms: float  # peak RMS of the trigger chunk (int16 amplitude scale)
+
+
+@dataclass
+class AIMetricsEvent:
+    """Single source of truth for live AI performance telemetry."""
+    tokens_per_second: float
+    latency_ms: int
+    inference_ms: int
+    queue_depth: int
+    tool_calls: int
+    active_model: str
 
 
 @dataclass

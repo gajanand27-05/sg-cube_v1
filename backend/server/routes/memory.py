@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query
 
 from backend.core.events import get_bus
 from backend.core.memory.manager import memory as memory_manager
-from backend.daemon.ui_events import MemoryHitEvent
+from backend.daemon.ui_events import MemoryHitEvent, MemoryHit
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -32,7 +32,15 @@ def search_memory(
     try:
         # search_explainable returns [{entry, scores, explanation}, ...]
         candidates = memory_manager.ltm.search_explainable(q, limit=limit)
-        get_bus().publish(MemoryHitEvent(query=q, source="semantic", results_count=len(candidates)))
+        hits = [
+            MemoryHit(
+                title=(c["entry"].content or "")[:80],
+                score=round(float(c["scores"].get("combined", 0.0)), 3),
+                source=c["entry"].source or "unknown",
+            )
+            for c in candidates
+        ]
+        get_bus().publish(MemoryHitEvent(query=q, source="semantic", results_count=len(candidates), hits=hits))
         results = []
         for c in candidates:
             e = c["entry"]

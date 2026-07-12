@@ -33,6 +33,7 @@ from backend.daemon.ui_events import (
     ToolStartedEvent,
     VisionUpdateEvent,
     WakeHeard,
+    AIMetricsEvent,
 )
 
 log = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ TYPE_MAP: dict[type, str] = {
     HandoverEvent: "handover",
     ProactiveEvent: "proactive",
     SystemStatsEvent: "system_stats",
+    AIMetricsEvent: "ai_metrics",
     ToolStartedEvent: "tool_started",
     ToolFinishedEvent: "tool_finished",
     MemoryHitEvent: "memory_hit",
@@ -154,7 +156,20 @@ class UIEventManager:
                 d[f"metric_{k}"] = v
             del d["metrics"]
 
-        return d
+        return self._to_jsonable(d)
+
+    @staticmethod
+    def _to_jsonable(v: Any) -> Any:
+        """Recursively convert dataclass instances (and their nested fields)
+        into plain dicts/lists so the payload is JSON-serializable. Needed
+        now that MemoryHitEvent/VisionUpdateEvent carry nested dataclasses."""
+        if hasattr(v, "__dataclass_fields__"):
+            return {k: UIEventManager._to_jsonable(val) for k, val in v.__dict__.items()}
+        if isinstance(v, (list, tuple)):
+            return [UIEventManager._to_jsonable(x) for x in v]
+        if isinstance(v, dict):
+            return {k: UIEventManager._to_jsonable(val) for k, val in v.items()}
+        return v
 
 
 _manager: UIEventManager | None = None

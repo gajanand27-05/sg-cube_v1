@@ -12,10 +12,14 @@ Respond ONLY with a JSON object in this format:
 {
   "app": "Application Name",
   "summary": "One sentence describing exactly what the user is doing or looking at.",
-  "keywords": ["tag1", "tag2", "tag3"]
+  "keywords": ["tag1", "tag2", "tag3"],
+  "objects": [{"label": "person", "confidence": 0.98}],
+  "ocr": ["STOP", "Main Street"]
 }
 
 Be specific. If code is visible, mention the language. If a website is open, mention the domain.
+"objects" lists notable things visible (people, vehicles, UI elements) each with a 0-1 confidence.
+"ocr" lists short text strings readable on screen.
 """
 
 async def analyze_screenshot(image_b64: str, window_title: str) -> Optional[dict]:
@@ -37,7 +41,9 @@ async def analyze_screenshot(image_b64: str, window_title: str) -> Optional[dict
         if "app" not in data: data["app"] = window_title
         if "summary" not in data: data["summary"] = "User looking at screen."
         if "keywords" not in data: data["keywords"] = []
-        
+        if "objects" not in data: data["objects"] = []
+        if "ocr" not in data: data["ocr"] = []
+
         return data
         
     except Exception as e:

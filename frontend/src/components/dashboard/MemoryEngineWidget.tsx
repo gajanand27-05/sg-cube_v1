@@ -19,6 +19,7 @@ export function MemoryEngineWidget() {
   const lastHit = useMemoryStore((s) => s.lastHit)
   const lastHitAt = useMemoryStore((s) => s.lastHitAt)
   const hitCount = useMemoryStore((s) => s.hitCount)
+  const hits = useMemoryStore((s) => s.hits)
   const rel = useRelativeTime(lastHitAt)
 
   return (
@@ -49,7 +50,22 @@ export function MemoryEngineWidget() {
       {/* Recent Recall (real data only) */}
       <div className="mt-4 flex flex-col gap-2">
         <div className="text-[10px] text-sgc-dim uppercase tracking-wider">Recent Recall</div>
-        {lastHit ? (
+        {hits.length > 0 ? (
+          <div className="flex flex-col gap-1.5">
+            {hits.map((h, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <Check size={13} className="text-[#00ff41] mt-0.5 shrink-0" />
+                <div className="flex flex-col min-w-0 flex-1">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-sgc-bright text-sm truncate">{h.title}</span>
+                    <span className="text-sgc-bright text-[10px] font-mono shrink-0">{Math.round(h.score * 100)}%</span>
+                  </div>
+                  <span className="text-sgc-dim text-[9px] font-mono uppercase tracking-wider">{h.source}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : lastHit ? (
           <div className="flex items-start gap-2">
             <Check size={14} className="text-[#00ff41] mt-0.5 shrink-0" />
             <div className="flex flex-col min-w-0">

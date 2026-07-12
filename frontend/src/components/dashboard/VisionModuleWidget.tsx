@@ -6,6 +6,8 @@ export function VisionModuleWidget() {
   const windows = useVisionStore((s) => s.windows)
   const activeWindow = useVisionStore((s) => s.activeWindow)
   const lastDescription = useVisionStore((s) => s.lastDescription)
+  const objects = useVisionStore((s) => s.objects)
+  const ocr = useVisionStore((s) => s.ocr)
   const active = activeWindow || windows[0] || null
 
   return (
@@ -52,6 +54,36 @@ export function VisionModuleWidget() {
           </span>
         </div>
       </div>
+
+      {/* Detected objects (real data when the VLM returns them) */}
+      {objects.length > 0 && (
+        <div className="mt-3 flex flex-col gap-1.5">
+          <div className="text-[10px] text-sgc-dim uppercase tracking-wider">Detected</div>
+          {objects.map((o, i) => (
+            <div key={i} className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2 text-sgc-bright text-sm normal-case tracking-normal min-w-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#f97316] shrink-0" />
+                <span className="truncate">{o.label}</span>
+              </span>
+              <span className="text-sgc-dim text-[10px] font-mono shrink-0">{Math.round(o.confidence * 100)}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* OCR text (real data when the VLM returns it) */}
+      {ocr.length > 0 && (
+        <div className="mt-3 flex flex-col gap-1.5">
+          <div className="text-[10px] text-sgc-dim uppercase tracking-wider">OCR</div>
+          <div className="flex flex-wrap gap-1.5">
+            {ocr.map((t, i) => (
+              <span key={i} className="text-[10px] font-mono text-sgc-bright bg-[#0a1526] border border-sgc-border px-1.5 py-0.5 rounded">
+                {t}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

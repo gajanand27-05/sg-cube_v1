@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { VisionObject } from './telemetry'
 
 export interface Observation {
   content: string
@@ -11,6 +12,8 @@ interface VisionState {
   lastDescription: string
   windows: string[]
   activeWindow: string
+  objects: VisionObject[]
+  ocr: string[]
   observations: Observation[]
   updateFromWs: (type: string, payload: Record<string, unknown>) => void
   setWindows: (windows: string[], active: string) => void
@@ -21,6 +24,8 @@ export const useVisionStore = create<VisionState>((set) => ({
   lastDescription: '',
   windows: [],
   activeWindow: '',
+  objects: [],
+  ocr: [],
   observations: [],
 
   updateFromWs: (type, payload) => {
@@ -28,6 +33,8 @@ export const useVisionStore = create<VisionState>((set) => ({
       set({
         lastDescription: payload.description as string,
         windows: (payload.windows as string[]) ?? [],
+        objects: (payload.objects as VisionObject[]) ?? [],
+        ocr: (payload.ocr as string[]) ?? [],
       })
     }
   },

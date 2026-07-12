@@ -5,6 +5,7 @@ import { useSystemStore } from './systemStore'
 import { useVisionStore } from './visionStore'
 import { useMemoryStore } from './memoryStore'
 import { useCanvasStore } from './canvasStore'
+import { useMetricsStore } from './metricsStore'
 
 export interface WsEvent {
   id: string
@@ -77,6 +78,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         useVisionStore.getState().updateFromWs(data.type, data.payload)
         useMemoryStore.getState().updateFromWs(data.type, data.payload)
         useCanvasStore.getState().updateFromWs(data.type, data.payload)
+        useMetricsStore.getState().updateFromWs(data.type, data.payload)
       } catch {
         /* ignore */
       }
