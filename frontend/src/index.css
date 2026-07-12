@@ -23,9 +23,14 @@
     --c-bright: 255 255 255;      /* #ffffff */
     --c-accent: 0 119 153;        /* #007799 */
     --c-accent-bright: 0 170 255; /* #00aaff */
-    --c-danger: 255 0 60;         /* #ff003c */
-    --c-warn: 255 183 0;          /* #ffb700 */
-    --c-success: 0 255 65;        /* #00ff41 */
+    --c-danger: 255 0 60;        /* #ff003c */
+    --c-warn: 255 183 0;         /* #ffb700 */
+    --c-success: 0 255 65;       /* #00ff41 */
+
+    /* Motion language — one system, applied everywhere. ponytail: tune here. */
+    --dur-hover: 200ms;
+    --dur-glow: 300ms;
+    --dur-state: 400ms;
 
     /* Module accent tokens — make subsystems instantly distinguishable
        (cyan core, blue AI, green memory, orange vision, purple reasoning). */
@@ -236,6 +241,17 @@
       0 0 26px color-mix(in srgb, var(--panel-accent, rgb(var(--c-primary))) 12%, transparent),
       inset 0 0 30px color-mix(in srgb, var(--panel-accent, rgb(var(--c-primary))) 4%, transparent);
   }
+
+  /* ── Typography hierarchy (4 levels) ───────────────────────────────
+     ponytail: every label used to compete equally; these pin the eye. */
+  .tp-1 { font-family: 'Rajdhani', ui-monospace, monospace; font-size: 16px; font-weight: 700; color: #fff; letter-spacing: 0.05em; line-height: 1.2; }
+  .tp-2 { font-family: 'Rajdhani', ui-monospace, monospace; font-size: 15px; font-weight: 600; color: rgb(var(--c-accent-bright)); letter-spacing: 0.02em; line-height: 1.2; }
+  .tp-3 { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; font-weight: 500; color: #7da7bf; letter-spacing: 0.05em; line-height: 1.4; text-transform: uppercase; }
+  .tp-4 { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; font-weight: 400; color: rgba(255,255,255,0.45); letter-spacing: 0.03em; line-height: 1.4; }
+
+  /* Shared hero-illustration treatment so the four heroes read as one kit:
+     same stroke weight, same glow radius, same perspective. */
+  .hero-illu { stroke-width: 1.5; filter: drop-shadow(0 0 5px currentColor); }
 
   /* ── Cube core stage ─────────────────────────────────────────────
      The centerpiece: bloom, glowing platform, concentric orbit rings

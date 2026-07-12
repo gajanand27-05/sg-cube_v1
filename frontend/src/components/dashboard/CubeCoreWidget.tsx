@@ -82,7 +82,7 @@ export function CubeCoreWidget({ status }: Props) {
       <div className="cube-platform" />
 
       <div className="absolute top-4 left-4 font-mono">
-        <div className="text-sgc-bright tracking-widest text-sm">SG CUBE CORE</div>
+        <div className="tp-1">SG CUBE CORE</div>
         <div className="text-sgc-dim text-[10px] uppercase tracking-wider mt-1">Intelligence Hub</div>
       </div>
 

@@ -10,7 +10,7 @@ export function LiveTranscriptionWidget({ status }: Props) {
   return (
     <div className="flex flex-col h-full p-4">
       <div className="flex justify-between items-center mb-4 border-b border-sgc-border pb-3 shrink-0">
-        <div className="flex items-center gap-2 text-sgc-bright font-mono tracking-widest text-sm">
+        <div className="flex items-center gap-2 tp-1">
           <Mic size={16} className="text-sgc-primary" />
           LIVE TRANSCRIPTION
         </div>

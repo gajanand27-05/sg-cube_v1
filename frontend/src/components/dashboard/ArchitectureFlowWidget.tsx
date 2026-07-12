@@ -12,10 +12,10 @@ export function ArchitectureFlowWidget() {
   ]
 
   return (
-    <div className="glass rounded-2xl flex flex-col p-4">
+    <div className="glass rounded-2xl flex flex-col p-5">
       <div className="flex justify-between items-center mb-4 border-b border-sgc-border pb-3">
-        <div className="flex items-center gap-2 text-sgc-bright font-mono tracking-widest text-sm">
-          <Network size={16} className="text-sgc-primary drop-shadow-[0_0_8px_rgba(0,243,255,0.5)]" />
+        <div className="flex items-center gap-2 tp-1">
+          <Network size={16} className="text-sgc-primary drop-shadow-[0_0_8px_rgba(0,243,255,0.35)]" />
           SG-CUBE ARCHITECTURE
         </div>
         <div className="text-sgc-primary text-[10px] font-mono tracking-widest uppercase cursor-pointer hover:text-sgc-bright">

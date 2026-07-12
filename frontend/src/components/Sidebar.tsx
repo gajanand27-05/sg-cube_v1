@@ -18,25 +18,23 @@ export function Sidebar() {
     <aside className="w-16 border-r border-sgc-border flex flex-col items-center py-6 gap-6 bg-sgc-panel shrink-0">
       <nav className="flex flex-col items-center gap-6">
         {links.map(({ to, icon: Icon, title }) => (
-          <NavLink
-            key={to}
-            to={to}
-            title={title}
-            className={({ isActive }) =>
-              cn(
-                "p-3 rounded-xl transition-all duration-300 relative group",
+          <NavLink key={to} to={to} title={title}>
+            {({ isActive }) => (
+              <div className={cn(
+                "p-3 rounded-xl transition-all duration-200 relative group flex items-center justify-center",
                 isActive
-                  ? "bg-[#0a1526] text-sgc-primary shadow-[0_0_15px_rgba(0,243,255,0.2)] border border-sgc-border-bright"
-                  : "text-sgc-dim hover:text-sgc-primary hover:bg-[#0a1526] hover:shadow-[0_0_15px_rgba(0,243,255,0.1)] border border-transparent"
-              )
-            }
-          >
-            <Icon size={20} className="relative z-10" />
-            {/* Subtle glow underneath active icon */}
-            <div className={cn(
-              "absolute inset-0 rounded-xl bg-sgc-primary opacity-0 blur-md transition-opacity duration-300 -z-0",
-              "group-[.active]:opacity-20"
-            )} />
+                  ? "text-sgc-primary"
+                  : "text-sgc-dim hover:text-sgc-bright hover:bg-[#0a1526]/50 border border-transparent hover:border-sgc-border/40"
+              )}>
+                <Icon size={20} className={cn("relative z-10 transition-transform duration-200", isActive ? "scale-110" : "group-hover:scale-105")} />
+                {isActive && (
+                  <span
+                    className="absolute inset-0 rounded-xl pointer-events-none"
+                    style={{ background: 'radial-gradient(circle at center, rgba(0,243,255,0.35), transparent 70%)', filter: 'blur(7px)' }}
+                  />
+                )}
+              </div>
+            )}
           </NavLink>
         ))}
       </nav>

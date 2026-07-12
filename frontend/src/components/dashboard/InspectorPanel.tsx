@@ -73,7 +73,7 @@ export function InspectorPanel({ event, onClose }: Props) {
       
       {/* Header */}
       <div className="flex justify-between items-center p-4 border-b border-sgc-border">
-        <div className="flex items-center gap-2 font-mono tracking-widest text-sm">
+        <div className="flex items-center gap-2 tp-1">
           <Activity size={16} className={colorClass} />
           <span className="text-sgc-bright">INSPECTOR</span>
           <span className="text-sgc-dim text-[10px] ml-2">{event.id}</span>

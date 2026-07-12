@@ -2,9 +2,9 @@ import { Mic } from 'lucide-react'
 
 export function VoiceWidget() {
   return (
-    <div className="glass rounded-2xl flex flex-col p-4">
+    <div className="glass rounded-2xl flex flex-col p-5">
       <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center gap-2 text-sgc-primary font-mono tracking-widest text-sm">
+        <div className="flex items-center gap-2 tp-1">
           <Mic size={16} />
           VOICE MODULE
         </div>
@@ -20,7 +20,7 @@ export function VoiceWidget() {
           <div className="absolute w-32 h-32 rounded-full border border-sgc-border-bright opacity-10 animate-pulse" />
         </div>
         <div className="w-16 h-16 rounded-full bg-[#0a1526] border-2 border-sgc-border-bright shadow-[0_0_20px_rgba(0,243,255,0.4)] flex items-center justify-center z-10">
-          <Mic size={28} className="text-sgc-primary drop-shadow-[0_0_8px_rgba(0,243,255,0.5)]" />
+          <Mic size={28} className="text-sgc-primary drop-shadow-[0_0_8px_rgba(0,243,255,0.35)]" />
         </div>
       </div>
 
@@ -59,7 +59,7 @@ export function VoiceWidget() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3 font-mono text-[10px] uppercase tracking-wider text-sgc-dim mt-2">
+        <div className="grid grid-cols-2 gap-5 tp-3 mt-2">
           <div className="flex justify-between border-b border-sgc-border pb-1">
             <span>Language</span>
             <span className="text-sgc-bright">EN-US</span>

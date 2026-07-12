@@ -11,7 +11,7 @@ function Gauge({ label, value, color }: { label: string; value: number; color: s
           <circle cx="32" cy="32" r={r} fill="none" stroke="#0a1526" strokeWidth="5" />
           <circle cx="32" cy="32" r={r} fill="none" stroke={color} strokeWidth="5" strokeLinecap="round"
             strokeDasharray={circ} strokeDashoffset={offset}
-            style={{ filter: `drop-shadow(0 0 4px ${color})`, transition: 'stroke-dashoffset 0.8s ease' }} />
+            style={{ filter: `drop-shadow(0 0 5px ${color})`, transition: 'stroke-dashoffset 0.4s ease' }} />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center font-mono text-[11px] text-sgc-bright">{value}%</div>
       </div>
@@ -26,10 +26,10 @@ export function MetricsWidget() {
   // Assuming the backend provides or will provide these AI metrics.
   
   return (
-    <div className="glass rounded-2xl flex flex-col p-4">
+    <div className="glass rounded-2xl flex flex-col p-5">
       <div className="flex justify-between items-center mb-4 border-b border-sgc-border pb-3">
-        <div className="flex items-center gap-2 text-sgc-bright font-mono tracking-widest text-sm">
-          <Activity size={16} className="text-sgc-primary drop-shadow-[0_0_8px_rgba(0,243,255,0.5)]" />
+        <div className="flex items-center gap-2 tp-1">
+          <Activity size={16} className="text-sgc-primary drop-shadow-[0_0_8px_rgba(0,243,255,0.35)]" />
           SYSTEM METRICS
         </div>
         <div className="flex items-center gap-2">
@@ -46,7 +46,7 @@ export function MetricsWidget() {
         <Gauge label="Memory" value={42} color="#00ff41" />
       </div>
 
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 font-mono text-[10px] uppercase tracking-wider text-sgc-dim">
+      <div className="grid grid-cols-2 gap-5 tp-3">
         
         <div className="flex justify-between border-b border-sgc-border pb-1">
           <span>LLM Tokens/s</span>

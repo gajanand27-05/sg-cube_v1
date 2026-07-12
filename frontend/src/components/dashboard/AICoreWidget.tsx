@@ -16,7 +16,7 @@ export function AICoreWidget({ status }: Props) {
 
   return (
     <div className={cn(
-      "glass rounded-2xl flex flex-col p-4 transition-all duration-500",
+      "glass rounded-2xl flex flex-col p-5 transition-all duration-500",
       isThinking ? "shadow-[0_0_22px_rgba(168,85,247,0.25)] bg-purple-500/5" :
       isPlanning ? "shadow-[0_0_22px_rgba(59,130,246,0.3)] bg-blue-500/5 animate-pulse" :
       isExecuting ? "shadow-[0_0_22px_rgba(0,255,65,0.22)] bg-[#00ff41]/5" :
@@ -24,7 +24,7 @@ export function AICoreWidget({ status }: Props) {
       "shadow-[0_0_18px_rgba(0,243,255,0.08)]"
     )}>
       <div className="flex justify-between items-center mb-4 border-b border-sgc-border pb-3">
-        <div className="flex items-center gap-2 text-sgc-bright font-mono tracking-widest text-sm">
+        <div className="flex items-center gap-2 tp-1">
           <Brain size={16} className={cn("transition-colors duration-300", isThinking ? "text-purple-400" : isExecuting ? "text-[#00ff41]" : isWaiting ? "text-yellow-400" : "text-sgc-primary")} />
           AI CORE
         </div>
@@ -38,8 +38,8 @@ export function AICoreWidget({ status }: Props) {
         {/* Neural network hero */}
         <div className="w-20 h-20 relative shrink-0 flex items-center justify-center">
           <div className="absolute inset-0 border border-sgc-border-bright rounded-full opacity-15 animate-spin-slow" />
-          <svg viewBox="0 0 100 100" className="w-full h-full relative" style={{ filter: `drop-shadow(0 0 4px ${accent})` }}>
-            <g stroke={accent} strokeWidth="1" opacity="0.35">
+          <svg viewBox="0 0 100 100" className="w-full h-full relative" style={{ filter: `drop-shadow(0 0 5px ${accent})` }}>
+            <g stroke={accent} strokeWidth="1.5" opacity="0.35">
               <line x1="25" y1="28" x2="50" y2="50" />
               <line x1="75" y1="28" x2="50" y2="50" />
               <line x1="25" y1="72" x2="50" y2="50" />
@@ -50,13 +50,13 @@ export function AICoreWidget({ status }: Props) {
             </g>
             {[[50,14],[25,28],[75,28],[50,50],[25,72],[75,72]].map(([x,y],i) => (
               <circle key={i} cx={x} cy={y} r="4.5" fill={accent}
-                style={{ animation: `nnPulse 2s ease-in-out infinite ${i*0.25}s` }} />
+                style={{ animation: `nnPulse 2.4s ease-in-out infinite ${i*0.25}s` }} />
             ))}
           </svg>
         </div>
         
         {/* State/Model Info */}
-        <div className="flex-1 flex flex-col gap-2 font-mono text-[10px] uppercase tracking-wider text-sgc-dim">
+        <div className="flex-1 flex flex-col gap-2 tp-3">
           <div className="flex justify-between border-b border-sgc-border pb-1">
             <span>Model</span>
             <span className="text-sgc-bright text-right">gemma3:12b</span>

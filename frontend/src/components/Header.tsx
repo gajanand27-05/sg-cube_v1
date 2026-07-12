@@ -15,7 +15,7 @@ export function Header() {
   }, [])
 
   return (
-    <header className="flex justify-between items-center h-16 border-b border-sgc-border px-6 bg-sgc-panel shrink-0">
+    <header className="flex justify-between items-center h-[72px] border-b border-sgc-border px-8 bg-sgc-panel shrink-0">
       
       {/* Left: Logo & Branding */}
       <div className="flex items-center gap-4">
@@ -29,7 +29,7 @@ export function Header() {
       </div>
       
       {/* Center: Command Palette */}
-      <div className="flex-1 max-w-xl mx-8 relative group">
+      <div className="flex-1 max-w-xl mx-12 relative group">
         <div className="absolute left-3 top-1/2 -translate-y-1/2 text-sgc-primary drop-shadow-[0_0_5px_rgba(0,243,255,0.5)]">
           <span className="font-mono font-bold">{'>_'}</span>
         </div>
@@ -44,7 +44,7 @@ export function Header() {
       </div>
 
       {/* Right: Time, Status, Profile */}
-      <div className="flex items-center gap-8">
+      <div className="flex items-center gap-10">
         
         {/* Time & Date */}
         <div className="flex flex-col items-end justify-center font-mono">
@@ -57,7 +57,7 @@ export function Header() {
         </div>
         
         {/* System Status */}
-        <div className="flex items-center gap-3 border-l border-sgc-border pl-8">
+        <div className="flex items-center gap-3 border-l border-sgc-border pl-10">
           <div className="flex flex-col items-end justify-center font-mono">
             <span className="text-sgc-bright text-xs tracking-widest uppercase">{connected ? 'Cloud Connected' : 'Local Mode'}</span>
             <span className="text-sgc-dim text-[10px] tracking-wider">All systems operational</span>
@@ -76,7 +76,7 @@ export function Header() {
         </div>
 
         {/* Notifications & Profile */}
-        <div className="flex items-center gap-4 ml-4">
+        <div className="flex items-center gap-5 ml-6">
           <div className="relative cursor-pointer text-sgc-dim hover:text-sgc-bright transition-colors">
             <Bell size={20} />
             <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-sgc-secondary shadow-[0_0_5px_rgba(0,170,255,0.8)]" />
