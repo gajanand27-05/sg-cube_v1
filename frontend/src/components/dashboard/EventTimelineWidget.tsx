@@ -1,6 +1,15 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { WsEvent } from '@/hooks/useWebSocket'
-import { Clock, Filter } from 'lucide-react'
+import { Clock, Filter, ArrowUpRight } from 'lucide-react'
+import {
+  EVENT_COLORS,
+  DEFAULT_COLOR,
+  MODULES,
+  matchModule,
+  summarizeEvent,
+  eventDuration,
+} from '@/lib/events'
 
 interface Props {
   events: WsEvent[]
@@ -8,35 +17,12 @@ interface Props {
   selectedEventId?: string | null
 }
 
-const EVENT_COLORS: Record<string, string> = {
-  voice_detected: 'text-[#00ff41] border-[#00ff41]',
-  speech_recognition: 'text-[#00ff41] border-[#00ff41]',
-  memory_search: 'text-[#a855f7] border-[#a855f7]',
-  tool_call: 'text-[#3b82f6] border-[#3b82f6]',
-  vision_detected: 'text-[#f97316] border-[#f97316]',
-  llm_reasoning: 'text-[#eab308] border-[#eab308]',
-  error: 'text-[#ef4444] border-[#ef4444]'
-}
-const DEFAULT_COLOR = 'text-[#00aaff] border-[#00aaff]'
-
-type FilterType = 'All' | 'Voice' | 'Memory' | 'Tool' | 'Vision' | 'LLM' | 'Error'
-
 export function EventTimelineWidget({ events, onSelectEvent, selectedEventId }: Props) {
-  const [filter, setFilter] = useState<FilterType>('All')
+  const [filter, setFilter] = useState<(typeof MODULES)[number]>('All')
+  const navigate = useNavigate()
 
-  const filteredEvents = events.filter(e => {
-    if (filter === 'All') return true
-    if (filter === 'Voice') return e.type.includes('voice') || e.type.includes('speech')
-    if (filter === 'Memory') return e.type.includes('memory')
-    if (filter === 'Tool') return e.type.includes('tool')
-    if (filter === 'Vision') return e.type.includes('vision')
-    if (filter === 'LLM') return e.type.includes('llm') || e.type.includes('reasoning')
-    if (filter === 'Error') return e.type.includes('error')
-    return true
-  })
-
-  // Show only last 20 events in the UI for performance, newest top
-  const recentEvents = [...filteredEvents].reverse().slice(0, 20)
+  const filteredEvents = events.filter((e) => matchModule(e.type, filter))
+  const recentEvents = [...filteredEvents].reverse().slice(0, 25)
 
   return (
     <div className="glass rounded-2xl flex flex-col p-5 min-h-[200px] flex-1">
@@ -47,24 +33,35 @@ export function EventTimelineWidget({ events, onSelectEvent, selectedEventId }: 
         </div>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-[#00ff41] shadow-[0_0_5px_#00ff41] animate-pulse" />
+          <button
+            onClick={() => navigate('/activity')}
+            className="flex items-center gap-1 text-[9px] font-mono tracking-widest uppercase text-sgc-dim hover:text-sgc-primary transition-colors"
+            title="Open full Activity Inspector"
+          >
+            Full log <ArrowUpRight size={11} />
+          </button>
         </div>
       </div>
-      
+
       {/* Filters */}
       <div className="flex gap-2 mb-3 overflow-x-auto custom-scrollbar pb-1">
-        {(['All', 'Voice', 'Memory', 'Tool', 'Vision', 'LLM', 'Error'] as FilterType[]).map(f => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`text-[9px] font-mono tracking-widest uppercase px-2 py-0.5 border rounded transition-colors ${
-              filter === f 
-                ? 'border-sgc-primary text-sgc-bright bg-sgc-primary/10' 
-                : 'border-sgc-border text-sgc-dim hover:border-sgc-dim'
-            }`}
-          >
-            {f}
-          </button>
-        ))}
+        {MODULES.map((f) => {
+          const count = events.filter((e) => matchModule(e.type, f)).length
+          return (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`text-[9px] font-mono tracking-widest uppercase px-2 py-0.5 border rounded transition-colors flex items-center gap-1 ${
+                filter === f
+                  ? 'border-sgc-primary text-sgc-bright bg-sgc-primary/10'
+                  : 'border-sgc-border text-sgc-dim hover:border-sgc-dim'
+              }`}
+            >
+              {f}
+              <span className="opacity-50">{count}</span>
+            </button>
+          )
+        })}
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3 font-mono text-[10px] text-sgc-dim pr-1">
@@ -78,14 +75,16 @@ export function EventTimelineWidget({ events, onSelectEvent, selectedEventId }: 
             const isSelected = selectedEventId === event.id
             const textColor = colorClass.split(' ')[0]
             const borderColor = colorClass.split(' ')[1]
+            const summary = summarizeEvent(event)
+            const duration = eventDuration(event)
 
             return (
-              <div 
-                key={event.id} 
+              <div
+                key={event.id}
                 onClick={() => onSelectEvent?.(event)}
                 className={`flex flex-col gap-0.5 border-l-2 pl-2 transition-all cursor-pointer ${
-                  isSelected 
-                    ? `${borderColor} bg-white/5 py-1 -ml-2 pl-4 rounded-r` 
+                  isSelected
+                    ? `${borderColor} bg-white/5 py-1 -ml-2 pl-4 rounded-r`
                     : 'border-sgc-border hover:border-sgc-dim'
                 }`}
               >
@@ -93,9 +92,15 @@ export function EventTimelineWidget({ events, onSelectEvent, selectedEventId }: 
                   <span className={`text-[9px] ${textColor}`}>
                     {new Date(event.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })}
                   </span>
-                  <span className="text-[9px] opacity-50">{event.id}</span>
+                  <span className="flex items-center gap-2">
+                    {duration !== null && (
+                      <span className="text-[9px] text-sgc-dim opacity-60">{duration}ms</span>
+                    )}
+                    <span className="text-[9px] opacity-50">{event.id}</span>
+                  </span>
                 </div>
                 <span className="text-sgc-bright capitalize tracking-wide">{event.type.replace(/_/g, ' ')}</span>
+                {summary && <span className="text-sgc-dim text-[9px] normal-case tracking-normal truncate">{summary}</span>}
               </div>
             )
           })

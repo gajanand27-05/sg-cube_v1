@@ -1,20 +1,11 @@
 import { useState } from 'react'
 import type { WsEvent } from '@/hooks/useWebSocket'
 import { X, ChevronDown, ChevronRight, Activity } from 'lucide-react'
+import { EVENT_COLORS } from '@/lib/events'
 
 interface Props {
   event: WsEvent
   onClose: () => void
-}
-
-const EVENT_COLORS: Record<string, string> = {
-  voice_detected: 'text-[#00ff41]',
-  speech_recognition: 'text-[#00ff41]',
-  memory_search: 'text-[#a855f7]',
-  tool_call: 'text-[#3b82f6]',
-  vision_detected: 'text-[#f97316]',
-  llm_reasoning: 'text-[#eab308]',
-  error: 'text-[#ef4444]'
 }
 
 export function InspectorPanel({ event, onClose }: Props) {
