@@ -7,11 +7,12 @@ const RING_SETTLE = 2.1;
 // Grid alignment for that clean PCB rail look
 const GRID = 6;
 
-// Trace count — dense, all rooted at the ring outer shell
-const N_TRACES = 110;
+// Trace count — dense enough to feel like a PCB backdrop, but not so busy
+// it competes with the panels sitting on top of it.
+const N_TRACES = 75;
 
 // Background dots scattered outside the cube's clear zone
-const N_DOTS = 260;
+const N_DOTS = 180;
 
 // 8-way direction table (N, NE, E, SE, S, SW, W, NW). Diagonals unlock the
 // scattered circuit-board feel.
