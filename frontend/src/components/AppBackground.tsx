@@ -108,8 +108,8 @@ function generateTraces(layout: Layout): Trace[] {
       start: [sx, sy],
       bends,
       end,
-      opacity: 0.22 + rand() * 0.25,
-      strokeW: 0.7 + rand() * 0.7,
+      opacity: 0.38 + rand() * 0.3,
+      strokeW: 0.8 + rand() * 0.8,
     });
   }
   return arr;
@@ -129,7 +129,7 @@ function generateDots(layout: Layout): Dot[] {
       x,
       y,
       r: 0.7 + rand() * 1.3,
-      opacity: 0.15 + rand() * 0.3,
+      opacity: 0.22 + rand() * 0.38,
     });
   }
   return arr;
@@ -182,16 +182,16 @@ export function AppBackground() {
               {/* Soft halo */}
               <path
                 d={t.d}
-                stroke="#0891b2"
+                stroke="#22d3ee"
                 strokeWidth={t.strokeW + 2}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                opacity={0.06}
+                opacity={0.09}
               />
-              {/* Main trace — dim so panels sit above visually */}
+              {/* Main trace — medium cyan, sits behind panels visually */}
               <path
                 d={t.d}
-                stroke="#0e7490"
+                stroke="#0891b2"
                 strokeWidth={t.strokeW}
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -214,11 +214,11 @@ export function AppBackground() {
                 cy={t.start[1]}
                 r={2}
                 fill="#22d3ee"
-                opacity={0.7}
+                opacity={0.85}
               />
               {/* Bend dots */}
               {t.bends.map(([bx, by], j) => (
-                <circle key={j} cx={bx} cy={by} r={1.3} fill="#0891b2" opacity={0.7} />
+                <circle key={j} cx={bx} cy={by} r={1.3} fill="#22d3ee" opacity={0.75} />
               ))}
               {/* Endpoint terminal */}
               <rect
@@ -227,7 +227,7 @@ export function AppBackground() {
                 width={4}
                 height={4}
                 fill="#22d3ee"
-                opacity={0.7}
+                opacity={0.85}
               />
             </g>
           ))}
