@@ -2,11 +2,14 @@ import { Header } from "@/components/Header";
 import { BottomBar } from "@/components/BottomBar";
 import { Panel } from "@/components/Panel";
 import { CubeVisualization } from "@/components/CubeVisualization";
+import { AppBackground } from "@/components/AppBackground";
 
 export default function App() {
   return (
-    <div className="min-h-screen flex flex-col">
-      <Header />
+    <div className="min-h-screen flex flex-col relative">
+      <AppBackground />
+      <div className="relative z-10 flex flex-col flex-1 min-h-0">
+        <Header />
 
       <main className="flex-1 grid gap-3 p-3 grid-cols-[340px_minmax(0,1fr)_340px]">
         {/* LEFT COLUMN */}
@@ -72,7 +75,8 @@ export default function App() {
         </div>
       </main>
 
-      <BottomBar />
+        <BottomBar />
+      </div>
     </div>
   );
 }

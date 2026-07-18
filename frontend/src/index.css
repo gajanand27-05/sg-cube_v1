@@ -54,3 +54,67 @@
     box-shadow: 0 0 8px currentColor;
   }
 }
+
+@keyframes hud-ring-spawn {
+  from {
+    opacity: 0;
+    transform: scale(0.32);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.hud-ring-spawn {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: hud-ring-spawn 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes circuit-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.circuit-fade-in {
+  opacity: 0;
+  animation: circuit-fade-in 1.4s ease-out forwards;
+}
+
+@keyframes circuit-pulse {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -266;
+  }
+}
+
+.circuit-pulse {
+  animation-name: circuit-pulse;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+/* Wave-form current pulses. Path is set to pathLength=1 so the dash offset
+   is normalized regardless of actual trace length. Cycle moves the dash
+   pattern by exactly one period per 1.5s so pulses loop seamlessly. */
+@keyframes wave-out {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -0.29;
+  }
+}
+
+.wave-pulse {
+  animation: wave-out 1.4s linear infinite;
+  animation-delay: 2.1s;
+}

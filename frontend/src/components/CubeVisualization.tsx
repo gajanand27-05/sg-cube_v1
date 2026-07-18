@@ -136,65 +136,76 @@ function HUDRings() {
         </radialGradient>
       </defs>
 
-      <circle cx={CX} cy={CY} r={198} fill="url(#rimGlow)" />
-
-      <g>
-        <path
-          d={donutPath(168, 190)}
-          fill={NAVY}
-          fillRule="evenodd"
-          stroke={NAVY_STROKE}
-          strokeWidth={0.5}
-        />
-        <BarcodeTicks angle={0} />
-        <BarcodeTicks angle={90} />
-        <BarcodeTicks angle={180} />
-        <BarcodeTicks angle={270} />
-        <CardinalArrow angle={0} />
-        <CardinalArrow angle={180} />
+      <g className="hud-ring-spawn" style={{ animationDelay: "0.85s" }}>
+        <Spinner duration={55} reverse>
+          <circle cx={CX} cy={CY} r={198} fill="url(#rimGlow)" />
+          <path
+            d={donutPath(168, 190)}
+            fill={NAVY}
+            fillRule="evenodd"
+            stroke={NAVY_STROKE}
+            strokeWidth={0.5}
+          />
+          <BarcodeTicks angle={0} />
+          <BarcodeTicks angle={90} />
+          <BarcodeTicks angle={180} />
+          <BarcodeTicks angle={270} />
+          <CardinalArrow angle={0} />
+          <CardinalArrow angle={180} />
+        </Spinner>
       </g>
 
-      <Spinner duration={22}>
-        <ArcSegments
-          count={4}
-          rIn={148}
-          rOut={165}
-          arcDeg={62}
-          gapDeg={28}
-          fill="rgba(34,211,238,0.85)"
-        />
-      </Spinner>
+      <g className="hud-ring-spawn" style={{ animationDelay: "0.65s" }}>
+        <Spinner duration={22}>
+          <ArcSegments
+            count={4}
+            rIn={148}
+            rOut={165}
+            arcDeg={62}
+            gapDeg={28}
+            fill="rgba(34,211,238,0.85)"
+          />
+        </Spinner>
+      </g>
 
-      <Spinner duration={16}>
-        <DotsRing count={72} r={132} dotR={2} fill="#e0f2fe" opacity={0.95} />
-      </Spinner>
+      <g className="hud-ring-spawn" style={{ animationDelay: "0.5s" }}>
+        <Spinner duration={16}>
+          <DotsRing count={72} r={132} dotR={2} fill="#e0f2fe" opacity={0.95} />
+        </Spinner>
+      </g>
 
-      <Spinner duration={26} reverse>
-        <ArcSegments
-          count={4}
-          rIn={102}
-          rOut={118}
-          arcDeg={55}
-          gapDeg={35}
-          fill="rgba(34,211,238,0.85)"
-          phase={22}
-        />
-      </Spinner>
+      <g className="hud-ring-spawn" style={{ animationDelay: "0.35s" }}>
+        <Spinner duration={26} reverse>
+          <ArcSegments
+            count={4}
+            rIn={102}
+            rOut={118}
+            arcDeg={55}
+            gapDeg={35}
+            fill="rgba(34,211,238,0.85)"
+            phase={22}
+          />
+        </Spinner>
+      </g>
 
-      <Spinner duration={11} reverse>
-        <DotsRing count={54} r={88} dotR={1.6} fill="#67e8f9" opacity={0.9} />
-      </Spinner>
+      <g className="hud-ring-spawn" style={{ animationDelay: "0.2s" }}>
+        <Spinner duration={11} reverse>
+          <DotsRing count={54} r={88} dotR={1.6} fill="#67e8f9" opacity={0.9} />
+        </Spinner>
+      </g>
 
-      <Spinner duration={7} reverse>
-        <ArcSegments
-          count={2}
-          rIn={72}
-          rOut={78}
-          arcDeg={40}
-          gapDeg={140}
-          fill="rgba(103,232,249,0.75)"
-        />
-      </Spinner>
+      <g className="hud-ring-spawn" style={{ animationDelay: "0s" }}>
+        <Spinner duration={7} reverse>
+          <ArcSegments
+            count={2}
+            rIn={72}
+            rOut={78}
+            arcDeg={40}
+            gapDeg={140}
+            fill="rgba(103,232,249,0.75)"
+          />
+        </Spinner>
+      </g>
     </svg>
   );
 }
@@ -290,9 +301,12 @@ function Cube() {
   const group = useRef<THREE.Group>(null!);
   const spawnStart = useRef<number | null>(null);
   const settled = useRef(false);
+  const SPAWN_DELAY = 1.8; // wait for rings to finish assembling
   const SPAWN_DURATION = 2.25;
 
   useFrame((state, delta) => {
+    if (state.clock.elapsedTime < SPAWN_DELAY) return;
+
     if (spawnStart.current === null) spawnStart.current = state.clock.elapsedTime;
     const t = state.clock.elapsedTime - spawnStart.current;
 
@@ -368,6 +382,7 @@ function Particles({ count = 80 }: { count?: number }) {
 export function CubeVisualization() {
   return (
     <div
+      id="sg-cube-anchor"
       className="relative w-full h-full min-h-[260px] flex items-center justify-center select-none"
       onContextMenu={(e) => e.preventDefault()}
     >
