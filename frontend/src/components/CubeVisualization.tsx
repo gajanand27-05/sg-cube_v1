@@ -1,6 +1,7 @@
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
+import type { ReactNode } from "react";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
 
@@ -31,6 +32,30 @@ function donutPath(rIn: number, rOut: number) {
   return (
     `M ${CX + rOut} ${CY} A ${rOut} ${rOut} 0 1 0 ${CX - rOut} ${CY} A ${rOut} ${rOut} 0 1 0 ${CX + rOut} ${CY} Z ` +
     `M ${CX + rIn} ${CY} A ${rIn} ${rIn} 0 1 1 ${CX - rIn} ${CY} A ${rIn} ${rIn} 0 1 1 ${CX + rIn} ${CY} Z`
+  );
+}
+
+function Spinner({
+  duration,
+  reverse = false,
+  children,
+}: {
+  duration: number;
+  reverse?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <g>
+      {children}
+      <animateTransform
+        attributeName="transform"
+        type="rotate"
+        from={`0 ${CX} ${CY}`}
+        to={`${reverse ? -360 : 360} ${CX} ${CY}`}
+        dur={`${duration}s`}
+        repeatCount="indefinite"
+      />
+    </g>
   );
 }
 
@@ -98,8 +123,6 @@ function CardinalArrow({ angle }: { angle: number }) {
 }
 
 function HUDRings() {
-  const spinStyle = { transformBox: "fill-box", transformOrigin: "center" } as const;
-
   return (
     <svg
       className="absolute inset-0 w-full h-full pointer-events-none"
@@ -113,12 +136,9 @@ function HUDRings() {
         </radialGradient>
       </defs>
 
-      {/* Outer rim soft glow */}
       <circle cx={CX} cy={CY} r={198} fill="url(#rimGlow)" />
 
-      {/* --- STATIC OUTER SHELL --- */}
       <g>
-        {/* Dark navy band with subtle cyan edges */}
         <path
           d={donutPath(168, 190)}
           fill={NAVY}
@@ -126,18 +146,15 @@ function HUDRings() {
           stroke={NAVY_STROKE}
           strokeWidth={0.5}
         />
-        {/* Barcode tick clusters at cardinals */}
         <BarcodeTicks angle={0} />
         <BarcodeTicks angle={90} />
         <BarcodeTicks angle={180} />
         <BarcodeTicks angle={270} />
-        {/* Cardinal arrows pointing inward */}
         <CardinalArrow angle={0} />
         <CardinalArrow angle={180} />
       </g>
 
-      {/* --- LAYER 1: outer thick arc segments (CW slow) --- */}
-      <g className="animate-spin-slow" style={spinStyle}>
+      <Spinner duration={22}>
         <ArcSegments
           count={4}
           rIn={148}
@@ -146,15 +163,13 @@ function HUDRings() {
           gapDeg={28}
           fill="rgba(34,211,238,0.85)"
         />
-      </g>
+      </Spinner>
 
-      {/* --- LAYER 2: outer dots ring (CW medium) --- */}
-      <g className="animate-spin-medium" style={spinStyle}>
+      <Spinner duration={16}>
         <DotsRing count={72} r={132} dotR={2} fill="#e0f2fe" opacity={0.95} />
-      </g>
+      </Spinner>
 
-      {/* --- LAYER 3: inner thick arc segments (CCW slow) --- */}
-      <g className="animate-spin-slow-reverse" style={spinStyle}>
+      <Spinner duration={26} reverse>
         <ArcSegments
           count={4}
           rIn={102}
@@ -164,63 +179,161 @@ function HUDRings() {
           fill="rgba(34,211,238,0.85)"
           phase={22}
         />
-      </g>
+      </Spinner>
 
-      {/* --- LAYER 4: inner dots ring (CCW medium) --- */}
-      <g className="animate-spin-medium-reverse" style={spinStyle}>
+      <Spinner duration={11} reverse>
         <DotsRing count={54} r={88} dotR={1.6} fill="#67e8f9" opacity={0.9} />
-      </g>
+      </Spinner>
 
-      {/* --- LAYER 5: small inner accent segments (CCW fast) --- */}
-      <g className="animate-spin-fast-reverse" style={spinStyle}>
+      <Spinner duration={7} reverse>
         <ArcSegments
           count={2}
           rIn={72}
           rOut={78}
           arcDeg={40}
           gapDeg={140}
-          fill="rgba(103,232,249,0.7)"
+          fill="rgba(103,232,249,0.75)"
         />
-      </g>
+      </Spinner>
     </svg>
+  );
+}
+
+function easeOutBack(t: number) {
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+
+const CORNERS: [number, number, number][] = [
+  [1, 1, 1], [-1, 1, 1], [1, -1, 1], [1, 1, -1],
+  [-1, -1, 1], [-1, 1, -1], [1, -1, -1], [-1, -1, -1],
+];
+
+function CornerDots() {
+  return (
+    <>
+      {CORNERS.map((c, i) => (
+        <mesh key={i} position={c}>
+          <sphereGeometry args={[0.055, 16, 16]} />
+          <meshBasicMaterial color={CYAN_GLOW} toneMapped={false} />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
+function InnerCube() {
+  const ref = useRef<THREE.Group>(null!);
+  useFrame((_, delta) => {
+    ref.current.rotation.y -= delta * 0.45;
+    ref.current.rotation.z += delta * 0.2;
+  });
+  return (
+    <group ref={ref}>
+      <mesh>
+        <boxGeometry args={[1.15, 1.15, 1.15]} />
+        <meshStandardMaterial
+          color={CYAN}
+          metalness={0.6}
+          roughness={0.35}
+          transparent
+          opacity={0.12}
+        />
+      </mesh>
+      <lineSegments>
+        <edgesGeometry args={[new THREE.BoxGeometry(1.15, 1.15, 1.15)]} />
+        <lineBasicMaterial color={CYAN_GLOW} transparent opacity={0.7} toneMapped={false} />
+      </lineSegments>
+    </group>
+  );
+}
+
+const FACE_LABELS: {
+  pos: [number, number, number];
+  rot: [number, number, number];
+  label: string;
+}[] = [
+  { pos: [0, 0, 1.005], rot: [0, 0, 0], label: "SG" },
+  { pos: [0, 0, -1.005], rot: [0, Math.PI, 0], label: "CUBE" },
+  { pos: [1.005, 0, 0], rot: [0, Math.PI / 2, 0], label: "SG" },
+  { pos: [-1.005, 0, 0], rot: [0, -Math.PI / 2, 0], label: "CUBE" },
+  { pos: [0, 1.005, 0], rot: [-Math.PI / 2, 0, 0], label: "SG" },
+  { pos: [0, -1.005, 0], rot: [Math.PI / 2, 0, 0], label: "CUBE" },
+];
+
+function FaceLabels() {
+  return (
+    <>
+      {FACE_LABELS.map((f, i) => (
+        <Text
+          key={i}
+          position={f.pos}
+          rotation={f.rot}
+          fontSize={f.label === "SG" ? 0.5 : 0.4}
+          color={CYAN_GLOW}
+          anchorX="center"
+          anchorY="middle"
+          letterSpacing={0.12}
+          outlineWidth={0.008}
+          outlineColor={CYAN}
+          material-toneMapped={false}
+        >
+          {f.label}
+        </Text>
+      ))}
+    </>
   );
 }
 
 function Cube() {
   const group = useRef<THREE.Group>(null!);
-  useFrame((_, delta) => {
+  const spawnStart = useRef<number | null>(null);
+  const settled = useRef(false);
+  const SPAWN_DURATION = 2.25;
+
+  useFrame((state, delta) => {
+    if (spawnStart.current === null) spawnStart.current = state.clock.elapsedTime;
+    const t = state.clock.elapsedTime - spawnStart.current;
+
+    if (!settled.current) {
+      if (t < SPAWN_DURATION) {
+        const p = t / SPAWN_DURATION;
+        group.current.scale.setScalar(Math.max(0, easeOutBack(p)));
+      } else {
+        group.current.scale.setScalar(1);
+        settled.current = true;
+      }
+    }
+
     group.current.rotation.y += delta * 0.3;
     group.current.rotation.x += delta * 0.12;
   });
 
   return (
-    <group ref={group}>
+    <group ref={group} scale={0}>
+      {/* Cyan-tinted cube body — same color, more opaque than before */}
       <mesh>
         <boxGeometry args={[2, 2, 2]} />
-        <meshBasicMaterial color={CYAN_DIM} transparent opacity={0.04} />
+        <meshStandardMaterial
+          color={CYAN_DIM}
+          metalness={0.6}
+          roughness={0.3}
+          transparent
+          opacity={0.5}
+          side={THREE.DoubleSide}
+        />
       </mesh>
 
-      <lineSegments>
-        <wireframeGeometry args={[new THREE.BoxGeometry(2, 2, 2, 3, 3, 3)]} />
-        <lineBasicMaterial color={CYAN} transparent opacity={0.35} />
-      </lineSegments>
-
+      {/* Bright outer edges */}
       <lineSegments>
         <edgesGeometry args={[new THREE.BoxGeometry(2, 2, 2)]} />
-        <lineBasicMaterial color={CYAN_GLOW} transparent opacity={1} />
+        <lineBasicMaterial color={CYAN_GLOW} transparent opacity={1} toneMapped={false} />
       </lineSegments>
 
-      <Text
-        fontSize={0.8}
-        color={CYAN_GLOW}
-        anchorX="center"
-        anchorY="middle"
-        letterSpacing={-0.05}
-        outlineWidth={0.02}
-        outlineColor={CYAN}
-      >
-        SG
-      </Text>
+      <CornerDots />
+      <InnerCube />
+      <FaceLabels />
     </group>
   );
 }
@@ -254,17 +367,22 @@ function Particles({ count = 80 }: { count?: number }) {
 
 export function CubeVisualization() {
   return (
-    <div className="relative w-full h-full min-h-[260px] flex items-center justify-center">
+    <div
+      className="relative w-full h-full min-h-[260px] flex items-center justify-center select-none"
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <HUDRings />
       <Canvas
         className="relative"
-        camera={{ position: [3.8, 2.6, 4.4], fov: 45 }}
-        gl={{ alpha: true, antialias: true }}
+        camera={{ position: [3.5, 2.4, 4.0], fov: 42 }}
+        gl={{ alpha: true, antialias: true, preserveDrawingBuffer: false }}
         dpr={[1, 2]}
       >
-        <ambientLight intensity={0.4} />
-        <pointLight position={[4, 4, 4]} color={CYAN} intensity={3} />
-        <pointLight position={[-4, -3, -4]} color={CYAN} intensity={1.5} />
+        <ambientLight intensity={0.35} />
+        <directionalLight position={[5, 6, 5]} intensity={2.2} color="#ffffff" />
+        <directionalLight position={[-5, -3, -2]} intensity={0.9} color={CYAN} />
+        <pointLight position={[0, 0, 3]} intensity={2.5} color={CYAN_GLOW} />
+        <pointLight position={[0, -3, -3]} intensity={1.2} color={CYAN} />
         <Cube />
         <Particles />
         <EffectComposer>
