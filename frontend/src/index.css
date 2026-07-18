@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-bg-base text-hud-text font-hud antialiased;
+    background-image:
+      radial-gradient(circle at 20% 10%, rgba(34, 211, 238, 0.05), transparent 40%),
+      radial-gradient(circle at 80% 90%, rgba(34, 211, 238, 0.04), transparent 40%);
+  }
+}
+
+@layer components {
+  .hud-panel {
+    @apply relative bg-bg-panel/80 border border-hud-border rounded-sm;
+    background-image: linear-gradient(180deg, rgba(34, 211, 238, 0.03), transparent 60%);
+  }
+
+  .hud-panel-corners::before,
+  .hud-panel-corners::after,
+  .hud-panel-corners > .corner-tl,
+  .hud-panel-corners > .corner-tr,
+  .hud-panel-corners > .corner-bl,
+  .hud-panel-corners > .corner-br {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-color: theme("colors.hud.cyan");
+    pointer-events: none;
+  }
+
+  .hud-label {
+    @apply text-xs uppercase tracking-[0.18em] text-hud-text-dim font-hud font-medium;
+  }
+
+  .hud-value {
+    @apply font-mono text-sm text-hud-text;
+  }
+
+  .hud-heading {
+    @apply text-sm uppercase tracking-[0.22em] font-semibold text-hud-cyan-glow;
+  }
+
+  .status-dot {
+    @apply inline-block w-2 h-2 rounded-full;
+    box-shadow: 0 0 8px currentColor;
+  }
+}
