@@ -105,16 +105,62 @@
 /* Wave-form current pulses. Path is set to pathLength=1 so the dash offset
    is normalized regardless of actual trace length. Cycle moves the dash
    pattern by exactly one period per 1.5s so pulses loop seamlessly. */
+/* One pulse per cycle: dash traverses path, then quiet, then next flash+pulse.
+   Cycle length + delay must match .shell-flash-* below so the ring's glow
+   fires at the same instant the current begins its outward journey. */
 @keyframes wave-out {
   from {
     stroke-dashoffset: 0;
   }
   to {
-    stroke-dashoffset: -0.29;
+    stroke-dashoffset: -2.05;
   }
 }
 
 .wave-pulse {
-  animation: wave-out 1.4s linear infinite;
+  animation: wave-out 3s linear infinite;
+  animation-delay: 2.1s;
+}
+
+@keyframes shell-flash-core {
+  0% {
+    opacity: 0;
+  }
+  4% {
+    opacity: 1;
+  }
+  25% {
+    opacity: 0.25;
+  }
+  55% {
+    opacity: 0.05;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes shell-flash-halo {
+  0% {
+    opacity: 0;
+  }
+  6% {
+    opacity: 0.65;
+  }
+  32% {
+    opacity: 0.15;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.shell-flash-core {
+  animation: shell-flash-core 3s linear infinite;
+  animation-delay: 2.1s;
+}
+
+.shell-flash-halo {
+  animation: shell-flash-halo 3s linear infinite;
   animation-delay: 2.1s;
 }

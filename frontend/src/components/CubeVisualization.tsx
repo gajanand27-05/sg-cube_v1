@@ -146,12 +146,36 @@ function HUDRings() {
             stroke={NAVY_STROKE}
             strokeWidth={0.5}
           />
+          {/* Shell flash — pulses bright cyan on the same beat as the trace pulses.
+              Wide halo + tight core, both driven by a shared keyframe. */}
+          <circle
+            cx={CX}
+            cy={CY}
+            r={179}
+            fill="none"
+            stroke={CYAN}
+            strokeWidth={22}
+            opacity={0}
+            className="shell-flash-halo"
+          />
+          <circle
+            cx={CX}
+            cy={CY}
+            r={179}
+            fill="none"
+            stroke={CYAN_GLOW}
+            strokeWidth={4}
+            opacity={0}
+            className="shell-flash-core"
+          />
           <BarcodeTicks angle={0} />
           <BarcodeTicks angle={90} />
           <BarcodeTicks angle={180} />
           <BarcodeTicks angle={270} />
           <CardinalArrow angle={0} />
+          <CardinalArrow angle={90} />
           <CardinalArrow angle={180} />
+          <CardinalArrow angle={270} />
         </Spinner>
       </g>
 

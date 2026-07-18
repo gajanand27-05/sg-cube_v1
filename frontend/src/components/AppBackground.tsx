@@ -108,8 +108,8 @@ function generateTraces(layout: Layout): Trace[] {
       start: [sx, sy],
       bends,
       end,
-      opacity: 0.55 + rand() * 0.4,
-      strokeW: 0.9 + rand() * 0.9,
+      opacity: 0.22 + rand() * 0.25,
+      strokeW: 0.7 + rand() * 0.7,
     });
   }
   return arr;
@@ -128,8 +128,8 @@ function generateDots(layout: Layout): Dot[] {
     arr.push({
       x,
       y,
-      r: 0.7 + rand() * 1.4,
-      opacity: 0.25 + rand() * 0.5,
+      r: 0.7 + rand() * 1.3,
+      opacity: 0.15 + rand() * 0.3,
     });
   }
   return arr;
@@ -169,7 +169,7 @@ export function AppBackground() {
         preserveAspectRatio="none"
       >
         {/* Scattered background dots (outside the cube clear zone) */}
-        <g fill="#67e8f9">
+        <g fill="#0891b2">
           {dots.map((d, i) => (
             <circle key={i} cx={d.x} cy={d.y} r={d.r} opacity={d.opacity} />
           ))}
@@ -182,94 +182,91 @@ export function AppBackground() {
               {/* Soft halo */}
               <path
                 d={t.d}
-                stroke="#22d3ee"
-                strokeWidth={t.strokeW + 2.5}
+                stroke="#0891b2"
+                strokeWidth={t.strokeW + 2}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                opacity={0.12}
+                opacity={0.06}
               />
-              {/* Main trace */}
+              {/* Main trace — dim so panels sit above visually */}
               <path
                 d={t.d}
-                stroke="#22d3ee"
+                stroke="#0e7490"
                 strokeWidth={t.strokeW}
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
-              {/* Current pulses — bright dashes travelling outward on each trace.
-                  pathLength=1 keeps every trace in the same normalized cycle so
-                  wavefronts stay coherent regardless of actual trace length. */}
+              {/* Current pulses — kept bright so the flow effect is still visible.
+                  pathLength=1 keeps every trace in the same normalized cycle. */}
               <path
                 d={t.d}
                 pathLength="1"
-                stroke="#e0f8ff"
-                strokeWidth={t.strokeW + 0.8}
+                stroke="#a5f3fc"
+                strokeWidth={t.strokeW + 0.6}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeDasharray="0.04 0.25"
+                strokeDasharray="0.05 2"
                 className="wave-pulse"
               />
               {/* Connector node at the ring shell */}
               <circle
                 cx={t.start[0]}
                 cy={t.start[1]}
-                r={2.5}
-                fill="#67e8f9"
-                stroke="#22d3ee"
-                strokeWidth={0.5}
+                r={2}
+                fill="#22d3ee"
+                opacity={0.7}
               />
               {/* Bend dots */}
               {t.bends.map(([bx, by], j) => (
-                <circle key={j} cx={bx} cy={by} r={1.5} fill="#22d3ee" />
+                <circle key={j} cx={bx} cy={by} r={1.3} fill="#0891b2" opacity={0.7} />
               ))}
               {/* Endpoint terminal */}
               <rect
-                x={t.end[0] - 2.5}
-                y={t.end[1] - 2.5}
-                width={5}
-                height={5}
-                fill="#67e8f9"
+                x={t.end[0] - 2}
+                y={t.end[1] - 2}
+                width={4}
+                height={4}
+                fill="#22d3ee"
+                opacity={0.7}
               />
             </g>
           ))}
         </g>
 
-        {/* Water-wave ripples emanating from the ring — sweep across everything */}
+        {/* Water-wave ripple — expands from the shell each beat, in lockstep
+            with the shell flash and trace pulses (all share the 3s cycle) */}
         <g fill="none" stroke="#67e8f9">
-          {[0, 1.4, 2.8].map((delay, i) => (
-            <circle
-              key={i}
-              cx={layout.cx}
-              cy={layout.cy}
-              r={layout.r + 4}
-              opacity={0}
-              strokeWidth={2.5}
-            >
-              <animate
-                attributeName="r"
-                from={layout.r + 4}
-                to={maxReach * 0.9}
-                dur="4.2s"
-                begin={`${RING_SETTLE + delay}s`}
-                repeatCount="indefinite"
-              />
-              <animate
-                attributeName="opacity"
-                values="0;0.32;0"
-                dur="4.2s"
-                begin={`${RING_SETTLE + delay}s`}
-                repeatCount="indefinite"
-              />
-              <animate
-                attributeName="stroke-width"
-                from={2.5}
-                to={0.4}
-                dur="4.2s"
-                begin={`${RING_SETTLE + delay}s`}
-                repeatCount="indefinite"
-              />
-            </circle>
-          ))}
+          <circle
+            cx={layout.cx}
+            cy={layout.cy}
+            r={layout.r + 4}
+            opacity={0}
+            strokeWidth={2.5}
+          >
+            <animate
+              attributeName="r"
+              from={layout.r + 4}
+              to={maxReach * 0.9}
+              dur="3s"
+              begin={`${RING_SETTLE}s`}
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0;0.5;0"
+              dur="3s"
+              begin={`${RING_SETTLE}s`}
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="stroke-width"
+              from={2.8}
+              to={0.4}
+              dur="3s"
+              begin={`${RING_SETTLE}s`}
+              repeatCount="indefinite"
+            />
+          </circle>
         </g>
       </svg>
     </div>
