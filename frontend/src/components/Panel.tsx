@@ -11,11 +11,20 @@ const toneClasses: Record<StatusTone, string> = {
   muted: "text-hud-text-dim",
 };
 
+export const statusToneClasses = toneClasses;
+
+/** Shared by Panel's own status pill and any statusSlot that renders one, so
+ *  a slotted pill is indistinguishable from a prop-driven one. */
+export const statusPillClass = "text-[10px] uppercase tracking-[0.2em] font-semibold";
+
 interface PanelProps {
   title?: string;
   number?: string;
   status?: string;
   statusTone?: StatusTone;
+  /** Renders in place of status/statusTone. Lets a panel own a live-updating
+   *  pill without lifting its ticker to this component's parent. */
+  statusSlot?: ReactNode;
   action?: ReactNode;
   className?: string;
   bodyClassName?: string;
@@ -27,6 +36,7 @@ export function Panel({
   number,
   status,
   statusTone = "cyan",
+  statusSlot,
   action,
   className,
   bodyClassName,
@@ -35,7 +45,7 @@ export function Panel({
   return (
     <section className={cn("hud-panel", className)}>
       <Corners />
-      {(title || status || action) && (
+      {(title || status || statusSlot || action) && (
         <header className="flex items-center justify-between gap-3 px-4 py-3 border-b border-hud-border-dim">
           <div className="flex items-center gap-2 min-w-0">
             {number && (
@@ -46,16 +56,12 @@ export function Panel({
             {title && <h2 className="hud-heading truncate">{title}</h2>}
           </div>
           <div className="flex items-center gap-3 shrink-0">
-            {status && (
-              <span
-                className={cn(
-                  "text-[10px] uppercase tracking-[0.2em] font-semibold",
-                  toneClasses[statusTone],
-                )}
-              >
-                {status}
-              </span>
-            )}
+            {statusSlot ??
+              (status && (
+                <span className={cn(statusPillClass, toneClasses[statusTone])}>
+                  {status}
+                </span>
+              ))}
             {action}
           </div>
         </header>

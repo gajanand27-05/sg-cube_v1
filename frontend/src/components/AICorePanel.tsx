@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
+import { statusPillClass, statusToneClasses } from "@/components/Panel";
 import {
   useUiConnectionState,
   useUiEvent,
@@ -76,9 +77,23 @@ export function useAICoreStatus(): CoreStatus {
   ]);
 }
 
+/** The AI Core header pill.
+ *
+ *  Exists so useAICoreStatus's 1s ticker lives HERE rather than in App. Called
+ *  at the tree root it re-rendered every panel, the PCB backdrop (~1000 SVG
+ *  nodes) and the r3f Canvas once per second to update one word.
+ */
+export function AICoreStatusPill() {
+  const { status, tone } = useAICoreStatus();
+  return (
+    <span className={cn(statusPillClass, statusToneClasses[tone])}>{status}</span>
+  );
+}
+
 export function AICorePanel() {
   const metrics = useUiEvent("ai_metrics");
   const lastIntent = useUiEvent("intent_resolved");
+  const lastReasoning = useUiEvent("agent_reasoning");
 
   const cacheCount = useUiEventCounter(
     "intent_resolved",
@@ -211,6 +226,19 @@ export function AICorePanel() {
             count={llmCount}
           />
         </div>
+      </div>
+
+      {/* Row 5 — Reasoning ticker (single-line footer, empty state em-dash) */}
+      <div className="flex items-center gap-3 min-w-0">
+        <span className="hud-label shrink-0">Reasoning</span>
+        <span
+          className="font-mono text-[10px] text-hud-text-dim truncate"
+          title={lastReasoning?.reasoning ?? ""}
+        >
+          {lastReasoning === null || !lastReasoning.reasoning
+            ? "—"
+            : lastReasoning.reasoning}
+        </span>
       </div>
 
       {/* Row 6 — Last response + latency sparkline (footer) */}

@@ -2,7 +2,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import type { ReactNode } from "react";
-import { useMemo, useRef } from "react";
+import { memo, useMemo, useRef } from "react";
 import * as THREE from "three";
 
 const CYAN = "#22d3ee";
@@ -13,6 +13,15 @@ const NAVY_STROKE = "rgba(34, 211, 238, 0.35)";
 
 const CX = 200;
 const CY = 200;
+
+// Source geometries for the two <edgesGeometry> instances. Must be module
+// constants, not inline `new THREE.BoxGeometry(...)`: r3f treats a change in
+// `args` identity as "reconstruct this instance", so a fresh object per render
+// rebuilt both edge geometries every time. The intermediate BoxGeometry is
+// never attached to the scene graph, so r3f's auto-disposal never reached it
+// and each render leaked GPU memory.
+const INNER_BOX = new THREE.BoxGeometry(1.15, 1.15, 1.15);
+const OUTER_BOX = new THREE.BoxGeometry(2, 2, 2);
 
 function polar(r: number, deg: number): [number, number] {
   const a = (deg * Math.PI) / 180;
@@ -277,7 +286,7 @@ function InnerCube() {
         />
       </mesh>
       <lineSegments>
-        <edgesGeometry args={[new THREE.BoxGeometry(1.15, 1.15, 1.15)]} />
+        <edgesGeometry args={[INNER_BOX]} />
         <lineBasicMaterial color={CYAN_GLOW} transparent opacity={0.7} toneMapped={false} />
       </lineSegments>
     </group>
@@ -365,7 +374,7 @@ function Cube() {
 
       {/* Bright outer edges */}
       <lineSegments>
-        <edgesGeometry args={[new THREE.BoxGeometry(2, 2, 2)]} />
+        <edgesGeometry args={[OUTER_BOX]} />
         <lineBasicMaterial color={CYAN_GLOW} transparent opacity={1} toneMapped={false} />
       </lineSegments>
 
@@ -403,7 +412,9 @@ function Particles({ count = 80 }: { count?: number }) {
   );
 }
 
-export function CubeVisualization() {
+// memo: no props, so this renders once. Keeps the r3f Canvas out of any
+// future App re-render.
+export const CubeVisualization = memo(function CubeVisualization() {
   return (
     <div
       id="sg-cube-anchor"
@@ -435,4 +446,4 @@ export function CubeVisualization() {
       </Canvas>
     </div>
   );
-}
+});

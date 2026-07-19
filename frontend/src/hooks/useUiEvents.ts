@@ -14,6 +14,55 @@ function resolveUrl(): string {
   return envUrl.length > 0 ? envUrl : "ws://127.0.0.1:8001/ws/ui";
 }
 
+// Fields each consumer actually dereferences, and the type it assumes. Guards
+// the seam where untrusted JSON becomes typed state: without this a renamed or
+// nulled backend field ships a TypeError straight into render.
+//
+// Only fields the UI touches are listed — this is a crash guard, not a schema.
+const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | "boolean">> = {
+  ai_metrics: {
+    tokens_per_second: "number",
+    latency_ms: "number",
+    inference_ms: "number",
+    active_model: "string",
+  },
+  intent_resolved: { source_layer: "string" },
+  agent_thinking: { agent_name: "string", is_thinking: "boolean" },
+  agent_reasoning: { reasoning: "string" },
+  agent_completed: { confidence: "number" },
+  provider_degraded: { action: "string" },
+  system_stats: {
+    cpu_percent: "number",
+    memory_percent: "number",
+    net_down_bps: "number",
+  },
+};
+
+function isValidPayload(type: string, payload: unknown): boolean {
+  const required = REQUIRED_FIELDS[type as UiEventType];
+  // Unknown types pass through untouched — the UI never reads them, and
+  // dropping them would silently break any future consumer.
+  if (!required) return true;
+  if (typeof payload !== "object" || payload === null) return false;
+  const p = payload as Record<string, unknown>;
+  for (const [field, kind] of Object.entries(required)) {
+    // NaN would pass typeof but breaks .toFixed output.
+    if (kind === "number" && !Number.isFinite(p[field])) return false;
+    if (kind !== "number" && typeof p[field] !== kind) return false;
+  }
+  return true;
+}
+
+const warned = new Set<string>();
+function warnOnce(type: string) {
+  if (warned.has(type)) return;
+  warned.add(type);
+  console.warn(
+    `[useUiEvents] dropping malformed "${type}" payload; ` +
+      `UI stays on its empty state. Further warnings for this type suppressed.`,
+  );
+}
+
 type PayloadListener<T extends UiEventType> = (
   envelope: UiEventEnvelope<T>,
 ) => void;
@@ -72,6 +121,10 @@ function openSocket() {
       return;
     }
     if (!envelope || typeof envelope.type !== "string") return;
+    if (!isValidPayload(envelope.type, envelope.payload)) {
+      warnOnce(envelope.type);
+      return;
+    }
     latest.set(envelope.type, envelope);
     const set = listeners.get(envelope.type);
     if (!set) return;

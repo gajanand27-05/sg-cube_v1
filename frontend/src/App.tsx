@@ -3,16 +3,17 @@ import { BottomBar } from "@/components/BottomBar";
 import { Panel } from "@/components/Panel";
 import { CubeVisualization } from "@/components/CubeVisualization";
 import { AppBackground } from "@/components/AppBackground";
-import { AICorePanel, useAICoreStatus } from "@/components/AICorePanel";
+import { AICorePanel, AICoreStatusPill } from "@/components/AICorePanel";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 export default function App() {
-  const aiCoreStatus = useAICoreStatus();
   return (
     <div className="min-h-screen flex flex-col relative">
       <AppBackground />
       <div className="relative z-10 flex flex-col flex-1 min-h-0">
         <Header />
 
+      <ErrorBoundary>
       <main className="flex-1 grid gap-3 p-3 grid-cols-[340px_minmax(0,1fr)_340px]">
         {/* LEFT COLUMN */}
         <div className="flex flex-col gap-3 min-h-0">
@@ -62,12 +63,7 @@ export default function App() {
 
         {/* RIGHT COLUMN */}
         <div className="flex flex-col gap-3 min-h-0">
-          <Panel
-            title="AI Core"
-            number="01"
-            status={aiCoreStatus.status}
-            statusTone={aiCoreStatus.tone}
-          >
+          <Panel title="AI Core" number="01" statusSlot={<AICoreStatusPill />}>
             <AICorePanel />
           </Panel>
           <Panel title="Memory Engine" number="02" status="Optimized" statusTone="success">
@@ -81,6 +77,7 @@ export default function App() {
           </Panel>
         </div>
       </main>
+      </ErrorBoundary>
 
         <BottomBar />
       </div>

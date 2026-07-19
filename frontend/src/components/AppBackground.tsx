@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useState } from "react";
+import { memo, useLayoutEffect, useMemo, useState } from "react";
 import { mulberry32 } from "@/lib/random";
 
 // Pulse waves start after the ring assembly finishes (~1.75s) with a small buffer.
@@ -135,7 +135,9 @@ function generateDots(layout: Layout): Dot[] {
   return arr;
 }
 
-export function AppBackground() {
+// memo: takes no props, so this renders exactly once. Insulates ~1000 SVG
+// nodes from any future re-render of App.
+export const AppBackground = memo(function AppBackground() {
   const [layout, setLayout] = useState<Layout>(FALLBACK);
 
   useLayoutEffect(() => {
@@ -271,4 +273,4 @@ export function AppBackground() {
       </svg>
     </div>
   );
-}
+});
