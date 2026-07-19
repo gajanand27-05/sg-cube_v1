@@ -306,6 +306,38 @@ async def _run_brain_streaming(brain_request: BrainRequest, turn: Optional[TurnL
     return response
 
 
+# Whisper emits these verbatim on silence, music, or room tone. They are not
+# commands and must never reach the router.
+_STT_HALLUCINATIONS = frozenset({
+    "you", "thank you", "thanks for watching", "thank you for watching",
+    "bye", "bye.", ".", "..", "...", "[blank_audio]", "[silence]",
+    "subtitles by the amara.org community", "please subscribe",
+    "music", "[music]", "applause", "[applause]",
+})
+
+
+def _is_dispatchable(command: str) -> bool:
+    """Whether an STT transcript is plausibly a spoken command.
+
+    Deliberately conservative: this only rejects transcripts that are
+    self-evidently not commands. It is a floor, not a classifier — a
+    determined mis-transcription of real speech still gets through, and the
+    real fix for TTS-bleed is acoustic echo cancellation (see the note in
+    wake_word.listen).
+    """
+    if not command:
+        return False
+    normalized = command.strip().lower().rstrip(".!?")
+    if not normalized:
+        return False
+    if normalized in _STT_HALLUCINATIONS:
+        return False
+    # Single stray character is noise, never an utterance worth executing.
+    if len(normalized) < 2:
+        return False
+    return True
+
+
 async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
     """Main daemon orchestration via async events.
 
@@ -344,6 +376,20 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
             turn.mark("stt_done")
             command = (stt.get("text") or "").strip()
             print(f"[command] {command!r}")
+
+            # Content gate. The only prior check is an RMS floor, which
+            # measures loudness, not speech — so Whisper hallucinating on
+            # room noise or on the assistant's own TTS bleeding back into the
+            # mic produced a transcript that was dispatched to the router and
+            # EXECUTED. That is how ambient audio ended up launching apps.
+            #
+            # Loudness alone is not consent to run a command.
+            if not _is_dispatchable(command):
+                print(f"[trigger] dropping non-command transcript {command!r}")
+                log.info("dropped non-command transcript: %r", command)
+                state_manager.transition_to(AssistantState.IDLE)
+                latency_ledger().record(turn)
+                return False
 
             # Emit partial for UI feedback (simulated since we don't have true streaming yet)
             from backend.daemon.ui_events import STTPartialEvent
