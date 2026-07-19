@@ -55,6 +55,15 @@
   }
 }
 
+@keyframes hud-crossfade-in {
+  from { opacity: 0.35; }
+  to   { opacity: 1; }
+}
+
+.hud-crossfade {
+  animation: hud-crossfade-in 150ms ease-out;
+}
+
 @keyframes hud-ring-spawn {
   from {
     opacity: 0;

@@ -3,8 +3,10 @@ import { BottomBar } from "@/components/BottomBar";
 import { Panel } from "@/components/Panel";
 import { CubeVisualization } from "@/components/CubeVisualization";
 import { AppBackground } from "@/components/AppBackground";
+import { AICorePanel, useAICoreStatus } from "@/components/AICorePanel";
 
 export default function App() {
+  const aiCoreStatus = useAICoreStatus();
   return (
     <div className="min-h-screen flex flex-col relative">
       <AppBackground />
@@ -60,8 +62,13 @@ export default function App() {
 
         {/* RIGHT COLUMN */}
         <div className="flex flex-col gap-3 min-h-0">
-          <Panel title="AI Core" number="01" status="Operational" statusTone="success">
-            <Placeholder label="model · context · confidence · agent" />
+          <Panel
+            title="AI Core"
+            number="01"
+            status={aiCoreStatus.status}
+            statusTone={aiCoreStatus.tone}
+          >
+            <AICorePanel />
           </Panel>
           <Panel title="Memory Engine" number="02" status="Optimized" statusTone="success">
             <Placeholder label="vector db · entries · recall · score" />
