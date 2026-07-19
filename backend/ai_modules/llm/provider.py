@@ -28,6 +28,23 @@ def _emit_fallback(from_backend: str, to_backend: str, reason: str) -> None:
         pass
 
 
+def _model_label(backend: Any, registered_name: str) -> str:
+    """Concrete model name for telemetry, falling back to the routing key.
+
+    getattr rather than a direct call because active_model_name is an
+    optional part of the interface and register() accepts any duck-typed
+    object. A backend that doesn't implement it should degrade to reporting
+    the routing key, not raise mid-request.
+    """
+    getter = getattr(backend, "active_model_name", None)
+    if getter is None:
+        return registered_name
+    try:
+        return getter() or registered_name
+    except Exception:
+        return registered_name
+
+
 class LLMBackend(ABC):
     """Backend interface — each provider implements this."""
 
@@ -57,6 +74,16 @@ class LLMBackend(ABC):
 
     @abstractmethod
     async def aembed(self, text: str, **kwargs: Any) -> list[float]: ...
+
+    def active_model_name(self) -> str | None:
+        """Concrete model this backend will actually call, for telemetry.
+
+        Not abstract: a backend that can't say returns None and the caller
+        falls back to the registered backend name. Without this, ai_metrics
+        reported the routing key ("ollama_cloud") in active_model, so the UI's
+        MODEL row named the backend rather than the model.
+        """
+        return None
 
 
 class LLMProvider:
@@ -107,7 +134,7 @@ class LLMProvider:
         self._inflight += 1
         self._calls += 1
         t0 = time.monotonic()
-        model = primary_name
+        model = _model_label(primary, primary_name)
         result = ""
         try:
             result = await primary.generate(
@@ -125,7 +152,7 @@ class LLMProvider:
             result = await fb_backend.generate(
                 prompt, system=system, temperature=temperature, json_mode=json_mode, **kwargs
             )
-            model = fb_name
+            model = _model_label(fb_backend, fb_name)
         finally:
             latency_ms = (time.monotonic() - t0) * 1000
             self._inflight -= 1
@@ -178,7 +205,7 @@ class LLMProvider:
         self._calls += 1
         t0 = time.monotonic()
         accumulated = ""
-        model = primary_name
+        model = _model_label(primary, primary_name)
         completed = False
 
         # Try primary. Track whether we've yielded anything — once we have,
@@ -204,7 +231,7 @@ class LLMProvider:
                 _emit_fallback(primary_name, fb_name, str(e)[:200])
                 log.warning("LLM primary '%s' stream failed pre-yield (%s); falling over to '%s'",
                             primary_name, type(e).__name__, fb_name)
-                model = fb_name
+                model = _model_label(fb_backend, fb_name)
 
             if not completed:
                 # Fallback path — outside the except so re-raise from fallback

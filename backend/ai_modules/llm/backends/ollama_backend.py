@@ -65,6 +65,11 @@ class OllamaBackend(LLMBackend):
         ):
             yield chunk
 
+    def active_model_name(self) -> str | None:
+        # Mirrors ollama_client's own default resolution, so telemetry names
+        # the model that actually ran rather than the routing key.
+        return self.default_model or settings.fast_model
+
     def embed(self, text: str, model: str | None = None, **kwargs: Any) -> list[float]:
         # Always local: the Ollama Cloud catalog has no embedding models.
         return ollama_client.embed(text, model=model, **kwargs)

@@ -61,7 +61,9 @@ Same class as the phantom-publisher finding, one layer deeper: the publisher exi
 
 **Fix**: `chat_stream()` now accumulates streamed tokens and emits once on completion (never per chunk), including on the fallback path with the fallback backend's name. Skipped on failure so a dead stream isn't reported as throughput.
 
-**Known cosmetic gap**: `active_model` reports the *backend* name (`ollama_cloud`), not the model (`gpt-oss:120b`). Pre-existing — `generate()` does the same. The UI's MODEL row will show `ollama_cloud`.
+**Known cosmetic gap — FIXED 2026-07-19**: `active_model` reported the *backend* name (`ollama_cloud`) rather than the model, so the UI's MODEL row named the routing key. `LLMBackend` gained an optional `active_model_name()`; the provider reads it through a defensive `_model_label()` helper (getattr, not a direct call) so duck-typed backends that don't implement it degrade to the routing key instead of raising mid-request. Verified live: `model=gpt-oss:120b`.
+
+**Still open**: two planner LLM calls fire per conversational turn (observed 2641ms + 3859ms), so the panel shows whichever landed last and Tok/s reads jumpy. Cause not yet established — the JSON-parse retry path in `planner.py` is the leading hypothesis. Measurement may also be contaminated by T-wake-word-executes-ambient-audio.
 
 ## T-agent-reasoning-conversational (opened + FIXED 2026-07-19)
 
@@ -229,3 +231,40 @@ which asserts *pairs* rather than spellings. Suite 193 -> 200.
 named pytest" — the project's own venv cannot run the project's own tests,
 so anyone following the README's `.venv\Scripts\activate` -> `pytest` path
 hits a wall. pytest exists only in the system interpreter.
+
+## T-wake-word-executes-ambient-audio (opened 2026-07-19 — PARTIALLY MITIGATED)
+
+**Observed**: during an unrelated HTTP query, the daemon executed `open_app` → "opened Terminal". The HTTP response's `tool_records` was `[]`, so it did not come from the request. The mic listener acted on ambient audio.
+
+**The "no wake gate" hypothesis is WRONG.** All three trigger paths in `wake_word.listen()` require a wake or a state derived from one:
+
+1. **Wake phrase** (`wake_word.py:278`) — requires `"onyx"` in the Vosk partial. Correctly gated.
+2. **Follow-up** (`:284-288`) — `elif in_followup: if rms > 500`. `followup_until` opens for `_FOLLOWUP_WINDOW_S = 3.0` after a *successful* command. Requires a prior turn, but **within that 3s window mere loudness triggers a capture** — no phrase required.
+3. **Barge-in** (`:296-300`) — requires `state_manager.current == SPEAKING` plus `rms > 800` for 2 consecutive frames.
+
+**The actual defect is a self-sustaining feedback loop, not a missing gate:**
+
+```
+legitimate wake -> assistant SPEAKS (TTS)
+                -> speaker bleeds into mic
+                -> barge-in fires (state==SPEAKING, rms>800)
+                -> captures TTS + room tone
+                -> Whisper hallucinates a transcript
+                -> dispatched to router and EXECUTED
+                -> assistant speaks the result -> loop repeats
+```
+
+Each completed command also opens a 3s window where loudness alone re-triggers. So **one legitimate wake can cascade into an unbounded chain of misheard commands.** The code already admits the seed condition at `wake_word.py:293-295`: *"a loud speaker close to the mic will still false-fire (out of scope — future AEC work)."*
+
+**Why it reached execution**: `trigger.py` validated only `rms < 200` before dispatch — loudness, not speech. `command = (stt.get("text") or "").strip()` then went straight to `_process_and_execute` with **no check that it was non-empty or plausible**. Corroborating evidence from earlier the same session: a stray `command_transcribed` carrying `"The assistant controls notepad, chrome, firefox, vscode, ive,"` — a Whisper hallucination that would have been dispatched.
+
+**Mitigation applied**: `_is_dispatchable()` in `trigger.py` drops empty, whitespace-only, sub-2-character, and known-Whisper-hallucination transcripts (`"you"`, `"thank you"`, `"thanks for watching"`, `"[BLANK_AUDIO]"`, `"music"`, …) before they reach the router. Covered by `tests/test_transcript_gate.py` (23 cases).
+
+**This is a floor, not a fix.** It breaks the common cascade but a plausible-sounding mis-transcription of real ambient speech still executes. Remaining work, roughly in order of value:
+
+1. **Suppress TTS echo** — track recently-spoken text and reject transcripts that substantially match it. Cheapest real break in the loop; no AEC needed.
+2. **Gate the follow-up window on content, not loudness** — `rms > 500` inside a 3s window is far too permissive.
+3. **Require confirmation for state-changing tools** when a turn originated from barge-in or follow-up rather than an explicit wake phrase.
+4. **Acoustic echo cancellation** — the real fix, already logged as out of scope.
+
+**Not verified**: no live multi-minute ambient-audio observation was run. The gate is unit-tested only.
