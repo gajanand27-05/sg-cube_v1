@@ -46,6 +46,19 @@ export type ProviderDegradedPayload = {
   fallback: string;
 };
 
+export type SystemStatsPayload = {
+  cpu_percent: number;
+  memory_percent: number;
+  memory_used_gb: number;
+  memory_total_gb: number;
+  disk_percent: number;
+  disk_used_gb: number;
+  disk_total_gb: number;
+  net_down_bps: number;
+  net_up_bps: number;
+  temp_c: number | null;
+};
+
 export type UiEventPayloadMap = {
   ai_metrics: AIMetricsPayload;
   intent_resolved: IntentResolvedPayload;
@@ -53,6 +66,7 @@ export type UiEventPayloadMap = {
   agent_reasoning: AgentReasoningPayload;
   agent_completed: AgentCompletedPayload;
   provider_degraded: ProviderDegradedPayload;
+  system_stats: SystemStatsPayload;
 };
 
 export type UiEventType = keyof UiEventPayloadMap;
