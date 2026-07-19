@@ -15,9 +15,9 @@ import {
 type StatusTone = "success" | "warning" | "danger" | "cyan" | "muted";
 type CoreStatus = { status: string; tone: StatusTone };
 
-const OFFLINE_MS = 30_000;
 const OPERATIONAL_MS = 5_000;
 const RETRY_WINDOW_MS = 3_000;
+const GAVE_UP_WINDOW_MS = 3_000;
 const FLASH_MS = 400;
 
 export function useAICoreStatus(): CoreStatus {
@@ -25,6 +25,7 @@ export function useAICoreStatus(): CoreStatus {
   const [lastMetricsAt, setLastMetricsAt] = useState<number | null>(null);
   const [lastMetricsModel, setLastMetricsModel] = useState<string | null>(null);
   const [lastRetryAt, setLastRetryAt] = useState<number | null>(null);
+  const [lastGaveUpAt, setLastGaveUpAt] = useState<number | null>(null);
   const [degradedSinceModel, setDegradedSinceModel] = useState<string | null>(
     null,
   );
@@ -44,16 +45,17 @@ export function useAICoreStatus(): CoreStatus {
   });
 
   useUiEventListener("provider_degraded", (p) => {
-    if (p.action === "retry") setLastRetryAt(Date.now());
+    const t = Date.now();
+    if (p.action === "retry") setLastRetryAt(t);
     if (p.action === "fallback") setDegradedSinceModel(lastMetricsModel ?? "");
+    if (p.action === "gave_up") setLastGaveUpAt(t);
   });
 
   return useMemo<CoreStatus>(() => {
-    if (
-      connection === "closed" ||
-      lastMetricsAt === null ||
-      now - lastMetricsAt > OFFLINE_MS
-    ) {
+    if (connection !== "open") {
+      return { status: "Offline", tone: "danger" };
+    }
+    if (lastGaveUpAt !== null && now - lastGaveUpAt < GAVE_UP_WINDOW_MS) {
       return { status: "Offline", tone: "danger" };
     }
     if (degradedSinceModel !== null) {
@@ -62,11 +64,21 @@ export function useAICoreStatus(): CoreStatus {
     if (lastRetryAt !== null && now - lastRetryAt < RETRY_WINDOW_MS) {
       return { status: "Retrying", tone: "warning" };
     }
-    if (now - lastMetricsAt < OPERATIONAL_MS) {
+    if (lastMetricsAt !== null && now - lastMetricsAt < OPERATIONAL_MS) {
       return { status: "Operational", tone: "success" };
     }
-    return { status: "Operational", tone: "success" };
-  }, [connection, lastMetricsAt, lastRetryAt, degradedSinceModel, now]);
+    if (lastMetricsAt === null) {
+      return { status: "Standby", tone: "cyan" };
+    }
+    return { status: "Idle", tone: "cyan" };
+  }, [
+    connection,
+    lastMetricsAt,
+    lastRetryAt,
+    lastGaveUpAt,
+    degradedSinceModel,
+    now,
+  ]);
 }
 
 export function AICorePanel() {
@@ -206,7 +218,7 @@ function MetricStat({
 }) {
   return (
     <div className="leading-tight">
-      <div className="text-[9px] uppercase tracking-[0.15em] text-hud-text-muted">
+      <div className="text-[10px] uppercase tracking-[0.15em] text-hud-text-dim">
         {label}
       </div>
       <div
@@ -299,8 +311,8 @@ function AgentDot({
       />
       <span
         className={cn(
-          "text-[9px] uppercase tracking-[0.15em] font-mono",
-          active ? "text-hud-text-dim" : "text-hud-text-muted",
+          "text-[10px] uppercase tracking-[0.15em] font-mono",
+          active ? "text-hud-text" : "text-hud-text-dim",
         )}
       >
         {AGENT_SHORT[name]}
