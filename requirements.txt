@@ -86,3 +86,7 @@ chromadb==1.5.9
 
 # Test runner — 190+ tests under tests/ are unrunnable without it.
 pytest>=8.0
+# Required by the async tests (@pytest.mark.asyncio). Without it the
+# marker is unknown, async tests are never awaited, and they fail on a
+# fresh clone even though they pass wherever it happens to be installed.
+pytest-asyncio>=0.24
