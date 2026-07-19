@@ -68,3 +68,74 @@ These are reliability items that cannot be aimed correctly until the two manual 
 ## T-daily-drive-findings (opened as a placeholder)
 
 **Placeholder** for whatever actually breaks or annoys during a real day of use. This ticket exists to remind future-me that "real usage" is the thing that produces new tickets — not more spec-reading. When you come back from using it, log the actual findings here and turn each into its own ticket.
+
+## T-rule-tier-overmatch (opened 2026-07-19 — FIXED, pending review)
+
+**The bug**: two compounding defects made the rule tier intercept queries it
+shouldn't, and corrupt the ones it should.
+
+**Defect A — `normalize()` is a cache-key normalizer that was also used as
+rule-engine input.** It strips all of `string.punctuation` before the text
+reaches `rule_engine.match()`, destroying arithmetic operators and URL
+structure:
+
+| Input | After normalize | Resolved as |
+|---|---|---|
+| `calculate 2+2` | `calculate 22` | `calculate('22')` — **returned 22** |
+| `what is 15 * 3` | `what is 15 3` | `calculate('15 3')` |
+| `open github.com` | `open githubcom` | `open_app('githubcom')` |
+| `open localhost:3000` | `open localhost3000` | `open_app('localhost3000')` |
+
+Both URL rules require a literal `.` in the domain, which normalize always
+removed — **confirmed unreachable dead code** (0 matches on every URL probe).
+The calculator could never receive a valid expression. The LLM path was
+unaffected: `router.py` passes raw `text`, not the normalized form.
+
+**Defect B — greedy `.+` catch-alls reachable via the fallback scan.**
+`^(?:calculate|what\s+is|what's)\s+(?P<expr>.+)$` claimed any question
+starting with "what is". Measured interception on a 15-question sample:
+**11/15**.
+
+The prefix trie did not prevent this. `_build_trie` extracted only the
+**first** alternative of a pattern, so the calculator bucketed under
+`"calculate"` and a "what"-prefixed query missed it in the fast path — but
+`match()` then ran a **full linear scan over every rule**, giving greedy
+patterns a shot at every input anyway. The trie was a fast path, never a
+filter.
+
+`router.py` then cached the bad match, so it repeated.
+
+**Why it mattered**: rule mis-matches are worse than errors. A 502 signals
+failure; `calculate('your opinion on jazz music')` returns a confident wrong
+answer. It was masked by the OpenRouter 402 — everything reaching the LLM
+tier failed anyway, so mis-routes looked like the only path that worked.
+
+**Fix applied**:
+1. Added `normalize_for_rules()` — lowercases, collapses whitespace, strips
+   only trailing `.?!` and surrounding quotes. `normalize()` is unchanged;
+   cache entries and other callers depend on its behavior. `router.py` now
+   computes both and uses each for its own purpose.
+2. Rewrote `_build_trie`'s token extraction to expand **all** leading
+   alternatives, including nested optional groups (`what(?:'s| is)?` →
+   `{what, what's}`). Catch-all rules dropped from 7 to 4, and the remaining
+   4 are genuinely undeterminable (bare-URL, bare-arithmetic).
+3. Removed the fallback linear scan, after verifying trie-only ≡ trie+fallback
+   across a 67-input corpus (0 divergences).
+4. Constrained the greedy patterns: `what is`/`what's` now require an
+   arithmetic-looking target (`calculate X` stays permissive — the explicit
+   verb is a clear signal); `summarize` requires a URL or a file with an
+   extension; `open_app` requires a known alias or single bare token and
+   drops the `start` verb; `remind me` requires `to` or a trailing duration.
+   `play` and `search` deliberately left alone.
+
+**Regression corpus**: `tests/test_rule_tier_routing.py`, 33 cases asserting
+action AND target. Suite went 160 → 193 passing.
+
+**Known follow-up**: one pre-existing test asserted the buggy behavior
+(`_check_rule("summarize this article", "summarize_pdf")` in
+`tests/test_all_phases.py`) and was updated, with the original quoted in a
+comment.
+
+**Suspected contamination of earlier findings**: some of what
+`T-planner-context-bleed` recorded as planner misbehavior may have been
+queries that never reached the planner.

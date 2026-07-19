@@ -9,7 +9,7 @@ from backend.core.events import Priority, get_bus
 from backend.core.orchestrator import cache_layer, rule_engine
 from backend.core.orchestrator.llm_layer import Intent, LLMResolveError
 from backend.core.orchestrator.llm_layer import resolve as llm_resolve
-from backend.core.orchestrator.normalize import normalize
+from backend.core.orchestrator.normalize import normalize, normalize_for_rules
 from backend.daemon.ui_events import IntentResolved
 from backend.database.supabase_client import get_service_client
 
@@ -68,8 +68,12 @@ def _publish_resolved(intent: Intent, source_layer: str) -> None:
 
 async def process_input(text: str, user_id: str) -> RouterResult:
     t0 = time.perf_counter()
-    norm = normalize(text)
-    if not norm:
+    # Two normalizers, two jobs. The cache key drops punctuation so near-miss
+    # phrasings collapse onto one entry; the rule engine needs punctuation
+    # intact or its arithmetic and URL patterns can never match.
+    cache_key = normalize(text)
+    rule_input = normalize_for_rules(text)
+    if not cache_key:
         return RouterResult(
             intent=Intent(action="unknown", target=""),
             source_layer="rule",
@@ -77,17 +81,17 @@ async def process_input(text: str, user_id: str) -> RouterResult:
             status="error",
         )
 
-    cached = cache_layer.get_fuzzy(norm)
+    cached = cache_layer.get_fuzzy(cache_key)
     if cached is not None:
         latency = int((time.perf_counter() - t0) * 1000)
         _log_to_db(user_id, text, cached, "cache", "success", latency)
         _publish_resolved(cached, "cache")
         return RouterResult(intent=cached, source_layer="cache", latency_ms=latency)
 
-    rule_hit = rule_engine.match(norm)
+    rule_hit = rule_engine.match(rule_input)
     if rule_hit is not None:
         latency = int((time.perf_counter() - t0) * 1000)
-        cache_layer.set(norm, rule_hit)
+        cache_layer.set(cache_key, rule_hit)
         _log_to_db(user_id, text, rule_hit, "rule", "success", latency)
         _publish_resolved(rule_hit, "rule")
         return RouterResult(intent=rule_hit, source_layer="rule", latency_ms=latency)

@@ -197,7 +197,16 @@ def test_phase_d1_notes_reminders_patterns():
 def test_phase_d1_translate_summarize_patterns():
     """Translate and summarize patterns."""
     _check_rule("translate hello to spanish", "translate")
-    _check_rule("summarize this article", "summarize_pdf")  # non-http -> summarize_pdf
+    # CHANGED (T-rule-tier-overmatch): this previously asserted
+    #   _check_rule("summarize this article", "summarize_pdf")
+    # which encoded the bug. "this article" is not a document — there is no
+    # PDF to summarize — so the old rule sent a plain question to the PDF
+    # summarizer. summarize_pdf now requires an actual file/URL target, and
+    # prose falls through to the LLM.
+    from backend.core.orchestrator.rule_engine import match
+    assert match("summarize this article") is None, "prose must reach the LLM"
+    _check_rule("summarize report.pdf", "summarize_pdf")
+    _check_rule("summarize https://example.com/post", "summarize_url")
     print("  [PASS] Phase D1: translate+summarize patterns (2)")
 
 

@@ -83,3 +83,6 @@ pyperclip==1.9.0
 # ── Phase 12: Semantic Memory (ChromaDB) ──
 chromadb==1.5.9
 
+
+# Test runner — 190+ tests under tests/ are unrunnable without it.
+pytest>=8.0
