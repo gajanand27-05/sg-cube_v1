@@ -5,7 +5,7 @@ from backend.ai_modules.llm import get_provider
 from backend.core.agents.base import BaseInternalAgent
 from backend.core.events import get_bus
 from backend.core.tools.registry import schemas_prompt
-from backend.daemon.ui_events import AgentThinkingEvent, TokenStreamEvent
+from backend.daemon.ui_events import AgentReasoningEvent, AgentThinkingEvent, TokenStreamEvent
 from backend.ai_modules.llm.routing import TaskType
 from backend.core.context.types import AgentContext
 
@@ -76,6 +76,12 @@ class PlannerAgent(BaseInternalAgent):
 
             steps = [c.get("reasoning", c.get("name")) for c in calls]
             self._emit("plan_ready", tool_count=len(calls), steps=steps)
+            # One joined event, not one per step: the UI reasoning ticker is a
+            # single line, so N rapid events would just leave the last one
+            # standing and waste bus traffic.
+            reasoning = " → ".join(str(s) for s in steps if s)
+            if reasoning:
+                get_bus().publish(AgentReasoningEvent(self.name, reasoning))
             yield {"type": "final", "content": calls}
         except Exception as e:
             self._emit("error", detail=str(e))

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 import uuid
 from typing import List, Optional, Tuple, AsyncGenerator, Any
 
@@ -10,13 +11,53 @@ from backend.core.agents.operator import OperatorAgent
 from backend.core.agents.planner import PlannerAgent
 from backend.core.context.builder import context_builder
 from backend.core.context.types import RequestContext
+from backend.core.events import get_bus
 from backend.core.healing import healer as self_healer
 from backend.core.memory.episodic import summarizer as episodic_summarizer
 from backend.core.memory.timeline import timeline
+from backend.daemon.ui_events import AgentCompletedEvent
 
 log = logging.getLogger(__name__)
 
 MAX_ITER = 5
+
+
+def _plan_confidence(calls: list[dict]) -> float:
+    """Weakest-link confidence of a tool plan, on AgentCompletedEvent's 0-100 scale.
+
+    The planner declares per-call confidence on a 0.0-1.0 scale (see the
+    system prompt in planner.py), while AgentCompletedEvent.confidence is
+    0-100. Skipping this conversion renders every response as "1%" behind a
+    danger-red bar — plausible enough to survive review, which is exactly why
+    it is done in one place instead of at each call site.
+    """
+    confs = [
+        c.get("confidence")
+        for c in calls
+        if isinstance(c.get("confidence"), (int, float))
+    ]
+    if not confs:
+        return 100.0
+    return max(0.0, min(100.0, min(confs) * 100))
+
+
+def _publish_completed(
+    status: str, confidence: float, t0: float, summary: str | None
+) -> None:
+    """Announce the Commander's turn outcome. Never raises — telemetry must
+    not break the response path."""
+    try:
+        get_bus().publish(
+            AgentCompletedEvent(
+                agent_name="Commander",
+                status=status,
+                confidence=confidence,
+                latency_ms=int((time.perf_counter() - t0) * 1000),
+                summary=summary,
+            )
+        )
+    except Exception as e:
+        log.warning("AgentCompletedEvent publish failed: %s", e)
 
 
 class CommanderChunk:
@@ -65,6 +106,7 @@ class CommanderAgent:
             self._current_task = None
 
     async def _run_loop_stream(self, text: str, context: ConversationContext, user_id: str | None) -> AsyncGenerator[CommanderChunk, None]:
+        t0 = time.perf_counter()
         # 1. Build unified context via ContextBuilder
         request = RequestContext(
             user_intent=text,
@@ -99,6 +141,9 @@ class CommanderAgent:
                         yield CommanderChunk("final_response", content["final_response"])
                         context.add_assistant(content["final_response"])
                         asyncio.create_task(episodic_summarizer.summarize_and_store(text, tool_records))
+                        _publish_completed(
+                            "completed", 100.0, t0, content["final_response"]
+                        )
                         return
                     # tool_calls
                     calls = content if isinstance(content, list) else content.get("tool_calls", [content])
@@ -131,6 +176,9 @@ class CommanderAgent:
                         
                         context.add_assistant(spoken)
                         yield CommanderChunk("final_response", spoken)
+                        # Completed its turn — asking for permission is a
+                        # finished outcome, not a failure.
+                        _publish_completed("completed", 100.0, t0, spoken)
                         return
 
                     # C. Operator Stage (Execution)
@@ -164,6 +212,10 @@ class CommanderAgent:
                             context.add_assistant(spoken)
                             asyncio.create_task(episodic_summarizer.summarize_and_store(text, tool_records))
                             yield CommanderChunk("final_response", spoken)
+                            # Guardian verified the plan and Operator executed it.
+                            _publish_completed(
+                                "verified", _plan_confidence(valid_calls), t0, spoken
+                            )
                             return
 
                     # Multi-tool summary request
@@ -173,7 +225,9 @@ class CommanderAgent:
                         "content": json.dumps({"tool_results": batch_results, "instruction": "Summarize results for the user."})
                     })
 
-        yield CommanderChunk("final_response", "I tried a few steps but couldn't finish that.")
+        exhausted = "I tried a few steps but couldn't finish that."
+        yield CommanderChunk("final_response", exhausted)
+        _publish_completed("failed", 0.0, t0, exhausted)
 
 
 # Global instance

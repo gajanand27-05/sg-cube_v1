@@ -44,7 +44,11 @@ TYPE_MAP: dict[type, str] = {
     WakeHeard: "wake_heard",
     CommandTranscribed: "command_transcribed",
     IntentResolved: "intent_resolved",
-    Executed: "tool_finished",
+    # Distinct from ToolFinishedEvent below: both used to map to
+    # "tool_finished" despite carrying incompatible payloads (command/message/
+    # reason/confidence here vs tool_name/result/error there), so a consumer
+    # got randomly-shaped objects depending on which fired.
+    Executed: "executed",
     SpokenResponse: "spoken_response",
     TokenStreamEvent: "token_stream",
     ConfidenceEvent: "confidence",
