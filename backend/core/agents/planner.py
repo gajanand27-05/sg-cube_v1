@@ -81,6 +81,14 @@ class PlannerAgent(BaseInternalAgent):
                 parsed = json.loads(clean)
 
             if "final_response" in parsed:
+                # This branch returns before the tool_calls reasoning publish
+                # below, so a conversational answer used to emit no reasoning
+                # at all — and the UI ticker stayed blank for most turns.
+                # Deliberately not the answer text: the ticker is one
+                # truncated line and the answer already surfaces elsewhere.
+                get_bus().publish(AgentReasoningEvent(
+                    self.name, "Answered directly — no tools required"
+                ))
                 yield {"type": "final", "content": parsed}
                 return
 

@@ -169,34 +169,60 @@ class LLMProvider:
             raise RuntimeError(f"Backend '{primary_name}' not registered. Available: {list(self._backends)}")
         primary = self._backends[primary_name]
 
+        # Metrics are accumulated here rather than only in generate(). The
+        # Planner streams exclusively, so with the emit living only on the
+        # generate() path ai_metrics never fired for the agent at all — the
+        # UI's Model / Tok/s / Latency / Infer rows stayed empty forever and
+        # the status pill could never leave Standby.
+        self._inflight += 1
+        self._calls += 1
+        t0 = time.monotonic()
+        accumulated = ""
+        model = primary_name
+        completed = False
+
         # Try primary. Track whether we've yielded anything — once we have,
         # we can't retry safely so mid-stream failures propagate.
         yielded_any = False
         try:
-            async for chunk in primary.chat_stream(
-                messages, temperature=temperature, json_mode=json_mode, **kwargs
-            ):
-                yielded_any = True
-                yield chunk
-            return
-        except Exception as e:
-            if yielded_any:
-                # Half-drained stream — can't recover, caller has to handle.
-                raise
-            fallback = self._get_fallback_backend(primary_name)
-            if fallback is None:
-                raise
-            fb_name, fb_backend = fallback
-            _emit_fallback(primary_name, fb_name, str(e)[:200])
-            log.warning("LLM primary '%s' stream failed pre-yield (%s); falling over to '%s'",
-                        primary_name, type(e).__name__, fb_name)
+            try:
+                async for chunk in primary.chat_stream(
+                    messages, temperature=temperature, json_mode=json_mode, **kwargs
+                ):
+                    yielded_any = True
+                    accumulated += chunk.get("token") or ""
+                    yield chunk
+                completed = True
+            except Exception as e:
+                if yielded_any:
+                    # Half-drained stream — can't recover, caller has to handle.
+                    raise
+                fallback = self._get_fallback_backend(primary_name)
+                if fallback is None:
+                    raise
+                fb_name, fb_backend = fallback
+                _emit_fallback(primary_name, fb_name, str(e)[:200])
+                log.warning("LLM primary '%s' stream failed pre-yield (%s); falling over to '%s'",
+                            primary_name, type(e).__name__, fb_name)
+                model = fb_name
 
-        # Fallback path — outside the except so re-raise from fallback
-        # propagates cleanly with the original chain intact.
-        async for chunk in fb_backend.chat_stream(
-            messages, temperature=temperature, json_mode=json_mode, **kwargs
-        ):
-            yield chunk
+            if not completed:
+                # Fallback path — outside the except so re-raise from fallback
+                # propagates cleanly with the original chain intact.
+                async for chunk in fb_backend.chat_stream(
+                    messages, temperature=temperature, json_mode=json_mode, **kwargs
+                ):
+                    accumulated += chunk.get("token") or ""
+                    yield chunk
+                completed = True
+        finally:
+            self._inflight -= 1
+            # One event per completed stream, never per chunk. Skipped on
+            # failure so a dead stream doesn't report as throughput.
+            if completed:
+                self._emit_metrics(
+                    model, accumulated, (time.monotonic() - t0) * 1000
+                )
 
     def embed(self, text: str, **kwargs: Any) -> list[float]:
         # Embeddings always use the embedding backend

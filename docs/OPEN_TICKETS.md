@@ -18,6 +18,57 @@ One-line trackers for known bugs / open threads. Longer than a line means it's n
 
 **Fix direction**: cap `context.recent_conversation` to fewer turns (currently `[-5:]`) or drop turns older than a topic switch. Prompt-engineering may also help ("prior turns are for context only — do not let them override the current request").
 
+> **UPDATE 2026-07-19 — NEEDS RE-SCOPING. A much simpler bug was found underneath this one and may account for some or all of the symptoms.**
+>
+> See **T-planner-turn-stale** below. The current question was never reaching the Planner at all from turn 2 onward: Commander snapshotted history *before* adding the current turn, and the Planner dropped `user_query` whenever history was non-empty. The model was answering the previous question because the current one was literally absent from the prompt.
+>
+> Re-read both symptoms recorded here in that light:
+> - *"'what windows are open' triggered `get_stock_price` because the prior turn was about AAPL"* — consistent with the model never seeing "what windows are open" and simply continuing the AAPL turn.
+> - *"after several clarification replies accumulated in STM, V3 pattern-matched and hallucinated a rejection"* — also consistent with the model being asked nothing and continuing the visible pattern.
+>
+> **Do not act on the `[-5:]` capping or prompt-engineering fix direction until this is re-observed on the fixed code.** Both were reasoned from the assumption that the model saw the question and was distracted by history. That assumption was wrong. Re-run the original repros; if they no longer reproduce, close this ticket rather than fixing it.
+
+## T-planner-turn-stale (opened + FIXED 2026-07-19)
+
+**The bug**: the assistant answered the PREVIOUS question on every turn after the first.
+
+```
+Q: what is the capital of France        A: (empty)
+Q: what is the tallest mountain         A: Paris                          <- Q1's answer
+Q: how many legs does a spider have     A: Paris ... Mount Everest ...    <- Q1+Q2's answers
+```
+
+**Root cause, two halves — either alone reproduces it:**
+
+1. `commander.py` — `agent_context.recent_conversation = context.render()` ran *before* `context.add_user(text)`, so `history` excluded the question being asked.
+2. `planner.py` — message assembly was `if history: extend(history) else: append(user_query)`. Once history was non-empty, `user_query` was dropped **entirely**.
+
+Turn 1 worked because empty history hit the `else` branch. **That is why 200 passing tests never caught it — every one was single-shot.**
+
+**Fix**: Commander is now the single source of truth and adds the current turn *before* snapshotting, so `history` always ends with the question. The Planner appends `user_query` defensively only when it is absent from history — checking the whole history, not just the last message, because Commander's tool loop appends corrections and tool results *after* the question.
+
+**Why not the reverse** (history = prior turns only, Planner always appends): Commander's retry loop mutates `history` in place with assistant/correction pairs. A question appended after those would land out of order.
+
+**Regression cover**: `tests/test_multi_turn_context.py`. The load-bearing assertion lives *inside the mock* — it verifies the messages the Planner actually sends end with the current question. A mock returning a canned string would pass even with the bug present. Verified by re-introducing the bug: 3 of 4 tests fail with `expected last user message 'what is the tallest mountain in the world', got 'what is the capital of France'`.
+
+**Found by**: the AI Core telemetry panel. The em-dashes were not a panel failure — they were the panel correctly reporting that nothing was being published, which prompted the first real end-to-end multi-turn probe of the session.
+
+## T-ai-metrics-stream-path (opened + FIXED 2026-07-19)
+
+**The bug**: `ai_metrics` never fired for the agent. `_emit_metrics` was called only from `provider.py` inside `generate()`; `chat_stream()` had zero calls — and the Planner streams exclusively. Consequence: AI Core's Model / Tok/s / Latency / Infer rows and BottomBar's LATENCY were permanently em-dash, and the status pill could never leave "Standby".
+
+Same class as the phantom-publisher finding, one layer deeper: the publisher existed but sat on a code path nobody called.
+
+**Fix**: `chat_stream()` now accumulates streamed tokens and emits once on completion (never per chunk), including on the fallback path with the fallback backend's name. Skipped on failure so a dead stream isn't reported as throughput.
+
+**Known cosmetic gap**: `active_model` reports the *backend* name (`ollama_cloud`), not the model (`gpt-oss:120b`). Pre-existing — `generate()` does the same. The UI's MODEL row will show `ollama_cloud`.
+
+## T-agent-reasoning-conversational (opened + FIXED 2026-07-19)
+
+**The bug**: `AgentReasoningEvent` was published only in the `tool_calls` branch of `planner.py`. The `final_response` branch returns before reaching it, so conversational answers — most turns — emitted no reasoning and the UI ticker stayed blank.
+
+**Fix**: publish a short honest line on the `final_response` branch too. Deliberately not the answer text: the ticker is one truncated line and the answer already surfaces elsewhere.
+
 ## T-planner-canvas-chain (opened 2026-07-09, re-classified 2026-07-10)
 
 **The bug**: On canvas requests, the user asks to render a widget and gets a spoken text answer instead.
