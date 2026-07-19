@@ -117,12 +117,22 @@ class CommanderAgent:
         )
         agent_context = await context_builder.collect(request)
 
-        # Update agent context with conversation history
-        agent_context.recent_conversation = context.render()
-
         # 2. Setup Request
         request_id = agent_context.request_id
+
+        # ORDER IS LOAD-BEARING: the current turn must be added BEFORE the
+        # snapshot. This used to snapshot first, so `history` excluded the
+        # question being asked — and because the Planner only appended
+        # user_query when history was empty, every turn after the first
+        # answered the PREVIOUS question. Turn 1 worked, which is why
+        # single-shot tests never caught it.
+        #
+        # history must also *contain* the current turn rather than have the
+        # Planner append it, because the loop below appends corrections and
+        # tool results to `history`; a question appended after those would
+        # land out of order.
         context.add_user(text)
+        agent_context.recent_conversation = context.render()
         history = agent_context.recent_conversation
         
         # Record user query in timeline

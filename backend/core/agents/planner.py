@@ -30,9 +30,23 @@ class PlannerAgent(BaseInternalAgent):
 
         prompt = self._build_prompt(context)
         messages = [{"role": "system", "content": prompt}]
-        if history:
-            messages.extend(history)
-        else:
+        messages.extend(history or [])
+
+        # The model must always see what it is being asked. This used to be an
+        # `else` on `if history:` — so once history was non-empty, user_query
+        # was dropped entirely and the Planner answered whatever was in the
+        # history instead of the current question.
+        #
+        # Commander is the source of truth: it puts the current turn into
+        # history before calling us. This append is the defensive path for any
+        # caller that doesn't. Checking the whole history, not just the last
+        # message, matters because Commander's tool loop appends corrections
+        # and tool results after the question.
+        already_present = any(
+            m.get("role") == "user" and m.get("content") == user_query
+            for m in (history or [])
+        )
+        if not already_present:
             messages.append({"role": "user", "content": user_query})
 
         full_content = ""
