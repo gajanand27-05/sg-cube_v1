@@ -22,6 +22,20 @@ class TaskType(str, Enum):
     GENERAL = "general"                                 # fallback
 
 
+def _cloud_or(fallback: str) -> str:
+    """Reasoning-class tasks go to Ollama Cloud when a key is configured.
+
+    Gemini stays ahead of the local fallback only if its key is set; with no
+    cloud key at all the whole chain degrades to local Ollama rather than
+    failing, so the assistant still answers on a laptop GPU.
+    """
+    if settings.ollama_api_key:
+        return "ollama_cloud"
+    if settings.gemini_api_key:
+        return "gemini"
+    return fallback
+
+
 class RoutingPolicy:
     """Maps TaskType -> backend name. Configurable via settings."""
     
@@ -34,11 +48,11 @@ class RoutingPolicy:
             TaskType.INTENT_CLASSIFICATION: "ollama",
             TaskType.VERIFICATION: "ollama",
             TaskType.EMBEDDING: "embedding",
-            TaskType.PLANNING: "gemini" if settings.gemini_api_key else "openrouter",
-            TaskType.CODING: "gemini" if settings.gemini_api_key else "openrouter",
+            TaskType.PLANNING: _cloud_or("ollama"),
+            TaskType.CODING: _cloud_or("ollama"),
             TaskType.SUMMARIZATION: "ollama",
-            TaskType.CHAT: "openrouter" if settings.openrouter_api_key else "gemini" if settings.gemini_api_key else "ollama",
-            TaskType.GENERAL: "openrouter" if settings.openrouter_api_key else "gemini" if settings.gemini_api_key else "ollama",
+            TaskType.CHAT: _cloud_or("ollama"),
+            TaskType.GENERAL: _cloud_or("ollama"),
         }
 
     def select(self, task: TaskType) -> str:

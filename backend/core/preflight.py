@@ -162,26 +162,26 @@ def check_llm_providers() -> list[PreflightCheck]:
         checks.append(PreflightCheck("llm:gemini", PreflightStatus.DISABLED,
                                      "GEMINI_API_KEY not set"))
 
-    # OpenRouter (or any OpenAI-compatible endpoint pointed at by openrouter_base_url)
-    if settings.openrouter_api_key:
+    # Ollama Cloud — hosted reasoning models (planner, coding, chat)
+    if settings.ollama_api_key:
         try:
             from backend.ai_modules.llm import get_provider
             p = get_provider()
-            if "openrouter" in p._backends:
-                checks.append(PreflightCheck("llm:openrouter", PreflightStatus.OK,
+            if "ollama_cloud" in p._backends:
+                checks.append(PreflightCheck("llm:ollama_cloud", PreflightStatus.OK,
                                              "registered", detail={
-                                                 "model": settings.openrouter_model,
-                                                 "base_url": settings.openrouter_base_url,
+                                                 "model": settings.ollama_cloud_model,
+                                                 "base_url": settings.ollama_cloud_url,
                                              }))
             else:
-                checks.append(PreflightCheck("llm:openrouter", PreflightStatus.DOWN,
+                checks.append(PreflightCheck("llm:ollama_cloud", PreflightStatus.DOWN,
                                              "key set but backend not registered"))
         except Exception as e:
-            checks.append(PreflightCheck("llm:openrouter", PreflightStatus.DOWN,
+            checks.append(PreflightCheck("llm:ollama_cloud", PreflightStatus.DOWN,
                                          f"provider init failed: {e}"))
     else:
-        checks.append(PreflightCheck("llm:openrouter", PreflightStatus.DISABLED,
-                                     "OPENROUTER_API_KEY not set"))
+        checks.append(PreflightCheck("llm:ollama_cloud", PreflightStatus.DISABLED,
+                                     "OLLAMA_API_KEY not set"))
 
     # Fallback backend check — if configured, it must be registered.
     fb = (settings.llm_fallback_backend or "").strip()

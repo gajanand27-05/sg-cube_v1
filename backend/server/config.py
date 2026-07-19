@@ -27,12 +27,12 @@ class Settings(BaseSettings):
     fast_model: str = "phi3"                    # classification, verification, intent
     embedding_model: str = "nomic-embed-text"   # vector embeddings
     
-    # Reasoning / coding models
-    reasoning_model: str = "gemini-2.5-flash"   # planner, complex logic
-    coding_model: str = "gemini-2.5-flash"      # code generation
-    
+    # Reasoning / coding models (served by Ollama Cloud — see below)
+    reasoning_model: str = "gpt-oss:120b"  # planner, complex logic
+    coding_model: str = "gpt-oss:120b"     # code generation
+
     # General conversation
-    chat_model: str = "deepseek/deepseek-chat"  # openrouter (aspirational — not currently read)
+    chat_model: str = "gpt-oss:120b"       # aspirational — not currently read
 
     # Vision
     vision_model: str = "qwen2.5vl:3b"          # local VLM
@@ -41,14 +41,32 @@ class Settings(BaseSettings):
     whisper_model: str = "small"                # faster-whisper
     piper_voice: str = "en_US-ryan-high"        # Piper TTS voice
 
-    # ── OpenRouter (primary cloud LLM — DeepSeek V3 default) ──
-    # DeepSeek V3 wins for this project: strong JSON, tool-use, chat quality,
-    # cheapest of the frontier-tier open-source models. Kimi K2 and Qwen 3
-    # are the runner-ups kept in reserve — swap OPENROUTER_MODEL in .env
-    # to try them.
-    openrouter_api_key: str = ""
-    openrouter_model: str = "deepseek/deepseek-chat"
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # ── Ollama Cloud (primary cloud LLM — gpt-oss:120b default) ──
+    # Same /api/chat wire format as local Ollama, just a different host plus
+    # a bearer token, so the local client serves both.
+    #
+    # NOTE: /api/tags is a PUBLIC endpoint and lists the whole catalog
+    # regardless of entitlement. Most heavy models (deepseek-v4-flash/pro,
+    # qwen3.5, glm-5.1, kimi-k2.5) return 403 "this model requires a
+    # subscription" on the Free tier — do not pick a model from the catalog
+    # without POSTing to /api/chat to confirm access.
+    #
+    # Measured on Free (time-to-first-token, JSON tool_call prompt):
+    #   gemma4:31b           0.80s   <- fastest
+    #   gpt-oss:120b         1.62s   <- chosen: largest available, still fast
+    #   gpt-oss:20b          2.17s   <- lightest quota burn
+    #   nemotron-3-nano:30b  2.78s
+    #   minimax-m2.5         9.29s
+    #
+    # NOTE: the cloud catalog has no embedding models, so embeddings stay on
+    # local Ollama (see ollama_url / embedding_model above). Vision stays
+    # local too — cloud vision would burn quota per frame.
+    #
+    # Free tier meters GPU-time, not tokens, on a 5-hour session window.
+    # Heavier models drain it faster.
+    ollama_api_key: str = ""
+    ollama_cloud_url: str = "https://ollama.com"
+    ollama_cloud_model: str = "gpt-oss:120b"
 
     # ── Gemini (Google AI SDK) ──
     gemini_api_key: str = ""
@@ -106,10 +124,10 @@ class Settings(BaseSettings):
     # headers) capped at `llm_max_retries`; on persistent failure fall
     # over to `llm_fallback_backend` if configured (empty = no fallback,
     # the caller gets a structured error). See backend/ai_modules/llm/
-    # provider.py + backends/gemini_backend.py + openrouter_client.py.
+    # provider.py + backends/gemini_backend.py + ollama_client.py.
     llm_max_retries: int = 3
     llm_backoff_base_s: float = 2.0  # used only when server doesn't send Retry-After
-    llm_fallback_backend: str = ""  # e.g. "openrouter" — falls over from gemini on 429
+    llm_fallback_backend: str = ""  # e.g. "ollama" — falls over to local on cloud failure
 
     # ── Phase 5A: tool execution timeouts (per-tier) ──
     # Every tool call is wrapped in asyncio.wait_for. Tier is derived from

@@ -1,7 +1,7 @@
 """Canvas-chain probe — classify T-planner-canvas-chain.
 
 The question: when the user says "Show me AAPL and the news", does the live
-Planner (DeepSeek V3 base via OpenRouter) emit multiple tool_calls in one
+Planner (deepseek-v4-flash via Ollama Cloud) emit multiple tool_calls in one
 response, or does it emit only one?
 
 Why it matters (from reading Commander at commander.py:157):

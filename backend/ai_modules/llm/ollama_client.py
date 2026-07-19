@@ -1,6 +1,13 @@
 """Ollama HTTP client — async generate, chat_stream, embed.
 
 Used by: verifier, episodic summarizer, intent classifier, embeddings.
+
+Serves both local Ollama and Ollama Cloud: same /api/chat wire format, so
+the only differences are the host and a bearer token. Pass base_url/api_key
+to target the cloud; omit them for local.
+
+embed()/aembed() are deliberately local-only — the Ollama Cloud catalog has
+no embedding models, so pointing them at the cloud would break ChromaDB.
 """
 import json
 import logging
@@ -20,6 +27,16 @@ class OllamaError(RuntimeError):
 BASE_URL = settings.ollama_url.rstrip("/")
 
 
+def _endpoint(base_url: str | None) -> str:
+    """Resolve the host to call — explicit arg wins, else local Ollama."""
+    return (base_url or settings.ollama_url).rstrip("/")
+
+
+def _headers(api_key: str | None) -> dict[str, str]:
+    """Ollama Cloud authenticates with a bearer token; local needs nothing."""
+    return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+
 async def generate(
     prompt: str,
     *,
@@ -29,6 +46,8 @@ async def generate(
     json_mode: bool = False,
     timeout: float = 30.0,
     images: list[str] | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
     **kwargs: Any,
 ) -> str:
     """Non-streaming generation. Supports images for VLM."""
@@ -56,7 +75,9 @@ async def generate(
         payload["format"] = "json"
 
     async with httpx.AsyncClient(timeout=timeout) as client:
-        r = await client.post(f"{BASE_URL}/api/chat", json=payload)
+        r = await client.post(
+            f"{_endpoint(base_url)}/api/chat", json=payload, headers=_headers(api_key)
+        )
         r.raise_for_status()
         return r.json()["message"]["content"]
 
@@ -68,6 +89,8 @@ async def chat_stream(
     temperature: float = 0.2,
     json_mode: bool = False,
     timeout: float = 60.0,
+    base_url: str | None = None,
+    api_key: str | None = None,
     **kwargs: Any,
 ) -> AsyncGenerator[dict, None]:
     """Streaming chat — yields {'token': str, 'done': bool}."""
@@ -82,7 +105,10 @@ async def chat_stream(
         payload["format"] = "json"
 
     async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream("POST", f"{BASE_URL}/api/chat", json=payload) as resp:
+        async with client.stream(
+            "POST", f"{_endpoint(base_url)}/api/chat", json=payload,
+            headers=_headers(api_key),
+        ) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if not line.strip():

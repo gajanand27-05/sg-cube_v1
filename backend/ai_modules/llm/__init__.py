@@ -5,7 +5,7 @@ from backend.ai_modules.llm.provider import LLMProvider, get_llm, init_llm_provi
 from backend.ai_modules.llm.routing import RoutingPolicy, TaskType, build_default_policy
 from backend.ai_modules.llm.backends import (
     OllamaBackend,
-    OpenRouterBackend,
+    OllamaCloudBackend,
     GeminiBackend,
     MockBackend,
 )
@@ -27,13 +27,13 @@ def create_llm_provider(test_mode: bool = False) -> LLMProvider:
     except Exception as e:
         log.warning(f"Ollama backend unavailable: {e}")
 
-    # Register OpenRouter if API key present
-    if settings.openrouter_api_key:
+    # Register Ollama Cloud if API key present
+    if settings.ollama_api_key:
         try:
-            provider.register("openrouter", OpenRouterBackend())
-            log.info("Registered OpenRouter backend")
+            provider.register("ollama_cloud", OllamaCloudBackend())
+            log.info("Registered Ollama Cloud backend (%s)", settings.ollama_cloud_model)
         except Exception as e:
-            log.warning(f"OpenRouter backend unavailable: {e}")
+            log.warning(f"Ollama Cloud backend unavailable: {e}")
 
     # Register Gemini if API key present
     if settings.gemini_api_key:
@@ -46,7 +46,7 @@ def create_llm_provider(test_mode: bool = False) -> LLMProvider:
     # Test mode: register mock backend as fallback
     if test_mode:
         mock = MockBackend()
-        for name in ["ollama", "openrouter", "gemini", "embedding"]:
+        for name in ["ollama", "ollama_cloud", "gemini", "embedding"]:
             if name not in provider._backends:
                 provider.register(name, mock)
         log.info("Test mode: registered MockBackend as fallback")

@@ -7,7 +7,7 @@ Two axes:
   * LLMProvider falls over to `settings.llm_fallback_backend` if the
     primary backend fails and (for chat_stream) hasn't yielded yet.
 
-We mock the backends because the real Gemini/OpenRouter clients need
+We mock the backends because the real Gemini/Ollama Cloud clients need
 network + keys. Focus is the wrapper logic, not the SDKs.
 """
 import asyncio
