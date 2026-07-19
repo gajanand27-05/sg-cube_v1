@@ -268,3 +268,36 @@ Each completed command also opens a 3s window where loudness alone re-triggers. 
 4. **Acoustic echo cancellation** — the real fix, already logged as out of scope.
 
 **Not verified**: no live multi-minute ambient-audio observation was run. The gate is unit-tested only.
+
+## T-panel-listener-state-lost-on-remount (opened 2026-07-19)
+
+**Observed**: after a live query, the AI Core panel showed MODEL / TOK/S / LATENCY / INFER / REASONING populated, but CONFIDENCE, LAST RESPONSE and the tier counters blank — all from the same turn.
+
+**Mechanism**: an asymmetry between the two subscription hooks in `useUiEvents.ts`.
+
+| Hook | Seeds from `latest` on mount | Survives remount |
+|---|---|---|
+| `useUiEvent` (:196-203) | yes | yes |
+| `useUiEventListener` (:208-217) | no | **no** |
+| `useUiEventCounter` (:222-229) | no | no |
+
+Listener-backed values live in component `useState`, so they are gone permanently on remount while `useUiEvent` rows recover from the module-level cache.
+
+**Trigger is a remount, NOT a stale page.** `latest` is a module-level Map, so a full page refresh clears it too — MODEL/TOK/S would also be blank in that case. They were populated, so the events did arrive while mounted. The realistic causes are StrictMode double-mount, or HMR updating `AICorePanel.tsx` while leaving `useUiEvents.ts` (and therefore `latest`) intact — likely, since the frontend was being edited all session.
+
+**Isolating test** — one step, and it distinguishes this from "events aren't arriving":
+1. Ask a question, confirm CONFIDENCE fills with a bar.
+2. Touch any frontend file to trigger HMR.
+3. CONFIDENCE goes blank while MODEL / TOK/S survive.
+
+Note the naive test (ask another question with the panel open) passes and confirms the wrong thing — it proves events flow, not that state survives a remount.
+
+**Do NOT fix by seeding `useUiEventListener` from `latest`.** `useUiEventCounter` shares the same `subscribe()` (:227) and increments on each callback, so replaying the last cached event on mount would inflate the tier counters on every hot reload.
+
+**Fix direction**:
+- CONFIDENCE -> `useUiEvent("agent_completed")?.confidence`. Already cache-seeded, no new machinery.
+- LAST RESPONSE -> needs an arrival time. The envelope carries `timestamp` (stamped server-side at `ws_ui.py:105`, typed in `uiEvents.ts`) but `useUiEvent` discards it at :203 (`setPayload(env.payload)`). Either add a `useUiEventEnvelope` variant or let `useUiEvent` optionally return the envelope.
+
+**Also correct a comment while in there**: the tier counters are documented as "session-only ... a runtime diagnostic". They are actually *since-last-mount* and reset on every HMR update. The behaviour is fine; the comment overclaims.
+
+**Found by**: the panel diagnosing itself.
