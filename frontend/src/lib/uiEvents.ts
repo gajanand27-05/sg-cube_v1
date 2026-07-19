@@ -70,19 +70,3 @@ export type UiEventPayloadMap = {
 };
 
 export type UiEventType = keyof UiEventPayloadMap;
-
-export const AGENT_ORDER: AgentName[] = [
-  "commander",
-  "planner",
-  "guardian",
-  "operator",
-  "watcher",
-];
-
-export const AGENT_SHORT: Record<AgentName, string> = {
-  commander: "CMD",
-  planner: "PLN",
-  guardian: "GRD",
-  operator: "OPR",
-  watcher: "WCH",
-};
