@@ -91,6 +91,49 @@ def test_rule_tier_routing(raw, expected_action, expected_target):
         )
 
 
+# Every "what-form" rule, in both apostrophe spellings.
+#
+# This is the gap that let a regression through: the original corpus had 33
+# cases and every one used a single spelling, so it never noticed that the
+# rules disagreed about apostrophes. normalize() used to hide the
+# disagreement by stripping them so everything became "whats"; once
+# normalize_for_rules() started preserving them, five rules began accepting
+# only "what's" while the time rule accepted only "whats".
+#
+# Assert PAIRS, not spellings. A user says one or the other and does not
+# care which.
+APOSTROPHE_PAIRS: list[tuple[str, str, str]] = [
+    ("what's the time", "whats the time", "get_time"),
+    ("what's the weather", "whats the weather", "get_weather"),
+    ("what's the forecast", "whats the forecast", "get_weather_forecast"),
+    ("what's the news", "whats the news", "get_news"),
+    ("what's my battery", "whats my battery", "get_battery"),
+    ("what's 2+2", "whats 2+2", "calculate"),
+]
+
+
+@pytest.mark.parametrize("with_apos,without_apos,expected", APOSTROPHE_PAIRS)
+def test_apostrophe_spellings_agree(with_apos, without_apos, expected):
+    a = match(normalize_for_rules(with_apos))
+    b = match(normalize_for_rules(without_apos))
+
+    assert a is not None, f"{with_apos!r} matched nothing"
+    assert b is not None, f"{without_apos!r} matched nothing"
+    assert a.action == expected, f"{with_apos!r}: got {a.action}"
+    assert b.action == expected, f"{without_apos!r}: got {b.action}"
+    assert a.action == b.action, (
+        f"apostrophe changed the outcome: {with_apos!r} -> {a.action}, "
+        f"{without_apos!r} -> {b.action}"
+    )
+
+
+def test_apostrophe_does_not_widen_the_rule_tier():
+    """The apostrophe fix must not let prose back in."""
+    assert match(normalize_for_rules("what's your opinion on jazz")) is None
+    assert match(normalize_for_rules("whats the capital of France")) is None
+    assert match(normalize_for_rules("what's machine learning")) is None
+
+
 def test_normalize_for_rules_preserves_matchable_characters():
     """The whole point of the second normalizer: operators and dots survive."""
     assert normalize_for_rules("Calculate 2+2.") == "calculate 2+2"

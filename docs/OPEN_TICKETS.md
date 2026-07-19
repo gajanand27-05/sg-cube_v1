@@ -139,3 +139,42 @@ comment.
 **Suspected contamination of earlier findings**: some of what
 `T-planner-context-bleed` recorded as planner misbehavior may have been
 queries that never reached the planner.
+
+### T-rule-tier-overmatch — follow-up: apostrophe regression (2026-07-19)
+
+The fix above inverted which apostrophe spelling worked, because the rules
+had always disagreed and `normalize()` was hiding it by stripping
+apostrophes so every form collapsed to `whats`.
+
+- Five rules used `what(?:'s| is)?` — accept `what's` / `what is`, reject
+  `whats`: weather, forecast, news, battery, calculator.
+- One rule used a bare `whats` — accepts `whats`, rejects `what's`: time.
+
+Pre-fix everything normalized to `whats`, so the time rule worked and the
+other five did not. Post-fix apostrophes survive, so the five worked and
+**`what's the time` broke** — plausibly the single most-used voice command
+on this HUD.
+
+`_token_variants` handled this at the trie-bucketing layer, making a pattern
+*findable* under both spellings, but the regex itself still matched only one
+— and with the fallback scan removed there was no second chance. Right
+instinct, wrong layer.
+
+**Fix**: made the apostrophe optional in the regex at all six sites
+(`what(?:'?s| is)?`, `what'?s\s+the\s+time`). Also taught `_expand_states`
+that a `?` after a single character makes that character optional, so
+`what'?s` buckets under both `what's` and `whats` instead of silently
+degrading to a catch-all.
+
+**Consequence**: `_token_variants` is now fully redundant — the trie is
+byte-identical without it and it contributes zero unique buckets. Left in
+place pending a decision rather than deleted.
+
+**Why the corpus missed it**: all 33 original cases used exactly one
+spelling each, so the disagreement was invisible. Added `APOSTROPHE_PAIRS`,
+which asserts *pairs* rather than spellings. Suite 193 -> 200.
+
+**Also found**: `.venv/Scripts/python.exe -m pytest` reports "No module
+named pytest" — the project's own venv cannot run the project's own tests,
+so anyone following the README's `.venv\Scripts\activate` -> `pytest` path
+hits a wall. pytest exists only in the system interpreter.

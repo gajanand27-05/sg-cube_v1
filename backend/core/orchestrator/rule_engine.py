@@ -428,8 +428,14 @@ def _expand_states(src: str) -> set[_State] | None:
         ch = src[i]
 
         if ch.isalnum() or ch in "'_":
-            out = {_concat(s, (ch, False)) for s in out}
-            i += 1
+            # A trailing '?' makes just this character optional, as in
+            # what'?s — which must bucket under both "whats" and "what's".
+            if i + 1 < len(src) and src[i + 1] == "?":
+                out = {_concat(s, (ch, False)) for s in out} | out
+                i += 2
+            else:
+                out = {_concat(s, (ch, False)) for s in out}
+                i += 1
             continue
 
         if ch == "(":
@@ -496,6 +502,16 @@ def _token_variants(tok: str) -> set[str]:
     normalize_for_rules keeps apostrophes but normalize strips them, and rules
     are matched against user speech either way, so "what's" must be findable
     as both "what's" and "whats".
+
+    Currently REDUNDANT: now that the rules spell the apostrophe as optional
+    (what'?s) and _expand_states understands a '?' after a single character,
+    _leading_tokens already emits both spellings — the trie is byte-identical
+    without this function. Kept as a safety net for any future rule that
+    hard-codes an apostrophe, pending a decision on removing it.
+
+    Note it only ever fixed *bucketing*, never matching: a pattern that
+    hard-codes "what's" stays unmatchable by "whats" no matter which bucket
+    it sits in. That gap is what the apostrophe regression was.
     """
     variants = {tok}
     if "'" in tok:
@@ -566,11 +582,11 @@ RULES: list[RuleEntry] = [
     (re.compile(r"^(?:turn\s+down|decrease)\s+(?:the\s+)?brightness$"), _brightness_down),
 
     # ── Weather ──
-    (re.compile(r"^(?:what(?:'s| is)?\s+(?:the\s+)?weather(?:\s+(?:in|for|at)\s+(?P<location>.+?))?|weather\s+(?:in|for|at)\s+(?P<location2>.+?))$"), _get_weather),
-    (re.compile(r"^(?:what(?:'s| is)?\s+(?:the\s+)?forecast(?:\s+(?:in|for|at)\s+(?P<location>.+?))?|forecast\s+(?:in|for|at)\s+(?P<location2>.+?))$"), _get_weather_forecast),
+    (re.compile(r"^(?:what(?:'?s| is)?\s+(?:the\s+)?weather(?:\s+(?:in|for|at)\s+(?P<location>.+?))?|weather\s+(?:in|for|at)\s+(?P<location2>.+?))$"), _get_weather),
+    (re.compile(r"^(?:what(?:'?s| is)?\s+(?:the\s+)?forecast(?:\s+(?:in|for|at)\s+(?P<location>.+?))?|forecast\s+(?:in|for|at)\s+(?P<location2>.+?))$"), _get_weather_forecast),
 
     # ── News ──
-    (re.compile(r"^(?:what(?:'s| is)?\s+(?:the\s+)?(?:news|headlines)(?:\s+(?:about|on|for)\s+(?P<topic>.+?))?|(?:get|show)\s+(?:me\s+)?(?:the\s+)?(?:news|headlines)(?:\s+(?:about|on|for)\s+(?P<topic2>.+?))?|(?:news|headlines)\s+(?:about|on|for)\s+(?P<topic3>.+?))$"), _get_news),
+    (re.compile(r"^(?:what(?:'?s| is)?\s+(?:the\s+)?(?:news|headlines)(?:\s+(?:about|on|for)\s+(?P<topic>.+?))?|(?:get|show)\s+(?:me\s+)?(?:the\s+)?(?:news|headlines)(?:\s+(?:about|on|for)\s+(?P<topic2>.+?))?|(?:news|headlines)\s+(?:about|on|for)\s+(?P<topic3>.+?))$"), _get_news),
 
     # ── System power ──
     (re.compile(r"^(?:shutdown|shut\s+down|power\s+off|turn\s+off)\s*(?:the\s+)?(?:computer|pc)?$"), _shutdown),
@@ -580,7 +596,7 @@ RULES: list[RuleEntry] = [
     (re.compile(r"^(?:sign\s+out|log\s+out)\s*(?:of\s+)?(?:computer|pc)?$"), _lock),
 
     # ── Battery / System info ──
-    (re.compile(r"^(?:what(?:'s| is)?\s+my\s+battery(?:\s+(?:level|status|percentage))?|battery\s+(?:level|status|percentage|life)|how\s+much\s+battery\s+(?:do\s+i\s+have|is\s+left)|check\s+battery)$"), _get_battery),
+    (re.compile(r"^(?:what(?:'?s| is)?\s+my\s+battery(?:\s+(?:level|status|percentage))?|battery\s+(?:level|status|percentage|life)|how\s+much\s+battery\s+(?:do\s+i\s+have|is\s+left)|check\s+battery)$"), _get_battery),
     (re.compile(r"^(?:system\s+status|system\s+info|pc\s+status|computer\s+status)$"), _get_system_status),
 
     # ── Screenshot ──
@@ -624,7 +640,7 @@ RULES: list[RuleEntry] = [
     # operation.
     (re.compile(r"^calculate\s+(?P<expr>.+)$"), _calculate),
     (re.compile(
-        r"^what(?:'s|\s+is)\s+"
+        r"^what(?:'?s|\s+is)\s+"
         r"(?P<expr>"
         r"[\d(].*[\d)%]"            # starts and ends numeric/paren
         r"|\d+(?:\.\d+)?\s*(?:plus|minus|times|divided\s+by|mod(?:ulo)?)\s+.*"
@@ -640,7 +656,7 @@ RULES: list[RuleEntry] = [
     (re.compile(r"^find\s+(?:the\s+)?(?:file|folder)\s+(?P<name>.+)$"), _find_file),
 
     # ── Time ──
-    (re.compile(r"^(?:what(?:\s+is)?\s+the\s+time|what\s+time\s+is\s+it|current\s+time|tell\s+me\s+the\s+time|whats\s+the\s+time|time\s+now|what\s+time\s+do\s+we\s+have)$"), _get_time),
+    (re.compile(r"^(?:what(?:\s+is)?\s+the\s+time|what\s+time\s+is\s+it|current\s+time|tell\s+me\s+the\s+time|what'?s\s+the\s+time|time\s+now|what\s+time\s+do\s+we\s+have)$"), _get_time),
 ]
 
 TRIE = _build_trie(RULES)
