@@ -20,9 +20,39 @@ VOICE_DIR = Path(__file__).parent / "piper_voices"
 VOICE_NAME = "en_US-ryan-high"
 
 _voice: PiperVoice | None = None
-_playback_task: asyncio.Task | None = None
-_audio_queue: asyncio.Queue | None = None
-_stop_event: asyncio.Event | None = None
+
+
+# ── Playback session ownership (T-tts-loop-globals) ────────────────────
+#
+# The queue, stop flag and player task used to be three module-level globals,
+# nulled in speak_stream's `finally`. handle_wake() runs asyncio.run() per
+# capture — a fresh event loop each time — so a second turn adopted the first
+# turn's queue while the first turn's finally pulled the globals out from under
+# it: "got Future <_audio_player()> attached to a different loop", then
+# "'NoneType' object has no attribute 'put'".
+#
+# Overlap is reachable without barge-in: an HTTP /voice/say runs speak() on the
+# server loop, and the proactive handler spawns its own thread with its own
+# asyncio.run, either of which can land mid-turn.
+#
+# So playback state is per-call and the module only remembers which session is
+# current, for stop_speech()/is_speaking() to act on.
+
+
+@dataclass
+class _PlaybackSession:
+    """Everything one speak_stream() call owns."""
+
+    queue: asyncio.Queue
+    # threading.Event, not asyncio.Event: stop_speech() is called from the
+    # wake-word listener thread on barge-in, and asyncio.Event.set() is not
+    # thread-safe — it would mutate state belonging to another loop.
+    stop: threading.Event
+    player: asyncio.Task | None = None
+
+
+_current_session: _PlaybackSession | None = None
+_session_lock = threading.Lock()
 
 
 # ── Echo suppression (T-wake-word-executes-ambient-audio, item 1) ──────
@@ -228,54 +258,99 @@ def generate_audio(text: str) -> Tuple[bytes, int]:
     return audio.tobytes(), rate
 
 
-async def _audio_player() -> None:
-    """Background task that plays audio chunks from queue."""
-    global _audio_queue, _stop_event
-    
-    if _audio_queue is None or _stop_event is None:
-        return
-    
+async def _get_or_stop(session: _PlaybackSession, timeout: float = 0.5):
+    """Await the next chunk, re-checking `stop` while waiting.
+
+    Returns the chunk, or `_STOPPED` if the session was interrupted. Never
+    blocks indefinitely: a stopped session must not leave the player parked on
+    a queue nobody will feed.
+    """
+    while not session.stop.is_set():
+        try:
+            return await asyncio.wait_for(session.queue.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            continue
+    return _STOPPED
+
+
+_STOPPED = object()
+
+
+async def _audio_player(session: _PlaybackSession) -> None:
+    """Play chunks from `session`'s queue until end-of-stream or stop."""
     stream = None
     try:
-        # Get first chunk to determine sample rate
-        first_chunk = await _audio_queue.get()
-        if first_chunk is None:
+        # First chunk determines the sample rate.
+        first_chunk = await _get_or_stop(session)
+        if first_chunk is None or first_chunk is _STOPPED:
             return
-        
+
         rate = first_chunk.get("rate", 22050)
         audio_data = first_chunk.get("audio", np.array([], dtype=np.int16))
-        
+
         if audio_data.size > 0:
             stream = sd.OutputStream(samplerate=rate, channels=1, dtype="int16")
             stream.start()
             stream.write(audio_data)
-        
-        # Play remaining chunks
-        while not _stop_event.is_set():
-            try:
-                chunk = await asyncio.wait_for(_audio_queue.get(), timeout=0.5)
-            except asyncio.TimeoutError:
-                continue
-            
-            if chunk is None:  # End signal
+
+        while True:
+            chunk = await _get_or_stop(session)
+            if chunk is None or chunk is _STOPPED:
                 break
-            
+
             audio_data = chunk.get("audio", np.array([], dtype=np.int16))
             if audio_data.size > 0 and stream:
                 stream.write(audio_data)
-    
+
     except Exception as e:
         print(f"[TTS] Audio player error: {e}")
     finally:
         if stream:
             stream.stop()
             stream.close()
-        # Drain queue
-        while not _audio_queue.empty():
+        while not session.queue.empty():
             try:
-                _audio_queue.get_nowait()
+                session.queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
+
+
+def _activate(session: _PlaybackSession) -> None:
+    """Make `session` current, stopping whatever was playing.
+
+    Newest speech wins. Deliberately does not wait for the previous session to
+    finish: barge-in has to interrupt immediately, and serializing turns behind
+    in-flight playback would trade a crash for a worse feel.
+    """
+    global _current_session
+    with _session_lock:
+        previous = _current_session
+        _current_session = session
+    if previous is not None and previous is not session:
+        previous.stop.set()
+
+
+def _deactivate(session: _PlaybackSession) -> None:
+    """Clear `session` if it is still current — never a newer one's state."""
+    global _current_session
+    with _session_lock:
+        if _current_session is session:
+            _current_session = None
+
+
+async def _put_or_stop(session: _PlaybackSession, item, timeout: float = 0.5) -> bool:
+    """Enqueue a chunk. False if the session was stopped instead.
+
+    The bounded queue could otherwise block forever once the player has exited,
+    turning an interrupt into a hang — worse than the crash this replaces.
+    """
+    while not session.stop.is_set():
+        try:
+            await asyncio.wait_for(session.queue.put(item), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            continue
+    return False
 
 
 async def speak_stream(text: str) -> AsyncGenerator[dict, None]:
@@ -283,70 +358,65 @@ async def speak_stream(text: str) -> AsyncGenerator[dict, None]:
     
     Yields progress dicts: {"status": "started|playing|finished", "text": str, "progress": float}
     """
-    global _playback_task, _audio_queue, _stop_event
-
     # Record before synthesis: the mic can start hearing us the moment the
     # first chunk hits the speaker, which is before this function returns.
     utterance = _note_spoken(text)
 
     voice = _get_voice()
 
-    # Initialize streaming infrastructure
-    _audio_queue = asyncio.Queue(maxsize=10)
-    _stop_event = asyncio.Event()
-    _stop_event.clear()
-    
-    # Start audio player task
-    _playback_task = asyncio.create_task(_audio_player())
-    
+    # Per-call state, bound to THIS call's event loop. See _PlaybackSession.
+    session = _PlaybackSession(queue=asyncio.Queue(maxsize=10), stop=threading.Event())
+    _activate(session)
+    session.player = asyncio.create_task(_audio_player(session))
+
     # Emit start event
     bus = get_bus()
     bus.publish(TTSStartEvent(text=text), priority=Priority.HIGH)
-    
+
     yield {"status": "started", "text": text, "progress": 0.0}
-    
+
     try:
         iterator = voice.synthesize(text)
         chunk_count = 0
-        
+
         for chunk in iterator:
-            if _stop_event.is_set():
+            if session.stop.is_set():
                 break
-            
+
             audio_array = chunk.audio_int16_array
             rate = chunk.sample_rate
-            
-            # Queue chunk for playback
-            await _audio_queue.put({"audio": audio_array, "rate": rate})
-            
+
+            if not await _put_or_stop(session, {"audio": audio_array, "rate": rate}):
+                break
+
             chunk_count += 1
             yield {"status": "playing", "text": text, "progress": chunk_count * 0.1}
-            
+
             # Small delay to let audio player start
             await asyncio.sleep(0.01)
-        
+
         # Signal end
-        await _audio_queue.put(None)
-        
-        if _playback_task:
-            await _playback_task
-        
+        await _put_or_stop(session, None)
+
+        await session.player
+
         bus.publish(TTSEndEvent(text=text), priority=Priority.HIGH)
         yield {"status": "finished", "text": text, "progress": 1.0}
-        
+
     except Exception as e:
         print(f"[TTS] Streaming error: {e}")
-        _stop_event.set()
+        session.stop.set()
         yield {"status": "error", "text": text, "error": str(e)}
     finally:
         # Start the echo tail here, not at TTSEndEvent: this also runs when
         # playback was cut short by barge-in or an error, and those are exactly
         # the moments the mic is most likely to be holding a capture of us.
         _close_utterance(utterance)
-        # Cleanup
-        _audio_queue = None
-        _stop_event = None
-        _playback_task = None
+        # Stop our own player, then release the slot — but only if a newer
+        # session hasn't already taken it. Nulling shared globals here is what
+        # broke the overlapping case.
+        session.stop.set()
+        _deactivate(session)
 
 
 def speak(text: str) -> dict:
@@ -370,26 +440,34 @@ def speak(text: str) -> dict:
 
 
 def stop_speech() -> None:
-    """Immediately stop any in-progress speech playback."""
-    global _stop_event, _audio_queue, _playback_task
-    
-    if _stop_event:
-        _stop_event.set()
-    
-    # Clear queue
-    if _audio_queue:
-        while not _audio_queue.empty():
-            try:
-                _audio_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-    
-    # Also stop sounddevice directly
+    """Immediately stop any in-progress speech playback.
+
+    Safe from any thread — barge-in calls this from the wake-word listener while
+    playback runs on a different loop. Sets a threading.Event and aborts the
+    device; it does not touch the session's asyncio objects, which belong to
+    that other loop. Returns without waiting, so barge-in latency is unchanged.
+    """
+    with _session_lock:
+        session = _current_session
+
+    if session is not None:
+        session.stop.set()
+
+    # The queue is drained by the player's own `finally`, on its own loop.
+    # Draining it from here would be a cross-loop mutation.
+
+    # Also stop sounddevice directly — cuts audio already handed to the device.
     sd.stop()
-    
+
     print("[TTS] Speech interrupted")
 
 
 def is_speaking() -> bool:
     """Check if TTS is currently playing."""
-    return _playback_task is not None and not _playback_task.done()
+    with _session_lock:
+        session = _current_session
+    return (
+        session is not None
+        and session.player is not None
+        and not session.player.done()
+    )

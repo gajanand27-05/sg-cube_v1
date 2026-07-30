@@ -9,9 +9,16 @@ This queue drains them one-at-a-time through speak_stream(), so:
     pending sentences via interrupt() — otherwise queued sentences would
     resume speaking after the user cut in.
 
-Piper's stop_speech / _stop_event lives at module scope in tts_piper.py,
-so overlapping speak_stream() calls would race. We serialize by putting
-one consumer task in front of the queue.
+This queue serializes sentences *within* a turn — one consumer task in front of
+the queue, so sentence N never starts before N-1 finishes.
+
+It does NOT protect against overlap *across* turns, and the note that used to
+be here implied it did: it said Piper's module-scope stop_speech/_stop_event
+meant "overlapping speak_stream() calls would race", as though this class were
+the answer. It isn't. An HTTP /voice/say or the proactive handler can call
+speak_stream on another loop entirely, which no amount of serializing here
+prevents. That is fixed where it belongs — playback state is now per-call in
+tts_piper.py, see _PlaybackSession and T-tts-loop-globals.
 """
 import asyncio
 import logging
@@ -48,12 +55,13 @@ class SentenceQueue:
     async def start(self) -> None:
         self._interrupted = False
         self._spoke_anything = False
-        # Fresh queue — drain any leftovers from a prior turn defensively.
-        while not self._queue.empty():
-            try:
-                self._queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
+        # Rebuild the queue rather than drain it. This is a module-level
+        # singleton but handle_wake() runs asyncio.run() per capture, so the
+        # queue built on turn N's loop is bound to a loop that is closed by
+        # turn N+1 — "<Queue ...> is bound to a different event loop", which is
+        # how Brain failed mid-turn. Constructing it here binds it to the loop
+        # that will actually consume it. See T-tts-loop-globals.
+        self._queue = asyncio.Queue()
         self._task = asyncio.create_task(self._consumer())
 
     async def enqueue(self, sentence: str) -> None:
