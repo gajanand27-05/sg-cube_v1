@@ -63,7 +63,17 @@ Same class as the phantom-publisher finding, one layer deeper: the publisher exi
 
 **Known cosmetic gap — FIXED 2026-07-19**: `active_model` reported the *backend* name (`ollama_cloud`) rather than the model, so the UI's MODEL row named the routing key. `LLMBackend` gained an optional `active_model_name()`; the provider reads it through a defensive `_model_label()` helper (getattr, not a direct call) so duck-typed backends that don't implement it degrade to the routing key instead of raising mid-request. Verified live: `model=gpt-oss:120b`.
 
-**Still open**: two planner LLM calls fire per conversational turn (observed 2641ms + 3859ms), so the panel shows whichever landed last and Tok/s reads jumpy. Cause not yet established — the JSON-parse retry path in `planner.py` is the leading hypothesis. Measurement may also be contaminated by T-wake-word-executes-ambient-audio.
+**~~Still open~~ — CLOSED 2026-07-30, hypothesis killed**: this claimed two planner LLM calls per conversational turn (observed 2641ms + 3859ms), with the JSON-parse retry at `planner.py` as the leading suspect. **Those figures are formally retracted** — they were measured while the wake-word daemon was live and executing misheard audio, so ambient turns were mutating the same shared state.
+
+Re-measured on the text path with `enable_wake_word=False`, instrumenting `LLMProvider.chat_stream` call counts, `PlannerAgent.generate_plan_stream` invocations and `_emit("retrying_parse")` separately so the two candidate causes were distinguishable:
+
+- **1.00 planner LLM calls per turn**, distribution `{1: 10}` over n=10 plain conversational turns. Not one turn made a second call from *any* component.
+- **0/10 corrective JSON retries**, 0/10 turns with more than one planner invocation.
+- **0.0% failure rate** on n=12 trivia questions (0 hard failures, 0 wrong/evasive).
+
+The retry path exists and is reachable; `gpt-oss:120b` simply returns clean JSON. The original observation was on the OpenRouter/DeepSeek stack that no longer exists — most likely model-specific JSON malformation, but that is untestable now and not claimed.
+
+Recorded here rather than left in commit `dc6349f`'s message, where it was invisible to anyone reading the ticket.
 
 ## T-agent-reasoning-conversational (opened + FIXED 2026-07-19)
 
@@ -262,8 +272,8 @@ Each completed command also opens a 3s window where loudness alone re-triggers. 
 
 **This is a floor, not a fix.** It breaks the common cascade but a plausible-sounding mis-transcription of real ambient speech still executes. Remaining work, roughly in order of value:
 
-1. **Suppress TTS echo** — track recently-spoken text and reject transcripts that substantially match it. Cheapest real break in the loop; no AEC needed.
-2. **Gate the follow-up window on content, not loudness** — `rms > 500` inside a 3s window is far too permissive.
+1. ~~**Suppress TTS echo**~~ — **DONE 2026-07-30** (commit `dc6349f`). `speak_stream()` records every utterance; `was_recently_spoken()` matches a transcript by token containment against the live speaking burst; `trigger.py:409` drops matches with `dropped TTS echo: %r`. Live-verified at the dispatch point. The open-air join is still unproven — see E1 in `leftovers.md`.
+2. **Gate the follow-up window on content, not loudness** — `rms > 500` inside a 3s window is far too permissive. **Now the top remaining item**: with echo suppression in, the observed live failures were Whisper hallucinating on near-silence after `stop_speech()` truncated the capture (`'Sorry about getting ready to talk about it.'`, `'I am working out.'` — the latter ran a full LLM turn). Those are not echo and this gate is what would stop them.
 3. **Require confirmation for state-changing tools** when a turn originated from barge-in or follow-up rather than an explicit wake phrase.
 4. **Acoustic echo cancellation** — the real fix, already logged as out of scope.
 
@@ -301,3 +311,77 @@ Note the naive test (ask another question with the panel open) passes and confir
 **Also correct a comment while in there**: the tier counters are documented as "session-only ... a runtime diagnostic". They are actually *since-last-mount* and reset on every HMR update. The behaviour is fine; the comment overclaims.
 
 **Found by**: the panel diagnosing itself.
+
+## T-tts-speaks-planner-json (opened + FIXED 2026-07-30)
+
+**Observed**: on every streaming voice turn the assistant read its own JSON envelope aloud. The recent-spoken ring (added for echo suppression, so it records exactly what Piper was handed) captured `'{"final_response":"Got it!'` and `'...anything else!"}'` as separate spoken utterances.
+
+**Mechanism**: Phase 4B streams the Planner's tokens to TTS a sentence at a time to cut time-to-first-audio. `brain.py:99-108` accumulated raw Commander `token` chunks into `sentence_buffer` and fired `tts_ready` whenever `_is_sentence_complete()` (`brain.py:139-142`) matched `[.!?]\s*$` with length > 10. But the Planner emits a serialized envelope, not prose, so the punctuation that predicate tripped on was **JSON punctuation**. The clean text existed only at the `final_response` branch (`brain.py:117`), by which point the garbage was already queued to Piper.
+
+Not a predicate bug. The predicate was correct for its stated input; the input was never prose. Phase 4B's streaming assumption and the Planner's output contract disagreed, and nothing sat between them.
+
+**Fix**: `backend/core/agents/prose_stream.py` — `FinalResponseExtractor`, a character state machine that incrementally pulls the `final_response` string value out of the token stream (handles `\"`, `\\`, `\n`, a split `\uXXXX`, a ```json fence, and prose prefixed before the envelope). The Planner feeds each token through it and yields a distinct `prose` chunk for whatever became speakable; Commander forwards it as `CommanderChunk("prose", ...)`; `brain.py` buffers **only** prose for `tts_ready`. Raw `token` chunks still flow untouched so the UI ticker and the `planner_first_token` latency mark are unaffected.
+
+Deliberately not a JSON parser: waiting for a complete document would hand back the whole Phase 4B win. Deliberately not sanitizing `{`/`}` out of `sentence_buffer` downstream — that treats the symptom and breaks on the next format change.
+
+A `tool_calls` envelope yields no prose at all, which is correct: those turns speak after execution. Previously they queued raw JSON here too, and `brain.py:130` used the leftover buffer as `spoken_text`.
+
+**Verified live**, three real turns (real LLM, Planner, Commander, Brain, SentenceQueue, Piper, audio out), reading back the recent-spoken ring and replaying the old predicate over the same token stream:
+
+| turn | envelope fragments spoken, before | after |
+|---|---|---|
+| "tell me about the planet Jupiter in three sentences" | 1 | 0 |
+| "hello there" | 1 | 0 |
+| "what is the capital of France" | 1 | 0 |
+
+**Time-to-first-audio**, same turns, `wake -> first_audio_out`: unchanged on the multi-sentence turn (6058ms -> 6058ms), **+74ms** on "hello there", and *faster* on "what is the capital of France" (the old predicate never matched at all — the buffer ended `."}` — so that turn only spoke via the end-of-stream fallback; it now streams at 4350ms). Max regression observed 74ms.
+
+**Known gap**: on the JSON-parse corrective retry (`planner.py`), prose streaming is suppressed for the second attempt — attempt 1 may already have voiced part of a value that then failed to parse, and re-emitting would speak the answer twice. That turn falls back to speaking the full parsed reply, costing one turn's streaming. The retry path fired 0/22 times when last measured.
+
+**Tests**: `tests/test_planner_prose_stream.py` (20). Note these prove the extractor and the wiring only — an assertion that `tts_ready` contains no `{` passes happily while the speaker stays broken. The ring read-back above is the pipeline evidence.
+
+## T-tts-loop-globals (opened 2026-07-30 — NOT FIXED, recorded only)
+
+**Observed**: during live probing, two overlapping voice turns produced `got Future <Task ... _audio_player()> attached to a different loop`, then `'NoneType' object has no attribute 'put'` from `speak_stream`, then `'NoneType' object has no attribute 'set'`. Playback died mid-turn.
+
+**Mechanism**: `handle_wake()` (`trigger.py:153`) runs `asyncio.run(...)` — a **fresh event loop per capture**. But `tts_piper.py` keeps `_audio_queue`, `_stop_event` and `_playback_task` at module scope, and clears them to `None` in `speak_stream`'s `finally`. So turn B's loop adopts turn A's queue while turn A's `finally` nulls the globals underneath it. `tts_queue.py`'s own module docstring already names the hazard: *"overlapping speak_stream() calls would race"* — `SentenceQueue` serializes within a turn, which is why this only shows up across turns.
+
+Reachable in production, not just under probing: barge-in starts a new capture (and therefore a new `asyncio.run`) while the previous turn's playback is still unwinding.
+
+**Fix direction**: the globals are the defect. Either give `speak_stream` per-call state (a small playback-session object owned by the caller, with `stop_speech()` acting on the current session) or hold one long-lived loop for the daemon instead of `asyncio.run` per capture. The first is narrower; the second also fixes the `Queue is bound to a different event loop` error seen from `Brain` on the same path.
+
+**Not verified**: no deliberate reproduction was attempted — both sightings were incidental to other probes.
+
+## T-log-cp1252 (opened + FIXED 2026-07-30)
+
+**Observed**: `trigger crash: 'charmap' codec can't encode character '→' in position 5` — and the actual exception being reported was never logged.
+
+**Mechanism**: `log.exception(f"trigger crash: {e}")` at `trigger.py:425`. On Windows `sys.stdout` defaults to the console codepage (cp1252 here), and the Planner's reasoning strings are joined with an arrow (`planner.py`, `" -> ".join(...)` using U+2192). Encoding the record raised **inside the logging handler**, so the record was dropped. The bug destroys the evidence for whatever bug it was reporting.
+
+**Fix**: `backend/__init__.py` reconfigures `sys.stdout`/`sys.stderr` to `utf-8` with `errors="backslashreplace"`. `reconfigure()` mutates the existing `TextIOWrapper` in place, so handlers that already captured the stream — uvicorn installs its own — are fixed too. `backslashreplace` is the load-bearing half: a write can never raise even where the terminal cannot render the character. No handlers, levels or formats are imposed.
+
+Placed at package import rather than in an entry point because the bug fires from everywhere debugging happens — uvicorn, the daemon CLI, pytest, ad-hoc probe scripts.
+
+**Known scope limit**, found by `tools/memory_health.py` crashing on exactly this: the fix only reaches code that imports `backend`. 25 of 37 `tools/` scripts already do; a standalone script that prints non-ASCII must `import backend` (one line, and the reason is commented at that import).
+
+**Tests**: `tests/test_log_encoding_safety.py` (4), run in subprocesses with `PYTHONIOENCODING=cp1252`. Includes a control that asserts the failure still reproduces *without* the fix, so the test cannot pass by quietly losing its teeth.
+
+## T-memory-zero-vectors (opened 2026-07-30 — NOT FIXED, recorded only)
+
+**Observed**, `tools/memory_health.py`: **32 of 37 rows in `sg_cube_memories` have a zero-norm embedding — 86%.** Only 5 long-term memories in the database are reachable by semantic search at all. `sg_cube_visual` has 3/209. `sg_cube_timeline` cannot be read at all (`InternalError: Error executing plan: Internal error: Error finding id` on `get(include=["embeddings"])`).
+
+**Mechanism**: `long_term.py:28` — when the embedding provider is unreachable, `ProviderEmbeddingFunction` appends `[0.0] * 768` and the row is stored anyway. A zero vector has no direction, so cosine distance to it is degenerate and the row can never rank. The failure is silent: `store()` logs success, `count()` grows, and search quietly returns less than it should. Local Ollama being down for the whole of 2026-07-29 is consistent with the 86%.
+
+**Why it matters beyond retrieval**: the Memory Engine panel reports `total_entries` from `collection.count()`, so the UI shows 37 memories where 5 are usable.
+
+**Fix direction**: refuse the write. An embedding failure should raise or defer, not persist a poisoned row — and existing zero-vector rows need a re-embed pass. Confirm with `tools/memory_health.py` reporting `zero_vectors=0` before closing.
+
+## T-memory-duplicate-rows (opened 2026-07-30 — NOT FIXED, recorded only)
+
+**Observed**, `tools/memory_health.py`: 29 duplicate rows in `sg_cube_memories` (37 rows, 8 distinct documents), 39 in `sg_cube_visual`, 290 in `sg_cube_timeline` (1053 rows, 763 distinct). Worst offenders: `'User asked: "what time is it"'` x50, `'User likes dark mode'` x6.
+
+First surfaced by the Memory Engine panel, which showed the same fact 4x in a 5-hit recall — a quarter of the long-term store spent on one preference.
+
+**Mechanism**: `store()` in `long_term.py` calls `collection.add()` with a fresh `uuid4` every time and no content check, so re-stating a fact appends rather than updates. `merge_similar_memories()` exists at `long_term.py:405` and **nothing calls it**.
+
+**Fix direction**: dedupe on write (content hash, or a similarity check against the top-1 nearest neighbour) plus a one-off compaction pass over the existing rows. Note ordering: this is downstream of T-memory-zero-vectors — a similarity-based dedupe cannot work while 86% of vectors are zero, so fix the embeddings first. Confirm with `tools/memory_health.py`.

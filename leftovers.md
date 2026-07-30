@@ -1,7 +1,22 @@
 
 # SG Cube — Leftovers / Deferred Items
 
-Created 2026-07-30. Tracks items that were acknowledged but not fully completed, plus files not intended for production.
+Created 2026-07-30. Deferred work and the don't-ship list.
+
+**Bugs do not belong here.** `docs/OPEN_TICKETS.md` is the ticket file; this one
+turning into a second one is how a bug gets lost. The B1/B2/B3 entries that were
+here have moved:
+
+| was | now |
+|---|---|
+| B1 — TTS speaks raw planner JSON | `T-tts-speaks-planner-json` — **fixed** 2026-07-30 |
+| B2 — `speak_stream` globals vs `asyncio.run` | `T-tts-loop-globals` — open, recorded |
+| B3 — `log.exception` dies on cp1252 | `T-log-cp1252` — **fixed** 2026-07-30 |
+
+Two memory-engine bugs found while investigating this batch are also filed there
+rather than here: `T-memory-zero-vectors` (86% of long-term memories have a
+zero-norm embedding and are unsearchable) and `T-memory-duplicate-rows`. Both
+open, neither fixed. `tools/memory_health.py` is the before/after instrument.
 
 ---
 
@@ -25,27 +40,6 @@ Created 2026-07-30. Tracks items that were acknowledged but not fully completed,
 - **What**: `test_e2e_echo_loopback.py::test_e2e_loopback_captures_playback` is currently `pytest.skip()` on this hardware
 - **Impact**: No broken tests, but the capture path isn't unit-testable here
 - **Fix**: Either keep the skip with the explanation (current) or make the test conditional on a device query at import time
-
----
-
-## Bugs Found Along the Way (Not in Scope — Not Fixed)
-
-### B1. TTS speaks raw planner JSON to user
-- **Where**: `streaming path` in `brain.py` — `brain.run_stream()` yields `tts_ready` chunks that contain JSON envelopes like `'{"final_response":"Got it!'` instead of clean text
-- **Impact**: User hears `'{"final_response":"Got it!", "tool_calls":...}'` spoken out loud
-- **The clean text** appears in `[ai] response:` logs but the streaming TTS path voices the JSON instead
-- **Severity**: Visible to user on every streaming turn
-
-### B2. `speak_stream` globals vs `asyncio.run` per capture
-- **Where**: `trigger.py:153` — `handle_wake()` opens a fresh `asyncio.run()` loop for each capture, but `_audio_queue`, `_stop_event`, `_playback_task` are module-level in `tts_piper.py`
-- **Impact**: Two overlapping turns → `'Future ... attached to a different loop'`, then `"'NoneType' object has no attribute 'put'"`
-- **tts_queue.py docstring already anticipates this**
-- **Severity**: Intermittent crash during concurrent speech
-
-### B3. `log.exception` dies on cp1252
-- **Where**: `trigger.py:425` — `log.exception(f"trigger crash: {e}")`
-- **Impact**: When the real exception contains `→` (arrow) or other UTF-8 characters, the logger itself fails with `'charmap' codec can't encode character '\u2192'`, and the real error is lost
-- **Severity**: Silent loss of error context during crashes
 
 ---
 
