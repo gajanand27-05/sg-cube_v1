@@ -179,6 +179,8 @@ class MemoryHitEvent:
     source: str
     results_count: int
     hits: list[MemoryHit] | None = None   # rich results when available
+    collection: str = ""                  # vector-db collection the search ran against
+    total_entries: int | None = None      # size of that collection at search time
 
 
 @dataclass

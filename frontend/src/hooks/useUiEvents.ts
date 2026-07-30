@@ -31,6 +31,9 @@ const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | 
   agent_reasoning: { reasoning: "string" },
   agent_completed: { confidence: "number" },
   provider_degraded: { action: "string" },
+  // hits/total_entries are nullable by contract, so they can't be required
+  // here — MemoryEnginePanel treats both as optional.
+  memory_hit: { query: "string", results_count: "number" },
   system_stats: {
     cpu_percent: "number",
     memory_percent: "number",

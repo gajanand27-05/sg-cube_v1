@@ -80,7 +80,12 @@ class Settings(BaseSettings):
 
     # ── Background services (toggle each independently) ──
     enable_vision: bool = True      # passive screen glance every 5m
-    enable_wake_word: bool = True   # mic listener for the wake phrase
+    # Default OFF. The mic listener executes misheard ambient audio
+    # (T-wake-word-executes-ambient-audio) and any turn it fires mutates the
+    # same STM/planner state a text turn reads, which silently contaminated the
+    # earlier planner measurements. Opt in with ENABLE_WAKE_WORD=true once echo
+    # suppression and the follow-up content gate are both proven in the room.
+    enable_wake_word: bool = False  # mic listener for the wake phrase
     enable_clipboard: bool = True   # clipboard change tracking
     enable_telemetry: bool = True   # CPU/mem/disk broadcast to UI
     enable_watcher: bool = True     # proactive agent triggers

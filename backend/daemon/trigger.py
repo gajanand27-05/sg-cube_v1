@@ -11,7 +11,13 @@ import numpy as np
 import sounddevice as sd
 
 from backend.ai_modules.speech.stt_whisper import transcribe_array, transcribe_stream
-from backend.ai_modules.speech.tts_piper import speak, stop_speech, speak_stream, is_speaking
+from backend.ai_modules.speech.tts_piper import (
+    is_speaking,
+    speak,
+    speak_stream,
+    stop_speech,
+    was_recently_spoken,
+)
 from backend.ai_modules.speech.tts_queue import get_sentence_queue
 from backend.core.agents.commander import commander
 from backend.core.brain import brain, BrainRequest, BrainResponse
@@ -387,6 +393,22 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
             if not _is_dispatchable(command):
                 print(f"[trigger] dropping non-command transcript {command!r}")
                 log.info("dropped non-command transcript: %r", command)
+                state_manager.transition_to(AssistantState.IDLE)
+                latency_ledger().record(turn)
+                return False
+
+            # Echo gate. Separate from _is_dispatchable on purpose: that
+            # function is pure (same input, same answer, no clock, no shared
+            # state) and 23 tests depend on it staying that way. This one is
+            # time- and state-dependent by nature — the same words are a valid
+            # command a few seconds later.
+            #
+            # This is the break in the feedback loop: TTS bleeds into the mic,
+            # barge-in fires on loudness, Whisper transcribes our own sentence,
+            # and it used to be dispatched and executed.
+            if was_recently_spoken(command):
+                print(f"[trigger] dropping TTS echo {command!r}")
+                log.info("dropped TTS echo: %r", command)
                 state_manager.transition_to(AssistantState.IDLE)
                 latency_ledger().record(turn)
                 return False

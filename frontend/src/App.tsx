@@ -4,6 +4,10 @@ import { Panel } from "@/components/Panel";
 import { CubeVisualization } from "@/components/CubeVisualization";
 import { AppBackground } from "@/components/AppBackground";
 import { AICorePanel, AICoreStatusPill } from "@/components/AICorePanel";
+import {
+  MemoryEnginePanel,
+  MemoryEngineStatusPill,
+} from "@/components/MemoryEnginePanel";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 export default function App() {
@@ -66,8 +70,12 @@ export default function App() {
           <Panel title="AI Core" number="01" statusSlot={<AICoreStatusPill />}>
             <AICorePanel />
           </Panel>
-          <Panel title="Memory Engine" number="02" status="Optimized" statusTone="success">
-            <Placeholder label="vector db · entries · recall · score" />
+          <Panel
+            title="Memory Engine"
+            number="02"
+            statusSlot={<MemoryEngineStatusPill />}
+          >
+            <MemoryEnginePanel />
           </Panel>
           <Panel title="Vision Module" number="03" status="Standby" statusTone="warning">
             <Placeholder label="camera · object detection · OCR · scene · navigation" />

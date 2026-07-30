@@ -73,9 +73,30 @@ class LongTermMemory:
         except Exception as e:
             log.error(f"Failed to store semantic memory: {e}")
 
-    def search(self, query: str, mtype: Optional[MemoryType] = None, limit: int = 5, 
+    def count(self) -> int:
+        """Number of entries in the collection — the UI's vector-db readout."""
+        try:
+            return int(self.collection.count())
+        except Exception as e:
+            log.debug(f"LTM count failed: {e}")
+            return 0
+
+    def search(self, query: str, mtype: Optional[MemoryType] = None, limit: int = 5,
                use_rerank: bool = True, min_importance: float = 0.0) -> List[MemoryEntry]:
         """Semantic search with optional reranking and temporal weighting."""
+        return [
+            c["entry"]
+            for c in self.search_scored(query, mtype, limit, use_rerank, min_importance)
+        ]
+
+    def search_scored(self, query: str, mtype: Optional[MemoryType] = None, limit: int = 5,
+                      use_rerank: bool = True, min_importance: float = 0.0) -> List[dict]:
+        """search() but keeps each candidate's score breakdown.
+
+        search() computed a combined score, ranked by it, then dropped it. Any
+        caller that wants to show *why* a memory was retrieved had to re-run the
+        query through search_explainable — a second embedding round-trip for
+        numbers the first pass already had."""
         where = {"type": mtype.value} if mtype else None
 
         try:
@@ -88,17 +109,16 @@ class LongTermMemory:
                 include=["documents", "metadatas", "distances"]
             )
 
-            entries = []
+            candidates = []
             if results["documents"]:
                 docs = results["documents"][0]
                 metas = results["metadatas"][0]
                 distances = results["distances"][0] if results["distances"] else [0] * len(docs)
 
-                candidates = []
                 for i in range(len(docs)):
                     m = metas[i]
                     created = datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now()
-                    
+
                     # Parse enhanced fields from metadata
                     importance = float(m.get("importance", 0.5))
                     confidence = float(m.get("confidence", 0.9))
@@ -162,11 +182,11 @@ class LongTermMemory:
                 # Rerank by combined score
                 if use_rerank:
                     candidates.sort(key=lambda x: x["combined_score"], reverse=True)
-                
-                entries = [c["entry"] for c in candidates[:limit]]
-                log.debug(f"LTM search: {len(docs)} candidates -> {len(entries)} results (rerank={use_rerank})")
-            
-            return entries
+
+                candidates = candidates[:limit]
+                log.debug(f"LTM search: {len(docs)} candidates -> {len(candidates)} results (rerank={use_rerank})")
+
+            return candidates
         except Exception as e:
             log.error(f"Semantic search failed: {e}")
             return []

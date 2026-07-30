@@ -7,11 +7,13 @@ import logging
 from typing import Any, Optional
 
 from backend.core.context.types import AgentContext, RequestContext, WindowInfo, DetectedObject
+from backend.core.events import Priority, get_bus
 from backend.core.memory.manager import memory as memory_manager
 from backend.core.memory.timeline import timeline
 from backend.core.memory.screen_memory import screen_memory
 from backend.core.tools.registry import REGISTRY, Tool
 from backend.core.caps.registry import capability_registry
+from backend.daemon.ui_events import MemoryHit, MemoryHitEvent
 from backend.ai_modules.llm import get_provider
 from backend.ai_modules.llm.routing import TaskType
 
@@ -100,12 +102,43 @@ class ContextBuilder:
             return []
     
     def _get_ltm_context(self, query: str) -> list:
-        """Semantic search in LTM for relevant facts."""
+        """Semantic search in LTM for relevant facts.
+
+        Publishes MemoryHitEvent. This is the only LTM read on the turn path —
+        before this, the event fired solely from the /memory/search HTTP route,
+        which nothing in the voice or chat pipeline calls, so the UI's memory
+        readout stayed empty through every real turn."""
         try:
-            return memory_manager.ltm.search(query, limit=5)
+            candidates = memory_manager.ltm.search_scored(query, limit=5)
         except Exception as e:
             log.debug(f"LTM search failed: {e}")
             return []
+
+        try:
+            hits = [
+                MemoryHit(
+                    title=(c["entry"].content or "")[:80],
+                    score=round(float(c.get("combined_score", 0.0)), 3),
+                    source=c["entry"].source or "unknown",
+                )
+                for c in candidates
+            ]
+            get_bus().publish(
+                MemoryHitEvent(
+                    query=query,
+                    source="context_builder",
+                    results_count=len(candidates),
+                    hits=hits,
+                    collection=memory_manager.ltm.collection.name,
+                    total_entries=memory_manager.ltm.count(),
+                ),
+                priority=Priority.LOW,
+            )
+        except Exception as e:
+            # Telemetry must never cost the caller its context.
+            log.debug(f"MemoryHitEvent publish failed: {e}")
+
+        return [c["entry"] for c in candidates]
     
     def _get_timeline_context(self) -> list:
         """Get recent chronological events."""

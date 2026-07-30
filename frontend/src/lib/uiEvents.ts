@@ -46,6 +46,22 @@ export type ProviderDegradedPayload = {
   fallback: string;
 };
 
+export type MemoryHit = {
+  title: string;
+  score: number; // 0..1 combined relevance
+  source: string;
+};
+
+export type MemoryHitPayload = {
+  query: string;
+  source: string;
+  results_count: number;
+  /** Null when the publisher had no rich results to attach. */
+  hits: MemoryHit[] | null;
+  collection: string;
+  total_entries: number | null;
+};
+
 export type SystemStatsPayload = {
   cpu_percent: number;
   memory_percent: number;
@@ -66,6 +82,7 @@ export type UiEventPayloadMap = {
   agent_reasoning: AgentReasoningPayload;
   agent_completed: AgentCompletedPayload;
   provider_degraded: ProviderDegradedPayload;
+  memory_hit: MemoryHitPayload;
   system_stats: SystemStatsPayload;
 };
 

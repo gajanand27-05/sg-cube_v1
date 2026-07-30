@@ -40,7 +40,14 @@ def search_memory(
             )
             for c in candidates
         ]
-        get_bus().publish(MemoryHitEvent(query=q, source="semantic", results_count=len(candidates), hits=hits))
+        get_bus().publish(MemoryHitEvent(
+            query=q,
+            source="semantic",
+            results_count=len(candidates),
+            hits=hits,
+            collection=memory_manager.ltm.collection.name,
+            total_entries=memory_manager.ltm.count(),
+        ))
         results = []
         for c in candidates:
             e = c["entry"]
