@@ -145,6 +145,11 @@ class CommanderAgent:
             async for chunk in self.planner.generate_plan_stream(text, history, agent_context):
                 if chunk["type"] == "token":
                     yield CommanderChunk("token", chunk["content"], {"request_id": request_id})
+                elif chunk["type"] == "prose":
+                    # Speakable text only — see agents/prose_stream.py. Kept
+                    # distinct from "token" so TTS never sees the JSON envelope
+                    # while the UI ticker and latency marks still get raw tokens.
+                    yield CommanderChunk("prose", chunk["content"], {"request_id": request_id})
                 elif chunk["type"] == "final":
                     content = chunk["content"]
                     if isinstance(content, dict) and "final_response" in content:

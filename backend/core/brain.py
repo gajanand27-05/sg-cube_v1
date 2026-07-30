@@ -97,8 +97,14 @@ class Brain:
 
         async for chunk in self.commander.run_stream(request.input_text, conversation, request.user_id):
             if chunk.type == "token":
-                sentence_buffer += chunk.content
+                # Raw planner tokens: UI ticker and the planner_first_token
+                # latency mark. NOT spoken — they are a JSON envelope, and
+                # buffering them here is what made Piper read
+                # `{"final_response":"Got it!` aloud. Speech comes from "prose".
                 yield BrainChunk(type="token", content=chunk.content)
+
+            elif chunk.type == "prose":
+                sentence_buffer += chunk.content
 
                 # Phase 4B: emit tts_ready every time a sentence completes,
                 # not just the first. Downstream drains a per-sentence queue
@@ -106,7 +112,7 @@ class Brain:
                 if self._is_sentence_complete(sentence_buffer):
                     yield BrainChunk(type="tts_ready", content=sentence_buffer.strip())
                     sentence_buffer = ""
-            
+
             elif chunk.type == "tool_start":
                 yield BrainChunk(type="tool_start", content=chunk.content, metadata=chunk.metadata)
             

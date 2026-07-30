@@ -3,6 +3,7 @@ from typing import Any, AsyncGenerator
 
 from backend.ai_modules.llm import get_provider
 from backend.core.agents.base import BaseInternalAgent
+from backend.core.agents.prose_stream import FinalResponseExtractor
 from backend.core.events import get_bus
 from backend.core.tools.registry import schemas_prompt
 from backend.daemon.ui_events import AgentReasoningEvent, AgentThinkingEvent, TokenStreamEvent
@@ -52,11 +53,20 @@ class PlannerAgent(BaseInternalAgent):
         full_content = ""
         try:
             llm = get_provider()
+            # Phase 4B streams to TTS sentence-by-sentence, but our tokens are a
+            # JSON envelope, not prose — downstream spoke `{"final_response":"Got
+            # it!` out loud. `prose` chunks carry only the speakable value; raw
+            # `token` chunks stay for the UI ticker and the planner_first_token
+            # latency mark.
+            prose = FinalResponseExtractor()
             async for chunk in llm.chat_stream(messages, task=TaskType.PLANNING, temperature=0.1):
                 token = chunk["token"]
                 full_content += token
                 get_bus().publish(TokenStreamEvent(self.name, token, full_content))
                 yield {"type": "token", "content": token}
+                speakable = prose.feed(token)
+                if speakable:
+                    yield {"type": "prose", "content": speakable}
 
             import re
             m = re.search(r"```(?:json)?\s*\n?(.*?)```", full_content, re.DOTALL)
@@ -72,6 +82,13 @@ class PlannerAgent(BaseInternalAgent):
                 messages.append({"role": "assistant", "content": full_content})
                 messages.append({"role": "user", "content": "Your previous reply was not valid JSON. Output ONLY a single JSON object. No prose, no markdown."})
                 full_content = ""
+                # No `prose` chunks on the retry. Attempt 1 may already have
+                # streamed part of a value out of the envelope that then failed
+                # to parse; emitting again would speak the answer twice. With
+                # nothing enqueued, trigger's `spoke_anything` fallback speaks
+                # the parsed response in full instead — one turn's worth of
+                # time-to-first-audio, on a path that fired 0/22 times when last
+                # measured.
                 async for chunk in llm.chat_stream(messages, task=TaskType.PLANNING, temperature=0.1):
                     token = chunk["token"]
                     full_content += token
