@@ -10,13 +10,16 @@ here have moved:
 | was | now |
 |---|---|
 | B1 — TTS speaks raw planner JSON | `T-tts-speaks-planner-json` — **fixed** 2026-07-30 |
-| B2 — `speak_stream` globals vs `asyncio.run` | `T-tts-loop-globals` — open, recorded |
+| B2 — `speak_stream` globals vs `asyncio.run` | `T-tts-loop-globals` — **fixed** 2026-07-30 |
 | B3 — `log.exception` dies on cp1252 | `T-log-cp1252` — **fixed** 2026-07-30 |
 
-Two memory-engine bugs found while investigating this batch are also filed there
-rather than here: `T-memory-zero-vectors` (86% of long-term memories have a
-zero-norm embedding and are unsearchable) and `T-memory-duplicate-rows`. Both
-open, neither fixed. `tools/memory_health.py` is the before/after instrument.
+Memory-engine bugs found while investigating this batch are also filed there:
+`T-memory-zero-vectors` (write path fixed 2026-07-30; the 32 poisoned rows are
+deliberately left in place so the repair session has a frozen baseline),
+`T-memory-duplicate-rows` (open — and the repair is purge-and-merge, since much
+of the timeline junk is STT hallucination rather than real memory), and
+`T-timeline-index-desync` (undiagnosed; a different fault from the zero vectors).
+`tools/memory_health.py` is the before/after instrument.
 
 ---
 

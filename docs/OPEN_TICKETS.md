@@ -340,7 +340,7 @@ A `tool_calls` envelope yields no prose at all, which is correct: those turns sp
 
 **Tests**: `tests/test_planner_prose_stream.py` (20). Note these prove the extractor and the wiring only — an assertion that `tts_ready` contains no `{` passes happily while the speaker stays broken. The ring read-back above is the pipeline evidence.
 
-## T-tts-loop-globals (opened 2026-07-30 — NOT FIXED, recorded only)
+## T-tts-loop-globals (opened + FIXED 2026-07-30)
 
 **Observed**: during live probing, two overlapping voice turns produced `got Future <Task ... _audio_player()> attached to a different loop`, then `'NoneType' object has no attribute 'put'` from `speak_stream`, then `'NoneType' object has no attribute 'set'`. Playback died mid-turn.
 
@@ -348,9 +348,19 @@ A `tool_calls` envelope yields no prose at all, which is correct: those turns sp
 
 Reachable in production, not just under probing: barge-in starts a new capture (and therefore a new `asyncio.run`) while the previous turn's playback is still unwinding.
 
-**Fix direction**: the globals are the defect. Either give `speak_stream` per-call state (a small playback-session object owned by the caller, with `stop_speech()` acting on the current session) or hold one long-lived loop for the daemon instead of `asyncio.run` per capture. The first is narrower; the second also fixes the `Queue is bound to a different event loop` error seen from `Brain` on the same path.
+**Fix**: per-call playback state. `_PlaybackSession` (queue + stop flag + player task) is created inside `speak_stream` and bound to that call's loop; the module only remembers which session is *current*, for `stop_speech()`/`is_speaking()` to act on. `finally` stops its own session and releases the slot only if a newer session has not already claimed it — nulling shared globals there is precisely what broke the overlapping case.
 
-**Not verified**: no deliberate reproduction was attempted — both sightings were incidental to other probes.
+The stop flag is a `threading.Event`, not an `asyncio.Event`: barge-in calls `stop_speech()` from the wake-word listener thread, and `asyncio.Event.set()` is not thread-safe — it would mutate state owned by another loop. `stop_speech()` no longer drains the queue either; that is the player's own `finally`, on the player's own loop.
+
+**Chose per-call state over one long-lived daemon loop.** The single-loop option would also have fixed this, but `_audio_player` calls `stream.write()`, which blocks for the duration of the audio. Moving playback onto the server's event loop would have blocked the web server for the length of every spoken sentence — trading an intermittent crash for a guaranteed stall. Per-call state keeps playback on the caller's own loop.
+
+**Barge-in latency is unchanged.** New sessions do *not* wait for the previous one: `_activate()` sets the old session's stop flag and returns, so newest speech wins immediately. Serializing turns behind in-flight playback would have traded a crash for a worse feel, which is the opposite of what barge-in is for. `stop_speech()` is still synchronous and still calls `sd.stop()`.
+
+Also fixed on the same defect: `SentenceQueue.start()` now rebuilds its `asyncio.Queue` instead of draining it. It is a module-level singleton, so the queue built on turn N's loop was bound to a loop closed by turn N+1 — the `<Queue ...> is bound to a different event loop` failure seen from `Brain`. And `tts_queue.py`'s docstring no longer implies that serializing sentences protects against cross-turn overlap; it never did.
+
+**Verified by reproducing first.** `tests/test_tts_concurrent_playback.py` drives two, then four, concurrent `asyncio.run` loops through `speak_stream` behind a `threading.Barrier`, faking only the audio *device* (`sd.OutputStream`) so the loop and state ownership under test stay real. Against the pre-fix code: **2 failed / 4 passed**, with all three original errors — `attached to a different loop`, `'NoneType' object has no attribute 'set'`, `'NoneType' object has no attribute 'empty'`. After: **6 passed**. Real-audio turns re-run afterwards: 0 playback errors, time-to-first-audio unchanged.
+
+**Not verified**: the specific production sequence (HTTP `/voice/say` landing mid-voice-turn) was not staged end to end; the reproduction models it with two loops rather than two entry points.
 
 ## T-log-cp1252 (opened + FIXED 2026-07-30)
 
@@ -366,7 +376,7 @@ Placed at package import rather than in an entry point because the bug fires fro
 
 **Tests**: `tests/test_log_encoding_safety.py` (4), run in subprocesses with `PYTHONIOENCODING=cp1252`. Includes a control that asserts the failure still reproduces *without* the fix, so the test cannot pass by quietly losing its teeth.
 
-## T-memory-zero-vectors (opened 2026-07-30 — NOT FIXED, recorded only)
+## T-memory-zero-vectors (opened 2026-07-30 — WRITE PATH FIXED, DATA REPAIR OPEN)
 
 **Observed**, `tools/memory_health.py`: **32 of 37 rows in `sg_cube_memories` have a zero-norm embedding — 86%.** Only 5 long-term memories in the database are reachable by semantic search at all. `sg_cube_visual` has 3/209. `sg_cube_timeline` cannot be read at all (`InternalError: Error executing plan: Internal error: Error finding id` on `get(include=["embeddings"])`).
 
@@ -374,7 +384,19 @@ Placed at package import rather than in an entry point because the bug fires fro
 
 **Why it matters beyond retrieval**: the Memory Engine panel reports `total_entries` from `collection.count()`, so the UI shows 37 memories where 5 are usable.
 
-**Fix direction**: refuse the write. An embedding failure should raise or defer, not persist a poisoned row — and existing zero-vector rows need a re-embed pass. Confirm with `tools/memory_health.py` reporting `zero_vectors=0` before closing.
+**Write path FIXED 2026-07-30.** `backend/core/memory/embedding.py` now holds one `ProviderEmbeddingFunction` for all three collections — they each carried a near-identical copy of the same defect. It raises `EmbeddingUnavailable` instead of returning zeros, and also rejects a vector that is empty, the wrong width, or all-zero, since a backend answering with junk is the same lost write by another route.
+
+`store()`, `store_observation()` and `record_event()` now catch that distinctly from a real storage error, log ERROR naming the consequence, publish `MemoryWriteFailedEvent`, and **return `bool`** — previously they returned `None` and logged success regardless.
+
+Reads changed too, and this is a quiet improvement: Chroma calls the embedding function for `query()` as well, so searches used to run *with a zero vector* and return arbitrary nearest neighbours. They now raise and degrade to an empty result, which every caller already handles.
+
+**Chose not to reuse `ProviderDegradedEvent`** even though `AICorePanel.tsx:43,112` already consumes it. That panel maps `action: "gave_up"` to status **"Offline"**, so an embedding outage would have claimed the reasoning model was down — a false alarm in the exact place you would look. `MemoryWriteFailedEvent` is a new typed event, mapped in `ws_ui.py`, and the Memory Engine panel shows a red "Write Failed" pill plus a session count of lost writes (hidden entirely at zero, so it reads as an alarm rather than another stat).
+
+**Verified live** against the real database with the embedding backend forced to refuse: all three collections returned `False`, three `MemoryWriteFailedEvent`s were published, and row counts did not move (37 / 209 / 1058 before and after). A `get(where={"source": "probe"})` confirmed the probe row was genuinely absent, not merely uncounted. Reads with Ollama up returned 3 hits, so the raise did not break search. 14 unit tests in `tests/test_memory_write_refusal.py`.
+
+**STILL OPEN — the data repair.** The 32 existing dead rows were deliberately left untouched so this ticket's numbers stay a usable baseline. Sequencing matters: the write path was fixed first because every store while the embedding backend was down made the repair bigger. Repair now runs once, against a store that can no longer re-poison itself.
+
+Before closing: `tools/memory_health.py` must report `zero_vectors=0`. Note the repair needs the embedding backend *up and staying up* — a run that half-fails re-poisons the rows it touches. Verified 2026-07-30 that local Ollama answers a real `embed()` (768 dims, norm 22.8), but that is a point-in-time check, not a guarantee.
 
 ## T-memory-duplicate-rows (opened 2026-07-30 — NOT FIXED, recorded only)
 
@@ -385,3 +407,44 @@ First surfaced by the Memory Engine panel, which showed the same fact 4x in a 5-
 **Mechanism**: `store()` in `long_term.py` calls `collection.add()` with a fresh `uuid4` every time and no content check, so re-stating a fact appends rather than updates. `merge_similar_memories()` exists at `long_term.py:405` and **nothing calls it**.
 
 **Fix direction**: dedupe on write (content hash, or a similarity check against the top-1 nearest neighbour) plus a one-off compaction pass over the existing rows. Note ordering: this is downstream of T-memory-zero-vectors — a similarity-based dedupe cannot work while 86% of vectors are zero, so fix the embeddings first. Confirm with `tools/memory_health.py`.
+
+**The duplicates are not all real memories — a large share is STT junk.** Added 2026-07-30, from `tools/memory_health.py`:
+
+```
+ 50x  'User asked: "what time is it"'
+ 20x  'User asked: "Thank you very much."'
+ 17x  'User asked: "I am using a voice assistant. I am using a voice as...'
+ 15x  'User asked: "The assistant controls notepad, close chrome, firef...'
+ 11x  'User asked: "The assistant controls notepad, chrome, firefox, vs...'
+```
+
+Rows 2-5 are Whisper hallucinations, not user speech. `"Thank you very much."` is in `trigger.py`'s own `_STT_HALLUCINATIONS` set, and `"The assistant controls notepad, chrome, firefox, vscode, ive,"` is the exact string quoted as corroborating evidence in **T-wake-word-executes-ambient-audio** above. That is ~60+ timeline rows that are the fossil record of the mic executing room noise.
+
+**So the repair is purge-and-merge, not merge alone.** A dedupe pass that only collapses duplicates would faithfully preserve one clean copy of each hallucination. Junk has to be deleted, not deduplicated.
+
+**Is the timeline still recording anything the mic hears?** No longer, on the mic path: `timeline.record_event` is called from `commander.py:139` (`User asked: "..."`), which runs inside `Brain` — downstream of both `_is_dispatchable` (`trigger.py:393`) and the TTS echo gate (`trigger.py:409`). A transcript rejected by either never reaches Commander, so it is never recorded. The historical junk predates those gates.
+
+Two caveats on that: the HTTP `/chat` and proactive paths reach Commander *without* passing `_is_dispatchable`, and the gate is a floor, not a classifier — a plausible-sounding mis-transcription still records.
+
+**Source histogram** of all 1058 rows, for whoever writes the purge: `user_query` 826, `vision` 194, `execution` 29, `manual` 9.
+
+**Baseline was 1054 rows when handed over and is 1058 now.** The growth is this session's own verification turns — every real Brain turn writes one `user_query` row. Worth knowing before the repair: probing the voice path inflates the very table being repaired. `sg_cube_memories` (37) and `sg_cube_visual` (209) are unchanged.
+
+## T-timeline-index-desync (opened 2026-07-30 — UNDIAGNOSED)
+
+**Observed**: reading embeddings from `sg_cube_timeline` fails for the whole collection, not for particular rows:
+
+```
+coll.get(include=["embeddings"])
+--> InternalError: Error executing plan: Internal error: Error finding id
+```
+
+All 1058 rows are unreadable this way, so `tools/memory_health.py` reports `zero_vectors=?` for this collection and cannot tell how much of it is salvageable. `sg_cube_memories` and `sg_cube_visual` read fine.
+
+**This is not T-memory-zero-vectors.** That one is bad *values* written through a bad code path, and the code path is now fixed. This is Chroma failing to resolve ids at all, which reads like the HNSW index being desynced from the metadata store — index-level corruption rather than poisoned content. A zero-vector row still reads back; these do not.
+
+The distinction matters for the repair: the other two collections can be re-embedded in place, but a desynced index may need the collection rebuilt from its documents and metadata, which are still readable (`get()` without `include=["embeddings"]` works — that is how the duplicate counts and the source histogram above were produced).
+
+**Still being written to.** 1053 → 1058 over this session. The writer is `timeline.record_event` from `commander.py:139`, once per Brain turn; `vision_loop.py:87` also writes on the vision path. So the collection is growing while unreadable, and every probe of the voice path adds to it.
+
+**Undiagnosed. Not attempted**: no repair, no rebuild, no root-cause work. Unknown whether writes are also silently failing, whether it is one bad segment or the whole index, and when it started. First step is probably to compare `chroma.sqlite3`'s segment/embedding tables against the collection's id list — the old `_check_chroma_sql.py` probe did exactly that kind of dump before being consolidated away, and is recoverable from git history if useful.
