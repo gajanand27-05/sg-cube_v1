@@ -143,7 +143,6 @@ class LLMProvider:
         except Exception as e:
             fallback = self._get_fallback_backend(primary_name)
             if fallback is None:
-                self._inflight -= 1
                 raise
             fb_name, fb_backend = fallback
             _emit_fallback(primary_name, fb_name, str(e)[:200])
