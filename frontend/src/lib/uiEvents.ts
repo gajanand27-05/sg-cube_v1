@@ -62,6 +62,12 @@ export type MemoryHitPayload = {
   total_entries: number | null;
 };
 
+export type MemoryWriteFailedPayload = {
+  collection: string;
+  reason: string;
+  content_preview: string;
+};
+
 export type SystemStatsPayload = {
   cpu_percent: number;
   memory_percent: number;
@@ -83,6 +89,7 @@ export type UiEventPayloadMap = {
   agent_completed: AgentCompletedPayload;
   provider_degraded: ProviderDegradedPayload;
   memory_hit: MemoryHitPayload;
+  memory_write_failed: MemoryWriteFailedPayload;
   system_stats: SystemStatsPayload;
 };
 

@@ -6,25 +6,14 @@ from typing import List, Optional
 import chromadb
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 from backend.core.memory.base import MemoryEntry, MemoryType
-from backend.ai_modules.llm import get_provider
+from backend.core.memory.embedding import (
+    EmbeddingUnavailable,
+    ProviderEmbeddingFunction,
+    report_write_failure,
+)
 from backend.database import CHROMA_PATH
 
 log = logging.getLogger(__name__)
-
-
-class TimelineEmbeddingFunction(EmbeddingFunction):
-    """Bridge between ChromaDB and LLM Provider for timeline embeddings."""
-    def __call__(self, input: Documents) -> Embeddings:
-        llm = get_provider()
-        embeddings = []
-        for text in input:
-            try:
-                vec = llm.embed(text)
-                embeddings.append(vec)
-            except Exception as e:
-                log.error(f"Timeline embedding failed: {e}")
-                embeddings.append([0.0] * 768)
-        return embeddings
 
 
 class TimelineMemory:
@@ -32,7 +21,7 @@ class TimelineMemory:
     
     def __init__(self):
         self.client = chromadb.PersistentClient(path=str(CHROMA_PATH))
-        self.ef = TimelineEmbeddingFunction()
+        self.ef = ProviderEmbeddingFunction("sg_cube_timeline")
         
         # Specific collection for chronological events
         self.collection = self.client.get_or_create_collection(
@@ -41,7 +30,7 @@ class TimelineMemory:
             metadata={"hnsw:space": "cosine"}
         )
 
-    def record_event(self, content: str, source: str, app: Optional[str] = None, metadata: Optional[dict] = None):
+    def record_event(self, content: str, source: str, app: Optional[str] = None, metadata: Optional[dict] = None) -> bool:
         """Record a discrete event into the timeline."""
         now = datetime.now()
         
@@ -60,8 +49,13 @@ class TimelineMemory:
                 metadatas=[meta]
             )
             log.info(f"Timeline: Recorded {source} event -> {content[:50]}...")
+            return True
+        except EmbeddingUnavailable as e:
+            report_write_failure("sg_cube_timeline", str(e), content)
+            return False
         except Exception as e:
             log.error(f"Failed to record timeline event: {e}")
+            return False
 
     def get_recent_timeline(self, limit: int = 10) -> List[MemoryEntry]:
         """Retrieve the most recent events in reverse-chronological order."""

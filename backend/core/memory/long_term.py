@@ -7,26 +7,15 @@ from typing import Any, List, Optional
 import chromadb
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 
-from backend.ai_modules.llm import get_provider
+from backend.core.memory.embedding import (
+    EmbeddingUnavailable,
+    ProviderEmbeddingFunction,
+    report_write_failure,
+)
 from backend.core.memory.base import MemoryEntry, MemoryType
 from backend.database import CHROMA_PATH
 
 log = logging.getLogger(__name__)
-
-
-class ProviderEmbeddingFunction(EmbeddingFunction):
-    """Bridge between ChromaDB and LLM Provider embeddings."""
-    def __call__(self, input: Documents) -> Embeddings:
-        llm = get_provider()
-        embeddings = []
-        for text in input:
-            try:
-                vec = llm.embed(text)
-                embeddings.append(vec)
-            except Exception as e:
-                log.error(f"Embedding failed for text: {text[:50]}... Error: {e}")
-                embeddings.append([0.0] * 768)
-        return embeddings
 
 
 class LongTermMemory:
@@ -34,7 +23,7 @@ class LongTermMemory:
     def __init__(self):
         CHROMA_PATH.parent.mkdir(parents=True, exist_ok=True)
         self.client = chromadb.PersistentClient(path=str(CHROMA_PATH))
-        self.ef = ProviderEmbeddingFunction()
+        self.ef = ProviderEmbeddingFunction("sg_cube_memories")
         
         self.collection = self.client.get_or_create_collection(
             name="sg_cube_memories",
@@ -42,8 +31,13 @@ class LongTermMemory:
             metadata={"hnsw:space": "cosine"}
         )
 
-    def store(self, entry: MemoryEntry):
-        """Store a memory entry with all enhanced fields."""
+    def store(self, entry: MemoryEntry) -> bool:
+        """Store a memory entry with all enhanced fields.
+
+        Returns True if the row was persisted. False means it was refused —
+        most often because the embedding backend was unreachable, in which case
+        storing it would have created an unsearchable row (T-memory-zero-vectors).
+        """
         # Ensure entry has an ID
         if "id" not in entry.metadata:
             entry.metadata["id"] = str(uuid.uuid4())
@@ -70,8 +64,15 @@ class LongTermMemory:
                 metadatas=[metadata]
             )
             log.info(f"Stored semantic memory: {entry.content[:50]}... (importance={entry.importance:.2f})")
+            return True
+        except EmbeddingUnavailable as e:
+            # Refused, not stored. Previously this appended a zero vector and
+            # logged success, leaving a row nothing could ever retrieve.
+            report_write_failure("sg_cube_memories", str(e), entry.content)
+            return False
         except Exception as e:
             log.error(f"Failed to store semantic memory: {e}")
+            return False
 
     def count(self) -> int:
         """Number of entries in the collection — the UI's vector-db readout."""

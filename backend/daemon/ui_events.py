@@ -184,6 +184,21 @@ class MemoryHitEvent:
 
 
 @dataclass
+class MemoryWriteFailedEvent:
+    """A memory could not be embedded, so it was not stored — T-memory-zero-vectors.
+
+    Deliberately NOT reported through ProviderDegradedEvent. The AI Core panel
+    maps that event's `gave_up` action to status "Offline", which would claim the
+    reasoning model is down when only the embedding backend is — a false alarm in
+    the one place you would look. This is a memory-subsystem fault and surfaces
+    on the Memory Engine panel.
+    """
+    collection: str       # e.g. "sg_cube_memories"
+    reason: str           # short human string
+    content_preview: str  # first ~80 chars of what was dropped
+
+
+@dataclass
 class DetectedObject:
     """A thing the vision model saw on screen."""
     label: str

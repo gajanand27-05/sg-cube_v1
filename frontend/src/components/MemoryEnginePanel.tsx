@@ -12,12 +12,16 @@ type StatusTone = "success" | "warning" | "danger" | "cyan" | "muted";
 type EngineStatus = { status: string; tone: StatusTone };
 
 const RECALLING_MS = 5_000;
+// Longer than RECALLING_MS: a dropped write is not a transient blip, and the
+// point is that you notice it rather than catch it in a 5s window.
+const WRITE_FAIL_MS = 30_000;
 const TOP_HITS = 3;
 
 export function useMemoryEngineStatus(): EngineStatus {
   const connection = useUiConnectionState();
   const [lastHitAt, setLastHitAt] = useState<number | null>(null);
   const [lastEmpty, setLastEmpty] = useState(false);
+  const [lastWriteFailAt, setLastWriteFailAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -30,8 +34,17 @@ export function useMemoryEngineStatus(): EngineStatus {
     setLastEmpty(p.results_count === 0);
   });
 
+  useUiEventListener("memory_write_failed", () => {
+    setLastWriteFailAt(Date.now());
+  });
+
   return useMemo<EngineStatus>(() => {
     if (connection !== "open") return { status: "Offline", tone: "danger" };
+    // A refused write outranks recall state: reads can look perfectly healthy
+    // while every new memory is being dropped on the floor.
+    if (lastWriteFailAt !== null && now - lastWriteFailAt < WRITE_FAIL_MS) {
+      return { status: "Write Failed", tone: "danger" };
+    }
     if (lastHitAt === null) return { status: "Standby", tone: "cyan" };
     if (now - lastHitAt < RECALLING_MS) {
       return lastEmpty
@@ -39,7 +52,7 @@ export function useMemoryEngineStatus(): EngineStatus {
         : { status: "Recalling", tone: "success" };
     }
     return { status: "Idle", tone: "cyan" };
-  }, [connection, lastHitAt, lastEmpty, now]);
+  }, [connection, lastHitAt, lastEmpty, lastWriteFailAt, now]);
 }
 
 /** Header pill for the Memory Engine panel.
@@ -55,6 +68,7 @@ export function MemoryEngineStatusPill() {
 
 export function MemoryEnginePanel() {
   const last = useUiEvent("memory_hit");
+  const lastWriteFail = useUiEvent("memory_write_failed");
 
   // Recall rate over the session: searches that returned at least one hit.
   const [searches, setSearches] = useState(0);
@@ -62,6 +76,13 @@ export function MemoryEnginePanel() {
   useUiEventListener("memory_hit", (p) => {
     setSearches((n) => n + 1);
     if (p.results_count > 0) setRecalled((n) => n + 1);
+  });
+
+  // Refused writes. Counted for the session rather than shown transiently:
+  // the damage is cumulative, and one dropped memory is worth seeing.
+  const [writeFailures, setWriteFailures] = useState(0);
+  useUiEventListener("memory_write_failed", () => {
+    setWriteFailures((n) => n + 1);
   });
 
   // hits is nullable by contract — a publisher may send counts with no bodies.
@@ -110,6 +131,23 @@ export function MemoryEnginePanel() {
           {last === null || !last.query ? "—" : last.query}
         </span>
       </div>
+
+      {/* Row 3.5 — Refused writes. Hidden entirely when there are none, so it
+          reads as an alarm rather than another stat. */}
+      {writeFailures > 0 && (
+        <div className="flex items-center justify-between gap-3 min-w-0">
+          <span className="hud-label shrink-0 text-hud-danger">Writes Lost</span>
+          <div className="flex items-center gap-3 min-w-0 justify-end">
+            <span className="font-mono text-xs text-hud-danger">{writeFailures}</span>
+            <span
+              className="font-mono text-[10px] text-hud-text-dim truncate"
+              title={lastWriteFail?.reason ?? ""}
+            >
+              {lastWriteFail === null ? "" : lastWriteFail.collection}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Row 4 — Top hits with relevance bars */}
       <div className="flex flex-col gap-2">

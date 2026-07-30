@@ -34,6 +34,7 @@ const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | 
   // hits/total_entries are nullable by contract, so they can't be required
   // here — MemoryEnginePanel treats both as optional.
   memory_hit: { query: "string", results_count: "number" },
+  memory_write_failed: { collection: "string", reason: "string" },
   system_stats: {
     cpu_percent: "number",
     memory_percent: "number",

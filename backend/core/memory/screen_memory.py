@@ -5,26 +5,15 @@ from typing import List, Optional
 
 import chromadb
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
-from backend.ai_modules.llm import get_provider
+from backend.core.memory.embedding import (
+    EmbeddingUnavailable,
+    ProviderEmbeddingFunction,
+    report_write_failure,
+)
 from backend.core.memory.base import MemoryEntry, MemoryType
 from backend.database import CHROMA_PATH
 
 log = logging.getLogger(__name__)
-
-
-class ScreenEmbeddingFunction(EmbeddingFunction):
-    """Bridge between ChromaDB and LLM Provider for screen memory."""
-    def __call__(self, input):
-        llm = get_provider()
-        embeddings = []
-        for text in input:
-            try:
-                vec = llm.embed(text)
-                embeddings.append(vec)
-            except Exception as e:
-                log.error(f"Screen embedding failed: {e}")
-                embeddings.append([0.0] * 768)
-        return embeddings
 
 
 class ScreenMemory:
@@ -32,7 +21,7 @@ class ScreenMemory:
     
     def __init__(self):
         self.client = chromadb.PersistentClient(path=str(CHROMA_PATH))
-        self.ef = ScreenEmbeddingFunction()
+        self.ef = ProviderEmbeddingFunction("sg_cube_visual")
         
         # Specific collection for visual context
         self.collection = self.client.get_or_create_collection(
@@ -41,7 +30,7 @@ class ScreenMemory:
             metadata={"hnsw:space": "cosine"}
         )
 
-    def store_observation(self, observation: dict):
+    def store_observation(self, observation: dict) -> bool:
         """Embed and store a structured visual observation.
         
         observation format: {"app": str, "summary": str, "keywords": list}
@@ -67,8 +56,13 @@ class ScreenMemory:
                 metadatas=[metadata]
             )
             log.info(f"Stored visual memory: {app} -> {summary[:40]}...")
+            return True
+        except EmbeddingUnavailable as e:
+            report_write_failure("sg_cube_visual", str(e), content)
+            return False
         except Exception as e:
             log.error(f"Failed to store visual memory: {e}")
+            return False
 
     def get_recent_observations(self, limit: int = 10) -> list[dict]:
         """Return recent observations sorted by time descending."""
