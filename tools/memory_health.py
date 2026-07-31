@@ -72,8 +72,14 @@ def report_collection(client, name: str) -> dict:
     # ── duplicate rows (T-memory-duplicate-rows) ──
     docs = [d for d in (coll.get().get("documents") or []) if d]
     counts = Counter(docs)
-    dupe_rows = sum(c - 1 for c in counts.values() if c > 1)
-    print(f"   distinct documents: {len(counts)}   duplicate rows: {dupe_rows}")
+    dupe_rows = 0
+    if name == "sg_cube_timeline":
+        # Timeline is an event log — repetition is normal and expected.
+        # Only duplicate counting matters for fact stores (memories, visual).
+        print(f"   distinct documents: {len(counts)}   (duplicates not counted — event log)")
+    else:
+        dupe_rows = sum(c - 1 for c in counts.values() if c > 1)
+        print(f"   distinct documents: {len(counts)}   duplicate rows: {dupe_rows}")
     for doc, c in sorted(counts.items(), key=lambda kv: -kv[1])[:5]:
         if c > 1:
             print(f"      {c:3d}x  {doc[:64]!r}")
