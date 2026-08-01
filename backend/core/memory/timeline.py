@@ -60,11 +60,14 @@ class TimelineMemory:
     def get_recent_timeline(self, limit: int = 10) -> List[MemoryEntry]:
         """Retrieve the most recent events in reverse-chronological order."""
         try:
-            # We fetch everything and sort manually because Chroma 'get' 
-            # with sorting isn't always reliable across versions, 
-            # and 'query' is semantic, not chronological.
+            # Fetch all — Chroma get(limit=N) returns the FIRST N rows in
+            # insertion order (oldest first). Sorting a stale window just gave
+            # "newest among the oldest 20". Python sort is fine at our scale.
+            # ponytail: O(n) full-scan ceiling. At ~1000 rows this is ~10 ms.
+            # Above ~10k rows this needs cursor-based pagination or a metadata
+            # index — swap to collection.get(where={"created_at": ">X"}, ...)
+            # when that matters.
             results = self.collection.get(
-                limit=limit * 2, # Fetch more to allow for filtering/sorting
                 include=["documents", "metadatas"]
             )
             

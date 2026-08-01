@@ -67,8 +67,17 @@ class ScreenMemory:
     def get_recent_observations(self, limit: int = 10) -> list[dict]:
         """Return recent observations sorted by time descending."""
         try:
+            # Fetch all — Chroma get(limit=N) returns the FIRST N rows in
+            # insertion order (oldest first). Sorting a stale window just gave
+            # "newest among the oldest 20" — increasingly wrong as the
+            # collection grows. Python sort is fine at our scale; ceiling
+            # noted below.
+            # ponytail: O(n) full-scan ceiling. At ~1000 rows this is a ~10 ms
+            # fetch + 1 ms sort. Above ~10k rows this needs cursor-based
+            # pagination or a metadata index — swap to
+            # collection.get(where={"created_at": ">X"}, ...) or a
+            # sorted-list-of-ids sidecar when that matters.
             results = self.collection.get(
-                limit=limit * 2,
                 include=["documents", "metadatas"]
             )
             entries = []
