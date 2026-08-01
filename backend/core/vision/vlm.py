@@ -2,7 +2,10 @@ import json
 import logging
 from typing import Any, Optional
 
-from backend.ai_modules.llm.ollama_client import generate as ollama_generate
+from backend.ai_modules.llm.ollama_client import (
+    generate as ollama_generate,
+    generate_sync as ollama_generate_sync,
+)
 from backend.server.config import settings
 
 log = logging.getLogger(__name__)
@@ -23,9 +26,9 @@ Be specific. If code is visible, mention the language. If a website is open, men
 """
 
 async def analyze_screenshot(image_b64: str, window_title: str) -> Optional[dict]:
-    """Use a local VLM to summarize the screenshot."""
+    """Use a local VLM to summarize the screenshot. Async — planner tool path."""
     prompt = f"Focused Window: {window_title}\n\nWhat is on the screen?"
-    
+
     try:
         response = await ollama_generate(
             prompt=prompt,
@@ -35,17 +38,41 @@ async def analyze_screenshot(image_b64: str, window_title: str) -> Optional[dict
             json_mode=True,
             timeout=120.0 # Vision models take longer
         )
-        
-        data = json.loads(response)
-        # Ensure it has the right fields
-        if "app" not in data: data["app"] = window_title
-        if "summary" not in data: data["summary"] = "User looking at screen."
-        if "keywords" not in data: data["keywords"] = []
-        if "objects" not in data: data["objects"] = []
-        if "ocr" not in data: data["ocr"] = []
+        return _parse_observation(response, window_title)
 
-        return data
-        
     except Exception as e:
         log.error(f"VLM analysis failed: {e}")
         return None
+
+
+def analyze_screenshot_sync(image_b64: str, window_title: str) -> Optional[dict]:
+    """Blocking twin of analyze_screenshot — for the vision loop's background
+    thread, which must never create an event loop next to uvicorn's."""
+    prompt = f"Focused Window: {window_title}\n\nWhat is on the screen?"
+
+    try:
+        response = ollama_generate_sync(
+            prompt=prompt,
+            system=VLM_SYSTEM_PROMPT,
+            images=[image_b64],
+            model=settings.vision_model,
+            json_mode=True,
+            timeout=120.0 # Vision models take longer
+        )
+        return _parse_observation(response, window_title)
+
+    except Exception as e:
+        log.error(f"VLM analysis failed: {e}")
+        return None
+
+
+def _parse_observation(response: str, window_title: str) -> dict:
+    data = json.loads(response)
+    # Ensure it has the right fields
+    if "app" not in data: data["app"] = window_title
+    if "summary" not in data: data["summary"] = "User looking at screen."
+    if "keywords" not in data: data["keywords"] = []
+    if "objects" not in data: data["objects"] = []
+    if "ocr" not in data: data["ocr"] = []
+
+    return data

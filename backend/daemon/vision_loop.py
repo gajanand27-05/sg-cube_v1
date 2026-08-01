@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import threading
 import time
@@ -6,7 +5,7 @@ from typing import Optional
 
 from backend.core.events import get_bus, Priority
 from backend.core.vision.capture import capture_screen
-from backend.core.vision.vlm import analyze_screenshot
+from backend.core.vision.vlm import analyze_screenshot_sync
 from backend.core.memory.screen_memory import screen_memory
 from backend.core.memory.timeline import timeline
 from backend.daemon.ui_events import VisionUpdateEvent
@@ -39,30 +38,28 @@ class VisionLoop:
         log.info("Vision loop stopped")
 
     def _run_loop(self):
-        # Vision tasks are async, but the loop is sync-threaded.
-        # We use a dedicated event loop for this thread.
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
+        # All-sync by design: a thread-local ProactorEventLoop next to
+        # uvicorn's own proactor loop hung nondeterministically on Windows
+        # (Py3.12) — the loop ticked silently and never published. No event
+        # loop is created in this thread at all.
         while not self._stop_event.is_set():
             if self.enabled:
                 try:
-                    loop.run_until_complete(self._step())
+                    self._step()
                 except Exception as e:
                     log.error(f"Vision loop step failed: {e}")
-            
+
             # Wait for interval or stop signal
             self._stop_event.wait(self.interval)
-        
-        loop.close()
 
-    async def _step(self):
+    def _step(self):
         """Single 'glance' at the screen."""
-        log.debug("Vision loop: taking a glance...")
-        
+        log.info("Vision loop: taking a glance...")
+
         # 1. Capture
         img_b64, title = capture_screen()
         if not img_b64:
+            log.warning("Vision loop: capture returned no image, skipping step")
             return
 
         # 2. Simple Change Detection (Efficiency Improvement)
@@ -71,11 +68,16 @@ class VisionLoop:
         if current_hash == self._last_img_hash:
             log.debug("Vision loop: screen unchanged, skipping VLM.")
             return
-            
+
         # 3. Analyze (Local VLM)
-        observation = await analyze_screenshot(img_b64, title)
+        observation = analyze_screenshot_sync(img_b64, title)
         if not observation:
-            return
+            # Graceful fallback: store a basic observation from the window title
+            # alone so the timeline still advances and the WS event still fires.
+            # The VLM is only needed for detailed analysis — without it we still
+            # track which app is active.
+            log.debug("VLM unavailable, storing basic observation")
+            observation = {"app": title, "summary": f"Active window: {title}", "keywords": [title], "objects": [], "ocr": []}
             
         # 4. Store (Semantic Memory + Timeline)
         self._last_img_hash = current_hash

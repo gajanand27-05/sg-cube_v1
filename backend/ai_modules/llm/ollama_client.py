@@ -82,6 +82,49 @@ async def generate(
         return r.json()["message"]["content"]
 
 
+def generate_sync(
+    prompt: str,
+    *,
+    system: str = "",
+    model: str | None = None,
+    temperature: float = 0.0,
+    json_mode: bool = False,
+    timeout: float = 30.0,
+    images: list[str] | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    **kwargs: Any,
+) -> str:
+    """Blocking twin of generate() — for threads that must not touch an event
+    loop (the vision loop's background thread under uvicorn: a thread-local
+    ProactorEventLoop hung nondeterministically next to uvicorn's own proactor
+    loop on Windows/Py3.12). Same wire format as the async twin."""
+    model = model or settings.fast_model
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    user_msg: dict[str, Any] = {"role": "user", "content": prompt}
+    if images:
+        user_msg["images"] = images
+    messages.append(user_msg)
+
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "options": {"temperature": temperature},
+    }
+    if json_mode:
+        payload["format"] = "json"
+
+    with httpx.Client(timeout=timeout) as client:
+        r = client.post(
+            f"{_endpoint(base_url)}/api/chat", json=payload, headers=_headers(api_key)
+        )
+        r.raise_for_status()
+        return r.json()["message"]["content"]
+
+
 async def chat_stream(
     messages: list[dict],
     *,

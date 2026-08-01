@@ -7,7 +7,7 @@ from fastapi.responses import Response
 
 from backend.core.memory.screen_memory import screen_memory
 from backend.core.vision.capture import capture_screen
-from backend.daemon.vision_loop import latest_observation
+from backend.daemon import vision_loop
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/vision", tags=["vision"])
@@ -24,9 +24,10 @@ def get_screenshot():
 
 @router.get("/latest")
 def get_latest_vision():
+    obs = vision_loop.latest_observation
     return {
-        "observation": latest_observation,
-        "active_window": latest_observation.get("app") if latest_observation else None,
+        "observation": obs,
+        "active_window": obs.get("app") if obs else None,
     }
 
 
