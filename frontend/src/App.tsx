@@ -9,6 +9,10 @@ import {
   MemoryEngineStatusPill,
 } from "@/components/MemoryEnginePanel";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import {
+  VisionModulePanel,
+  VisionStatusPill,
+} from "@/components/VisionModulePanel";
 
 export default function App() {
   return (
@@ -77,8 +81,8 @@ export default function App() {
           >
             <MemoryEnginePanel />
           </Panel>
-          <Panel title="Vision Module" number="03" status="Standby" statusTone="warning">
-            <Placeholder label="camera · object detection · OCR · scene · navigation" />
+          <Panel title="Vision Module" number="03" statusSlot={<VisionStatusPill />}>
+            <VisionModulePanel />
           </Panel>
           <Panel title="SG-Cube Architecture" className="flex-1">
             <Placeholder label="voice · ai core · memory · vision · tools" />

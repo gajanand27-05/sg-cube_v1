@@ -35,6 +35,9 @@ const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | 
   // here — MemoryEnginePanel treats both as optional.
   memory_hit: { query: "string", results_count: "number" },
   memory_write_failed: { collection: "string", reason: "string" },
+  // windows/objects/ocr are nullable by contract, so they can't be required
+  // here — VisionModulePanel treats all three as optional.
+  vision_update: { description: "string" },
   system_stats: {
     cpu_percent: "number",
     memory_percent: "number",
@@ -207,6 +210,24 @@ export function useUiEvent<T extends UiEventType>(
     return subscribe<T>(type, (env) => setPayload(env.payload));
   }, [type]);
   return payload;
+}
+
+/** Same seeding-from-latest contract as useUiEvent, but keeps the whole
+ *  envelope so consumers get the server-side timestamp useUiEvent drops.
+ *  Seeds from the module cache without replaying through subscribe(), so
+ *  useUiEventCounter is never inflated by a remount — T-panel-listener-
+ *  state-lost-on-remount fix direction. */
+export function useUiEventEnvelope<T extends UiEventType>(
+  type: T,
+): UiEventEnvelope<T> | null {
+  const seed = latest.get(type) as UiEventEnvelope<T> | undefined;
+  const [env, setEnv] = useState<UiEventEnvelope<T> | null>(seed ?? null);
+  useEffect(() => {
+    const cached = latest.get(type) as UiEventEnvelope<T> | undefined;
+    if (cached) setEnv(cached);
+    return subscribe<T>(type, (e) => setEnv(e));
+  }, [type]);
+  return env;
 }
 
 export function useUiEventListener<T extends UiEventType>(

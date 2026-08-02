@@ -68,6 +68,20 @@ export type MemoryWriteFailedPayload = {
   content_preview: string;
 };
 
+export type DetectedObject = {
+  label: string;
+  confidence: number; // 0.0 - 1.0
+};
+
+/** windows/objects/ocr are nullable by contract — the VLM may see none of them. */
+export type VisionUpdatePayload = {
+  description: string;
+  /** Always a single-element list containing the active app's name. */
+  windows: string[] | null;
+  objects: DetectedObject[] | null;
+  ocr: string[] | null;
+};
+
 export type SystemStatsPayload = {
   cpu_percent: number;
   memory_percent: number;
@@ -91,6 +105,7 @@ export type UiEventPayloadMap = {
   memory_hit: MemoryHitPayload;
   memory_write_failed: MemoryWriteFailedPayload;
   system_stats: SystemStatsPayload;
+  vision_update: VisionUpdatePayload;
 };
 
 export type UiEventType = keyof UiEventPayloadMap;
