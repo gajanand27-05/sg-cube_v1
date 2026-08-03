@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from typing import List, Optional, Tuple, AsyncGenerator, Any
@@ -20,6 +21,25 @@ from backend.daemon.ui_events import AgentCompletedEvent
 log = logging.getLogger(__name__)
 
 MAX_ITER = 5
+
+# T-planner-canvas-chain: "Summarize results for the user." cues the planner
+# toward a spoken summary, and some fraction of the time it fabricates a
+# render claim instead of calling render_canvas. Canvas-intent queries get
+# an explicit render instruction on the iteration-2 handback.
+_CANVAS_INTENT_RE = re.compile(r"\bcanvas\b|\bshow\s+me\b|\bdisplay\b|\brender\b", re.IGNORECASE)
+
+
+def _iteration_instruction(user_query: str) -> str:
+    """The instruction handed back to the planner with tool results.
+
+    Kept as one function so the canvas-chain probe can validate the real
+    path instead of its own copy of the string."""
+    if _CANVAS_INTENT_RE.search(user_query):
+        return (
+            "Now call render_canvas with widgets built from these tool_results. "
+            "Do NOT emit final_response until render_canvas has actually been called."
+        )
+    return "Summarize results for the user."
 
 
 def _plan_confidence(calls: list[dict]) -> float:
@@ -240,7 +260,7 @@ class CommanderAgent:
                     history.append({"role": "assistant", "content": json.dumps({"tool_calls": valid_calls})})
                     history.append({
                         "role": "user", 
-                        "content": json.dumps({"tool_results": batch_results, "instruction": "Summarize results for the user."})
+                        "content": json.dumps({"tool_results": batch_results, "instruction": _iteration_instruction(text)})
                     })
 
         exhausted = "I tried a few steps but couldn't finish that."

@@ -222,6 +222,8 @@ the canvas", "add X"):
     get_weather_data, get_map, etc.), then call render_canvas with
     a widgets list built from that data. Never ask the user to
     specify the widget type — you pick.
+  - Never emit final_response claiming a canvas was rendered unless
+    render_canvas was actually called in this same response.
 
 Output ONLY a JSON object with:
 {{"tool_calls": [{{"name": "capability", "args": {{...}}, "confidence": 0.0-1.0, "reasoning": "..."}}]}}
