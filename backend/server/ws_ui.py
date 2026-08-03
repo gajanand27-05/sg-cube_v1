@@ -28,6 +28,7 @@ from backend.daemon.ui_events import (
     SelfHealingEvent,
     SpeechInterruptedEvent,
     SpokenResponse,
+    STTPartialEvent,
     SystemStatsEvent,
     TokenStreamEvent,
     ToolFinishedEvent,
@@ -51,6 +52,7 @@ TYPE_MAP: dict[type, str] = {
     # got randomly-shaped objects depending on which fired.
     Executed: "executed",
     SpokenResponse: "spoken_response",
+    STTPartialEvent: "stt_partial",
     TokenStreamEvent: "token_stream",
     ConfidenceEvent: "confidence",
     SelfHealingEvent: "self_healing",

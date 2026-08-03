@@ -13,6 +13,10 @@ import {
   VisionModulePanel,
   VisionStatusPill,
 } from "@/components/VisionModulePanel";
+import { LiveTranscriptionPanel } from "@/components/LiveTranscriptionPanel";
+import { ConfidencePanel } from "@/components/ConfidencePanel";
+import { LatencyPanel } from "@/components/LatencyPanel";
+import { ActivityTimelinePanel } from "@/components/ActivityTimelinePanel";
 
 export default function App() {
   return (
@@ -38,13 +42,13 @@ export default function App() {
 
         {/* CENTER COLUMN */}
         <div className="flex flex-col gap-3 min-h-0">
-          <Panel title="Live Transcription" className="flex-[2]">
-            <Placeholder label="live transcript stream" />
+          <Panel title="Live Transcription" className="flex-[2]" bodyClassName="p-4 h-full">
+            <LiveTranscriptionPanel />
           </Panel>
 
           <div className="grid grid-cols-[200px_minmax(0,1fr)_200px] gap-3 flex-1">
             <Panel title="Confidence">
-              <Placeholder label="89%" />
+              <ConfidencePanel />
             </Panel>
             <Panel bodyClassName="p-0 h-full">
               <CubeVisualization />
@@ -54,14 +58,14 @@ export default function App() {
                 <Placeholder label="LOCAL-FIRST" />
               </Panel>
               <Panel title="Latency" className="flex-1">
-                <Placeholder label="12 ms" />
+                <LatencyPanel />
               </Panel>
             </div>
           </div>
 
           <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-3 flex-1">
-            <Panel title="Activity Timeline">
-              <Placeholder label="event stream" />
+            <Panel title="Activity Timeline" bodyClassName="p-4 h-full">
+              <ActivityTimelinePanel />
             </Panel>
             <Panel title="Quick Actions">
               <Placeholder label="web search · screen reader · file manager · open apps · take note · calculator" />

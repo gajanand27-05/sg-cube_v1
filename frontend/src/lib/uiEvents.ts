@@ -95,6 +95,43 @@ export type SystemStatsPayload = {
   temp_c: number | null;
 };
 
+export type STTPartialPayload = {
+  text: string;
+  is_final: boolean;
+};
+
+export type TokenStreamPayload = {
+  agent_name: string;
+  token: string;
+  /** Cumulative response text — use this, never accumulate `token` yourself. */
+  full_content: string;
+};
+
+/** Wire shape: _serialize flattens the nested ReliabilityMetrics dataclass
+ *  into top-level metric_* keys (ws_ui.py) — this map reflects that. */
+export type ConfidencePayload = {
+  request_id: string;
+  metric_tool_success_rate: number;
+  metric_avg_response_sec: number;
+  metric_memory_recall_pct: number;
+  metric_hallucination_passed: number;
+  metric_hallucination_total: number;
+  details: Record<string, unknown> | null;
+};
+
+export type ToolStartedPayload = {
+  tool_name: string;
+  args: Record<string, unknown>;
+};
+
+export type ToolFinishedPayload = {
+  tool_name: string;
+  status: string;
+  result: string | null;
+  error: string | null;
+  latency_ms: number;
+};
+
 export type UiEventPayloadMap = {
   ai_metrics: AIMetricsPayload;
   intent_resolved: IntentResolvedPayload;
@@ -106,6 +143,11 @@ export type UiEventPayloadMap = {
   memory_write_failed: MemoryWriteFailedPayload;
   system_stats: SystemStatsPayload;
   vision_update: VisionUpdatePayload;
+  stt_partial: STTPartialPayload;
+  token_stream: TokenStreamPayload;
+  confidence: ConfidencePayload;
+  tool_started: ToolStartedPayload;
+  tool_finished: ToolFinishedPayload;
 };
 
 export type UiEventType = keyof UiEventPayloadMap;

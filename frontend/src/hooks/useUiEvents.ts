@@ -38,6 +38,11 @@ const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | 
   // windows/objects/ocr are nullable by contract, so they can't be required
   // here — VisionModulePanel treats all three as optional.
   vision_update: { description: "string" },
+  stt_partial: { text: "string" },
+  token_stream: { full_content: "string" },
+  confidence: { metric_tool_success_rate: "number", metric_memory_recall_pct: "number" },
+  tool_started: { tool_name: "string" },
+  tool_finished: { tool_name: "string", status: "string" },
   system_stats: {
     cpu_percent: "number",
     memory_percent: "number",
