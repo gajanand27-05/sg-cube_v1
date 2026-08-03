@@ -6,6 +6,7 @@ import {
   useUiEvent,
   useUiEventCounter,
   useUiEventListener,
+  useUiEventEnvelope,
 } from "@/hooks/useUiEvents";
 
 type StatusTone = "success" | "warning" | "danger" | "cyan" | "muted";
@@ -113,12 +114,17 @@ export function AICorePanel() {
     if (p.action === "fallback" && p.fallback) setFallbackTarget(p.fallback);
   });
 
-  const [lastConfidence, setLastConfidence] = useState<number | null>(null);
-  const [lastResponseAt, setLastResponseAt] = useState<number | null>(null);
-  useUiEventListener("agent_completed", (p) => {
-    setLastConfidence(p.confidence);
-    setLastResponseAt(Date.now());
-  });
+  // Confidence + Last Response must survive a remount (HMR/StrictMode),
+  // so they come from the cache-seeded envelope, not a listener-backed
+  // useState — T-panel-listener-state-lost-on-remount.
+  const completedEnv = useUiEventEnvelope("agent_completed");
+  const lastConfidence =
+    completedEnv === null ||
+    typeof completedEnv.payload.confidence !== "number"
+      ? null
+      : completedEnv.payload.confidence;
+  const lastResponseAt =
+    completedEnv === null ? null : Date.parse(completedEnv.timestamp);
 
   const [latencyHistory, setLatencyHistory] = useState<number[]>([]);
   useUiEventListener("ai_metrics", (p) => {
