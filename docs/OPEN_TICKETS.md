@@ -398,6 +398,8 @@ Reads changed too, and this is a quiet improvement: Chroma calls the embedding f
 
 Before closing: `tools/memory_health.py` must report `zero_vectors=0`. Note the repair needs the embedding backend *up and staying up* — a run that half-fails re-poisons the rows it touches. Verified 2026-07-30 that local Ollama answers a real `embed()` (768 dims, norm 22.8), but that is a point-in-time check, not a guarantee.
 
+> **RESOLVED 2026-08-03.** `tools/memory_health.py` reports clean across all three collections: `sg_cube_memories` 6 rows / 0 zero vectors, `sg_cube_visual` 286 / 0, `sg_cube_timeline` 917 / 0 (embeddings readable again — see T-timeline-index-desync). The repair was done with the one-off tools in `tools/` (`purge_scan.py`, `purge_execute.py`, `dedupe_memories.py`, `dedupe_visual.py`), which were left in the tree as the documented procedure.
+
 ## T-memory-duplicate-rows (opened 2026-07-30 — NOT FIXED, recorded only)
 
 **Observed**, `tools/memory_health.py`: 29 duplicate rows in `sg_cube_memories` (37 rows, 8 distinct documents), 39 in `sg_cube_visual`, 290 in `sg_cube_timeline` (1053 rows, 763 distinct). Worst offenders: `'User asked: "what time is it"'` x50, `'User likes dark mode'` x6.
@@ -430,6 +432,8 @@ Two caveats on that: the HTTP `/chat` and proactive paths reach Commander *witho
 
 **Baseline was 1054 rows when handed over and is 1058 now.** The growth is this session's own verification turns — every real Brain turn writes one `user_query` row. Worth knowing before the repair: probing the voice path inflates the very table being repaired. `sg_cube_memories` (37) and `sg_cube_visual` (209) are unchanged.
 
+> **RESOLVED 2026-08-03** — purge-and-merge executed. `sg_cube_memories`: 37 → 6 rows (0 duplicates), `sg_cube_visual`: 306 → 286 (0 duplicates), `sg_cube_timeline`: 1058 → 917. The 5 recorded hallucination patterns are all gone (0 remaining each); the surviving `"what time is it"` rows are a legitimate repeated command in an event log, not junk. One-off purge tools remain in `tools/` (`purge_scan.py` dry-run, `purge_execute.py`, `dedupe_memories.py`, `dedupe_visual.py`).
+
 ## T-timeline-index-desync (opened 2026-07-30 — UNDIAGNOSED)
 
 **Observed**: reading embeddings from `sg_cube_timeline` fails for the whole collection, not for particular rows:
@@ -448,3 +452,5 @@ The distinction matters for the repair: the other two collections can be re-embe
 **Still being written to.** 1053 → 1058 over this session. The writer is `timeline.record_event` from `commander.py:139`, once per Brain turn; `vision_loop.py:87` also writes on the vision path. So the collection is growing while unreadable, and every probe of the voice path adds to it.
 
 **Undiagnosed. Not attempted**: no repair, no rebuild, no root-cause work. Unknown whether writes are also silently failing, whether it is one bad segment or the whole index, and when it started. First step is probably to compare `chroma.sqlite3`'s segment/embedding tables against the collection's id list — the old `_check_chroma_sql.py` probe did exactly that kind of dump before being consolidated away, and is recoverable from git history if useful.
+
+> **RESOLVED 2026-08-03** — the collection rebuilt (per `docs/MEMORY_REPAIR_RULES.md`) during the T-memory-duplicate-rows purge. `coll.get(include=["embeddings"])` returns all 917 rows; `tools/memory_health.py` reads `zero_vectors=0/917`. Root cause never isolated — the rebuild cleared it, and the write path (commander/vision) has been appending clean rows since. Recurrence would need the sqlite-segment comparison from the original first step; documented here in case.
