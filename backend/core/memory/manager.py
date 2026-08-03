@@ -90,9 +90,12 @@ class MemoryManager:
             timeline_str = ""
 
         context = "── SYSTEM MEMORY ──────────────────────────────────\n"
+        if stm_context:
+            context += f"Recent Conversation:\n{stm_context}\n"
+
         if fact_str:
             context += f"Relevant Facts:\n{fact_str}\n"
-        
+
         if timeline_str:
             context += f"\nRecent Activity Timeline:\n{timeline_str}\n"
 

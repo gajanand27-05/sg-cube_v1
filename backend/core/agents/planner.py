@@ -95,7 +95,18 @@ class PlannerAgent(BaseInternalAgent):
                     yield {"type": "token", "content": token}
                 m = re.search(r"```(?:json)?\s*\n?(.*?)```", full_content, re.DOTALL)
                 clean = m.group(1).strip() if m else full_content.strip()
-                parsed = json.loads(clean)
+                try:
+                    parsed = json.loads(clean)
+                except (json.JSONDecodeError, ValueError):
+                    # Second bad reply in a row. Don't raise — that turns a
+                    # formatting failure into "I tried a few steps but couldn't
+                    # finish that." from Commander's outer except. If the model
+                    # answered in plain prose, the prose IS the answer; speak it.
+                    self._emit("parse_failed", reason="bad_json_after_retry")
+                    if clean and not clean.lstrip().startswith(("{", "[")):
+                        parsed = {"final_response": clean}
+                    else:
+                        parsed = {"final_response": "I had trouble structuring that plan — could you ask again?"}
 
             if "final_response" in parsed:
                 # This branch returns before the tool_calls reasoning publish

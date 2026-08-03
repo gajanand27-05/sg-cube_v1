@@ -8,6 +8,10 @@ import pyautogui
 
 from backend.core.tools.registry import CapabilityTier, ToolResult, tool
 
+# Cap on OCR text returned to the agent loop — a full-screen Tesseract pass on
+# a text-dense display can exceed the planner's useful context budget.
+MAX_CHARS = 6000
+
 @tool(tier=CapabilityTier.READONLY)  # tier: captures screen + OCR, no state change
 def ocr_screen() -> ToolResult:
     """Read text visible anywhere on the screen using OCR. Takes a screenshot

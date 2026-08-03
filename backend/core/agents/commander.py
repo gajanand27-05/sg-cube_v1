@@ -172,8 +172,11 @@ class CommanderAgent:
                     if errors:
                         log.warning(f"Commander: Guardian rejected parts of the plan: {errors}")
                         last_error = errors[-1]
-                        path = self_healer.analyze(calls[0].get("name", "unknown"), last_error)
-                        instruction = self_healer.get_instruction(path, calls[0].get("name", "unknown"), last_error)
+                        # Guardian can reject a plan whose calls list is empty or
+                        # malformed — don't let the recovery path itself crash.
+                        failed_tool = calls[0].get("name", "unknown") if calls and isinstance(calls[0], dict) else "unknown"
+                        path = self_healer.analyze(failed_tool, last_error)
+                        instruction = self_healer.get_instruction(path, failed_tool, last_error)
                         
                         history.append({"role": "assistant", "content": json.dumps({"tool_calls": calls})})
                         history.append({"role": "user", "content": f"Correction needed: {instruction}"})

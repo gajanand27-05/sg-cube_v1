@@ -67,9 +67,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Wildcard + credentials made Starlette echo any Origin back with
+# Access-Control-Allow-Credentials, letting arbitrary websites drive the API
+# from a browser. Only the Vite dev server needs CORS — the built frontend is
+# served same-origin from this app.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

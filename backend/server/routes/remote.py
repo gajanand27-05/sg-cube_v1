@@ -26,6 +26,17 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/remote", tags=["remote"])
 
 
+def _is_private_host(host: str) -> bool:
+    """True for loopback / RFC1918 peers. The old startswith('172.') check
+    also matched public 172.x space outside 172.16.0.0/12."""
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return addr.is_loopback or addr.is_private
+
+
 class RemoteConnection:
     def __init__(self, websocket: WebSocket, device_id: str):
         self.websocket = websocket
@@ -36,17 +47,10 @@ class RemoteConnection:
         self.is_local = self._check_local()
 
     def _check_local(self) -> bool:
-        """Heuristic to check if the device is on the local network."""
+        """Check if the device is on the local network."""
         if not self.websocket.client:
             return False
-        host = self.websocket.client.host
-        # Basic private IP range checks
-        return (
-            host == "127.0.0.1" or
-            host.startswith("192.168.") or
-            host.startswith("10.") or
-            host.startswith("172.")  # Simplified 172.16.0.0/12 check
-        )
+        return _is_private_host(self.websocket.client.host)
 
     async def send_json(self, data: dict):
         if self.is_active:
@@ -158,6 +162,15 @@ manager = RemoteManager()
 
 @router.websocket("/connect/{device_id}")
 async def websocket_endpoint(websocket: WebSocket, device_id: str):
+    # This socket can trigger wake/dispatch and write the host clipboard.
+    # It carries no credential, so at minimum refuse peers outside the
+    # LAN/loopback — otherwise binding APP_HOST=0.0.0.0 hands those
+    # capabilities to any internet client.
+    peer = websocket.client.host if websocket.client else ""
+    if not _is_private_host(peer):
+        log.warning(f"Rejected remote WS from non-private address {peer!r} (device_id={device_id!r})")
+        await websocket.close(code=1008)
+        return
     conn = await manager.connect(websocket, device_id)
     try:
         while True:

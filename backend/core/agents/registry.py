@@ -33,7 +33,13 @@ class AgentRegistry:
         log.debug("AgentRegistry subscribed to event bus")
 
     def _ensure_subscribed(self):
-        if not self._subscribed:
+        # Double-checked under the lock: two threads racing past the flag would
+        # both subscribe, and every event would then be handled twice.
+        if self._subscribed:
+            return
+        with self._lock:
+            if self._subscribed:
+                return
             self._subscribe()
 
     def _ensure(self, agent_name: str) -> dict:
