@@ -281,7 +281,7 @@ Each completed command also opens a 3s window where loudness alone re-triggers. 
 
 **Not verified**: no live multi-minute ambient-audio observation was run. The gate is unit-tested only.
 
-## T-panel-listener-state-lost-on-remount (opened 2026-07-19)
+## T-panel-listener-state-lost-on-remount (opened 2026-07-19 — RESOLVED 2026-08-03)
 
 **Observed**: after a live query, the AI Core panel showed MODEL / TOK/S / LATENCY / INFER / REASONING populated, but CONFIDENCE, LAST RESPONSE and the tier counters blank — all from the same turn.
 
@@ -311,6 +311,8 @@ Note the naive test (ask another question with the panel open) passes and confir
 - LAST RESPONSE -> needs an arrival time. The envelope carries `timestamp` (stamped server-side at `ws_ui.py:105`, typed in `uiEvents.ts`) but `useUiEvent` discards it at :203 (`setPayload(env.payload)`). Either add a `useUiEventEnvelope` variant or let `useUiEvent` optionally return the envelope.
 
 **Also correct a comment while in there**: the tier counters are documented as "session-only ... a runtime diagnostic". They are actually *since-last-mount* and reset on every HMR update. The behaviour is fine; the comment overclaims.
+
+> **RESOLVED 2026-08-03.** Both remaining halves done in `AICorePanel.tsx`: CONFIDENCE and LAST RESPONSE now come from a single `useUiEventEnvelope("agent_completed")` (cache-seeded via the module-level `latest` map — survives remount; timestamp from the envelope replaces `Date.now()`). The `useUiEventEnvelope` variant (useUiEvents.ts:220) was built in the meantime, so the ticket's "add a variant" option was already landed. The counter overclaim comment is gone from the tree (removed in an earlier refactor) — the current counters doc is accurate ("counts since last mount"). Remaining listener-backed values (`fallbackTarget`, `latencyHistory` sparkline) are transient diagnostics by design, not history; not part of this ticket.
 
 **Found by**: the panel diagnosing itself.
 
