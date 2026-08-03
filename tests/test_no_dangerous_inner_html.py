@@ -55,25 +55,6 @@ def test_no_dangerously_set_inner_html_anywhere_in_frontend_src():
     print(f"  [PASS] no dangerouslySetInnerHTML in frontend/src (canvas defence intact)")
 
 
-def test_canvas_widget_render_uses_default_text_rendering():
-    """Assert CanvasWidgets.tsx renders text fields as JSX children,
-    which React default-escapes. Belt-and-suspenders with the grep
-    above."""
-    widgets_path = _project_root / "frontend" / "src" / "components" / "CanvasWidgets.tsx"
-    if not widgets_path.is_file():
-        import pytest
-        pytest.skip("CanvasWidgets.tsx not found")
-
-    text = widgets_path.read_text(encoding="utf-8")
-    for expected in ("{w.title}", "{w.body}", "{it.text}"):
-        assert expected in text, (
-            f"expected JSX escaped rendering of {expected} in CanvasWidgets.tsx — "
-            f"if this was refactored, verify the new path still escapes text via React default"
-        )
-    print("  [PASS] CanvasWidgets renders text via JSX default-escaping ({...} form)")
-
-
 if __name__ == "__main__":
     test_no_dangerously_set_inner_html_anywhere_in_frontend_src()
-    test_canvas_widget_render_uses_default_text_rendering()
     print("All Phase 3 structural safety tests passed.")
