@@ -81,7 +81,7 @@ Recorded here rather than left in commit `dc6349f`'s message, where it was invis
 
 **Fix**: publish a short honest line on the `final_response` branch too. Deliberately not the answer text: the ticker is one truncated line and the answer already surfaces elsewhere.
 
-## T-planner-canvas-chain (opened 2026-07-09, re-classified 2026-07-10)
+## T-planner-canvas-chain (opened 2026-07-09, re-classified 2026-07-10 — RESOLVED 2026-08-03)
 
 **The bug**: On canvas requests, the user asks to render a widget and gets a spoken text answer instead.
 
@@ -93,6 +93,8 @@ Recorded here rather than left in commit `dc6349f`'s message, where it was invis
 **Fix direction**: Commander should detect canvas-intent in the original user query and swap the iteration-2 instruction from `"Summarize results for the user."` to something like `"Now call render_canvas with widgets built from these tool_results. Do NOT emit final_response until render_canvas has actually been called."` Alternatively (or additionally), harden the Planner system prompt: `"Never emit final_response claiming a canvas was rendered unless render_canvas was actually called in this same response."` The Commander change is the tighter fix — the Planner change is a safety net.
 
 **Regression probe**: `tools/canvas_chain_probe.py` (untracked). Reruns cheap. After any fix, target is turn-2 render_canvas at 9/9 across all three phrasings.
+
+> **RESOLVED 2026-08-03.** Fixed per the fix direction: `commander.py` now routes the iteration-2 instruction through `_iteration_instruction()`, which detects canvas-intent (`canvas`/`show me`/`display`/`render`) and swaps in "Now call render_canvas with widgets built from these tool_results. Do NOT emit final_response until render_canvas has actually been called." The planner system prompt gained the safety-net line ("Never emit final_response claiming a canvas was rendered unless render_canvas was actually called in this same response"), and the probe now imports `_iteration_instruction` so it validates the real path, not a copy. Probe result: turn-2 `render_canvas` **9/9** across all three phrasings (was 7/9 with 2/9 hallucinated completions). Regression check: `tests/test_commander_canvas_instruction.py` (canvas phrasings swap, non-canvas keep the summary cue).
 
 ## T-echo-cancellation (Phase 4 out-of-scope, may resurface)
 
