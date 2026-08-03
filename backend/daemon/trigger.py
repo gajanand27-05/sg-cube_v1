@@ -25,6 +25,7 @@ from backend.core.events import get_bus, Priority
 from backend.core.state import AssistantState, manager as state_manager
 from backend.core.dogfooding import ledger as dogfooding_ledger
 from backend.core.latency import TurnLatency, ledger as latency_ledger
+from backend.server.config import settings
 from backend.daemon.ui_events import (
     CommandTranscribed,
     Executed,
@@ -94,8 +95,11 @@ def _emit(emit: EmitFn | None, event: Any) -> None:
 
 def on_wake_detected(emit: EmitFn | None = None) -> None:
     """Fires the instant the wake phrase is recognised."""
-    # Phase C2: Interrupt any in-progress speech immediately
-    stop_speech()
+    # Phase C2: Interrupt any in-progress speech immediately. Under the E1
+    # echo-test flag, defer the stop until after capture (handle_wake) so the
+    # mic records the full utterance instead of a fragment + silence.
+    if not settings.defer_stop_speech_after_capture:
+        stop_speech()
     # Phase 4B: drain any queued sentences so they don't resume speaking
     # after the interrupt.
     get_sentence_queue().interrupt()
@@ -116,7 +120,8 @@ def on_barge_in(rms: float, emit: EmitFn | None = None) -> None:
     frontend can reflect the "I cut you off" transition, not just a
     neutral wake.
     """
-    stop_speech()
+    if not settings.defer_stop_speech_after_capture:
+        stop_speech()
     # Phase 4B: drain queued sentences too.
     get_sentence_queue().interrupt()
     commander.interrupt()
@@ -150,6 +155,10 @@ async def _speak_selective(text: str, device_id: Optional[str] = None):
 
 def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
     """Synchronous entry point for the wake word listener."""
+    # E1 echo-test flag: capture has finished, so now cut the TTS that was
+    # deliberately left playing through the recording.
+    if settings.defer_stop_speech_after_capture:
+        stop_speech()
     return asyncio.run(_handle_wake_async(audio_bytes, emit, device_id))
 
 

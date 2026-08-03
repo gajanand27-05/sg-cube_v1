@@ -104,6 +104,13 @@ class Settings(BaseSettings):
     enable_barge_in: bool = True
     barge_in_rms_threshold: float = 800.0  # int16 amplitude scale; ambient ~50-200, speech ~1500-3000
     barge_in_debounce_frames: int = 2  # consecutive high-RMS chunks required (~250ms at 125ms/chunk)
+    # E1 (leftovers): open-air echo test harness flag. OFF by default so
+    # production barge-in keeps interrupting TTS instantly. When ON,
+    # stop_speech() is deferred from wake-onset to after capture completes,
+    # so the mic records the full TTS utterance instead of a ~200ms fragment
+    # + silence (which Whisper hallucinates on). Only the in-flight sentence
+    # keeps playing; queued sentences are still drained at wake.
+    defer_stop_speech_after_capture: bool = False
 
     # ── Capability tier gate ──
     # Phase 0.6 retired the global AUTO_CONFIRM_SYSTEM_WRITE flag in favor

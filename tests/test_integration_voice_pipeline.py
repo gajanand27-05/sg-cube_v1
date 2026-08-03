@@ -183,8 +183,44 @@ def test_trigger_process_handles_toolcall_dataclass():
     print("  [PASS] trigger._process_and_execute handles ToolCall dataclass, publishes correct Executed message")
 
 
+# ── Test 4: E1 echo-test flag defers stop_speech to after capture ───────
+
+def test_defer_stop_speech_flag():
+    """With DEFER_STOP_SPEECH_AFTER_CAPTURE=true, stop_speech() must NOT
+    fire at wake-onset (on_wake_detected / on_barge_in) and MUST fire once
+    capture is done (handle_wake). Without the flag, wake-onset still
+    stops immediately — production barge-in is unchanged."""
+    from backend.daemon import trigger as tr
+    from backend.server.config import settings
+
+    old = settings.defer_stop_speech_after_capture
+    try:
+        settings.defer_stop_speech_after_capture = True
+        with patch.object(tr, "stop_speech") as _stop, \
+             patch.object(tr.commander, "interrupt"), \
+             patch.object(tr, "_play_chime"):
+            tr.on_wake_detected(emit=None)
+        assert not _stop.called, "stop_speech must not fire at wake when deferred"
+
+        with patch.object(tr, "stop_speech") as _stop, \
+             patch.object(tr, "_handle_wake_async", new=AsyncMock()):
+            tr.handle_wake(b"\x00" * 1600)
+        assert _stop.called, "stop_speech must fire after capture (handle_wake)"
+
+        settings.defer_stop_speech_after_capture = False
+        with patch.object(tr, "stop_speech") as _stop, \
+             patch.object(tr.commander, "interrupt"), \
+             patch.object(tr, "_play_chime"):
+            tr.on_wake_detected(emit=None)
+        assert _stop.called, "without the flag, stop_speech must still fire at wake"
+        print("  [PASS] defer_stop_speech_after_capture defers stop_speech from wake to post-capture")
+    finally:
+        settings.defer_stop_speech_after_capture = old
+
+
 if __name__ == "__main__":
     test_on_wake_detected_resolves_all_symbols()
     test_brain_run_stream_reaches_final_chunk()
     test_trigger_process_handles_toolcall_dataclass()
+    test_defer_stop_speech_flag()
     print("All voice-pipeline integration tests passed.")
