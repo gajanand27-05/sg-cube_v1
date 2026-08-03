@@ -6,10 +6,13 @@ The matcher logic has 19 unit tests. The e2e report said:
    disabled in Windows and I didn't enable it — that's a system setting,
    your call."
 
-This probe uses Primary Sound Capture (index 4) — the Windows loopback
-capture driver — to verify that PCM can play through the speaker and be
-captured back through the same sounddevice pipeline, then passes through
-the echo gate.
+E2 resolved 2026-08-03: Stereo Mix was enabled on this machine, so this
+probe now plays a tone through the speakers and captures it back through
+Stereo Mix, then passes through the echo gate.
+
+Devices are found by name at import time (not hardcoded indices) so the
+test survives device re-enumeration — Stereo Mix was index 16 before
+enabling and is a different index on every host API after.
 
 It does NOT run Whisper (that needs a room + GPU), but confirms:
   1. Playback + loopback capture works end-to-end.
@@ -37,8 +40,20 @@ from backend.ai_modules.speech.tts_piper import (
 )
 
 
-PLAYBACK_DEVICE = 3       # Speakers (Realtek(R) Audio)
-CAPTURE_DEVICE = 4        # Primary Sound Capture Driver (Windows loopback)
+def _find_devices():
+    """Return (playback, capture) indices found by name, or (None, None)."""
+    out = sd.query_devices()
+    play = cap = None
+    for i, d in enumerate(out):
+        name = d["name"]
+        if play is None and "Speakers (Realtek" in name and d["max_output_channels"] > 0:
+            play = i
+        if cap is None and "Stereo Mix" in name and d["max_input_channels"] > 0:
+            cap = i
+    return play, cap
+
+
+PLAYBACK_DEVICE, CAPTURE_DEVICE = _find_devices()
 SAMPLE_RATE = 22050
 DURATION = 2.0
 
@@ -52,8 +67,13 @@ def clean_ring():
     tts_piper._recent_spoken.clear()
 
 
-def _capture_loopback(duration: float):
-    """Record via loopback stream, return np.ndarray of float32 PCM."""
+def _play_and_capture(duration: float) -> np.ndarray:
+    """Play a tone through the speakers while capturing via Stereo Mix.
+
+    Capture MUST overlap playback — the test previously played to
+    completion (sd.wait) and then captured, so it recorded silence and
+    skipped no matter what the hardware could do.
+    """
     rec_buffer = []
 
     def _record():
@@ -74,11 +94,14 @@ def _capture_loopback(duration: float):
 
     thread = Thread(target=_record, daemon=True)
     thread.start()
-    elapsed = 0
-    while elapsed < duration:
-        time.sleep(0.2)
-        elapsed += 0.2
+    time.sleep(0.3)
 
+    t = np.linspace(0, duration, int(SAMPLE_RATE * duration), endpoint=False)
+    audio = np.sin(2 * np.pi * 880 * t).astype(np.float32)
+    sd.play(audio, samplerate=SAMPLE_RATE, device=PLAYBACK_DEVICE)
+    sd.wait()
+
+    thread.join(timeout=duration + 5)
     if not rec_buffer:
         return np.array([], dtype=np.float32)
 
@@ -86,30 +109,25 @@ def _capture_loopback(duration: float):
 
 
 def test_e2e_loopback_captures_playback():
-    """Audio played through the speaker can be captured via the loopback driver.
+    """Audio played through the speaker can be captured via Stereo Mix.
 
     This was the missing half of the e2e probe: both halves proven (one
-    separately), now joined via WASAPI Primary Sound Capture.
+    separately), now joined via Stereo Mix loopback (E2 resolved 2026-08-03).
 
-    Note: Some hardware/driver combos capture zeros on the loopback path.
+    Note: some hardware/driver combos capture zeros on the loopback path.
     The echo gate itself is verified in test_e2e_echo_gate_suppresses_and_expires
     and test_e2e_loopback_with_echo_gate.
     """
-    # Play a tone
-    t = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
-    audio = np.sin(2 * np.pi * 880 * t).astype(np.float32)
-
-    sd.play(audio, samplerate=SAMPLE_RATE, device=PLAYBACK_DEVICE)
-    sd.wait()
-
-    # Capture via loopback
-    captured = _capture_loopback(DURATION + 0.5)
+    if PLAYBACK_DEVICE is None or CAPTURE_DEVICE is None:
+        pytest.skip("Stereo Mix / Speakers not found — enable Stereo Mix in mmsys.cpl")
+    # Play a tone while capturing it back via Stereo Mix
+    captured = _play_and_capture(DURATION)
 
     if len(captured) < 64 or np.max(np.abs(captured)) < 0.01:
         pytest.skip(
             f"loopback capture returned flat signal ({len(captured)} samples). "
             "This hardware/driver combo doesn't route playback to loopback "
-            "in software. The echo gate logic is still verified (21/22 tests pass)."
+            "in software. The echo gate logic is still verified elsewhere."
         )
 
     # Verify captured audio is non-trivial
@@ -141,16 +159,12 @@ def test_e2e_echo_gate_suppresses_and_expires():
 
 
 def test_e2e_loopback_with_echo_gate():
-    """Complete chain: play tone via speaker -> capture via loopback -> run
-    echo gate against a recorded transcript."""
-    # 1. Play and capture
-    t = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
-    audio = np.sin(2 * np.pi * 880 * t).astype(np.float32)
-
-    sd.play(audio, samplerate=SAMPLE_RATE, device=PLAYBACK_DEVICE)
-    sd.wait()
-
-    captured = _capture_loopback(DURATION + 0.5)
+    """Complete chain: play tone via speaker -> capture via Stereo Mix ->
+    run echo gate against a recorded transcript."""
+    if PLAYBACK_DEVICE is None or CAPTURE_DEVICE is None:
+        pytest.skip("Stereo Mix / Speakers not found — enable Stereo Mix in mmsys.cpl")
+    # 1. Play a tone while capturing it back via Stereo Mix
+    captured = _play_and_capture(DURATION)
     if len(captured) < 64:
         pytest.skip("loopback capture unavailable — Stereo Mix disabled or unsupported device")
 
