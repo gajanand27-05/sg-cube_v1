@@ -1,6 +1,7 @@
 """Replay & Diagnostics API — deterministic replay, trace inspection, regression testing."""
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -12,6 +13,21 @@ router = APIRouter(prefix="/replay", tags=["replay"])
 
 REPLAY_DIR = Path(__file__).resolve().parents[2] / "backend" / "database" / "replays"
 
+# Audit HIGH-1: request_id flows into REPLAY_DIR / f"{id}.json" — a "../"
+# payload escapes the replays dir. One guard for every trace-taking endpoint.
+# Leading-dot ids are rejected too: ".env" never leaves the dir but is still
+# a hidden file no trace id should name.
+_TRACE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def _trace_path(request_id: str) -> Path:
+    if not _TRACE_ID_RE.match(request_id):
+        raise HTTPException(400, f"Invalid trace id: {request_id!r}")
+    path = (REPLAY_DIR / f"{request_id}.json").resolve()
+    if not path.is_relative_to(REPLAY_DIR.resolve()):
+        raise HTTPException(400, f"Invalid trace id: {request_id!r}")
+    return path
+
 
 class ReplayRequest(BaseModel):
     request_id: str
@@ -21,7 +37,7 @@ class ReplayRequest(BaseModel):
 @router.post("/run")
 async def run_replay(req: ReplayRequest):
     """Run a deterministic replay of a recorded execution."""
-    trace_file = REPLAY_DIR / f"{req.request_id}.json"
+    trace_file = _trace_path(req.request_id)
     if not trace_file.exists():
         raise HTTPException(404, f"Trace not found: {req.request_id}")
     
@@ -45,7 +61,7 @@ async def run_replay(req: ReplayRequest):
 @router.get("/trace/{request_id}")
 async def get_trace(request_id: str):
     """Get full execution trace for a request."""
-    trace_file = REPLAY_DIR / f"{request_id}.json"
+    trace_file = _trace_path(request_id)
     if not trace_file.exists():
         raise HTTPException(404, f"Trace not found: {request_id}")
     
@@ -85,8 +101,8 @@ async def list_traces(limit: int = Query(50, le=200), offset: int = Query(0, ge=
 @router.post("/trace/{request_id}/diff")
 async def diff_trace(request_id: str, compare_with: str):
     """Compare two execution traces."""
-    trace1_file = REPLAY_DIR / f"{request_id}.json"
-    trace2_file = REPLAY_DIR / f"{compare_with}.json"
+    trace1_file = _trace_path(request_id)
+    trace2_file = _trace_path(compare_with)
     
     if not trace1_file.exists():
         raise HTTPException(404, f"Trace not found: {request_id}")
