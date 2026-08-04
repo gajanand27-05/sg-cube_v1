@@ -25,9 +25,17 @@ _VAD_TRAILING_SILENCE_MS = 800  # stop after this much silence post-speech
 _VAD_MAX_CAPTURE_S = 10.0  # hard cap so a stuck mic doesn't hang forever
 _VAD_INITIAL_WAIT_S = 3.0  # how long to wait for the user to start speaking
 
-_FOLLOWUP_TRIGGER_RMS = 500    # lower = more sensitive to quiet speech
 _FOLLOWUP_WINDOW_S = 3.0        # seconds the follow-up window stays open
 _FOLLOWUP_MAX_EMPTY = 2
+
+
+def _has_followup_content(partial: str) -> bool:
+    """T-wake-word-executes-ambient-audio item 2: follow-up must be gated on
+    content, not loudness. Returns True when Vosk actually saw speech-like
+    words (2+ alphabetic chars) in the partial — near-silence produces an
+    empty or single-char partial, so loudness alone can no longer trigger a
+    capture that Whisper then hallucinates a command out of."""
+    return any(len(w) >= 2 and w.isalpha() for w in partial.split())
 
 
 
@@ -280,12 +288,18 @@ class WakeWordListener:
                             trigger_label = f"wake: {partial!r} (rms={rms:.0f})"
                             self.recognizer.Reset()
                             empty_in_a_row = 0
-
-                    elif in_followup:
-                        if rms > _FOLLOWUP_TRIGGER_RMS:
+                        elif in_followup and _has_followup_content(partial):
+                            # T-wake-word-executes-ambient-audio item 2: gate the
+                            # follow-up window on CONTENT, not loudness. Near-silence
+                            # after the speaker cut off still clears rms>500 and
+                            # Whisper hallucinated whole commands on it ("I am
+                            # working out." ran a full LLM turn). Vosk sees no
+                            # words in that audio, so the partial stays empty.
                             trigger = True
-                            trigger_label = f"followup-speech (rms={rms:.0f})"
+                            trigger_label = f"followup: {partial!r} (rms={rms:.0f})"
                             initial_audio = [data]
+                            self.recognizer.Reset()
+
                 except Exception:
                     continue
 
