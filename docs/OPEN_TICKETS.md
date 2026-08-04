@@ -27,6 +27,12 @@ One-line trackers for known bugs / open threads. Longer than a line means it's n
 > - *"after several clarification replies accumulated in STM, V3 pattern-matched and hallucinated a rejection"* — also consistent with the model being asked nothing and continuing the visible pattern.
 >
 > **Do not act on the `[-5:]` capping or prompt-engineering fix direction until this is re-observed on the fixed code.** Both were reasoned from the assumption that the model saw the question and was distracted by history. That assumption was wrong. Re-run the original repros; if they no longer reproduce, close this ticket rather than fixing it.
+>
+> **CLOSED 2026-08-03 — neither repro reproduces on the fixed code.** Re-ran both original scenarios 3× each via `tools/context_bleed_probe.py` (untracked), with real turn history built under Commander's contract (history ends with the current question):
+> - Repro 1 (AAPL turn, then "What windows are open right now?"): 3/3 answered the windows question, **0/3** selected `get_stock`.
+> - Repro 2 (accumulated "I need clarification…" replies, then "what is the capital of France"): 3/3 answered "Paris" directly, **0/3** invented a rejection/irrelevant reply.
+>
+> Per the 2026-07-19 ruling, no capping or prompt fix applied — the symptoms were the turn-stale bug, which is fixed and regression-covered by `tests/test_multi_turn_context.py`.
 
 ## T-planner-turn-stale (opened + FIXED 2026-07-19)
 
