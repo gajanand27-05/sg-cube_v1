@@ -82,6 +82,21 @@ class LongTermMemory:
             log.debug(f"LTM count failed: {e}")
             return 0
 
+    def delete(self, memory_id: str) -> bool:
+        """Hard-delete one memory by id. False if the id doesn't exist.
+
+        No-op for unknown ids (Chroma delete is silent), so we check
+        existence first to give callers a truthful return value."""
+        try:
+            existing = self.collection.get(ids=[memory_id], include=[])
+            if not existing["ids"]:
+                return False
+            self.collection.delete(ids=[memory_id])
+            return True
+        except Exception as e:
+            log.error(f"Failed to delete memory {memory_id}: {e}")
+            return False
+
     def search(self, query: str, mtype: Optional[MemoryType] = None, limit: int = 5,
                use_rerank: bool = True, min_importance: float = 0.0) -> List[MemoryEntry]:
         """Semantic search with optional reranking and temporal weighting."""

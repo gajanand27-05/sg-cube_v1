@@ -142,8 +142,8 @@ class MemoryManager:
         return results
 
     def forget(self, memory_id: str) -> bool:
-        """Mark a memory as forgotten (soft delete)."""
-        return False  # Placeholder - requires ID tracking
+        """Delete a memory by id. True if it existed and was removed."""
+        return self.ltm.delete(memory_id)
 
     def learn(self, user_query: str, tool_results: list[dict], success: bool = True) -> None:
         """Learn from successful (or failed) tool executions."""
