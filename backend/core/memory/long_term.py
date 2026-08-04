@@ -4,7 +4,6 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any, List, Optional
 
-import chromadb
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 
 from backend.core.memory.embedding import (
@@ -13,7 +12,7 @@ from backend.core.memory.embedding import (
     report_write_failure,
 )
 from backend.core.memory.base import MemoryEntry, MemoryType
-from backend.database import CHROMA_PATH
+from backend.database import CHROMA_PATH, get_chroma_client
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +21,7 @@ class LongTermMemory:
     """Persistent semantic storage using ChromaDB and LLM Provider embeddings."""
     def __init__(self):
         CHROMA_PATH.parent.mkdir(parents=True, exist_ok=True)
-        self.client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+        self.client = get_chroma_client()
         self.ef = ProviderEmbeddingFunction("sg_cube_memories")
         
         self.collection = self.client.get_or_create_collection(

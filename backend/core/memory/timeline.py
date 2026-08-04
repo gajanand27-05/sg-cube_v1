@@ -3,7 +3,6 @@ import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-import chromadb
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 from backend.core.memory.base import MemoryEntry, MemoryType
 from backend.core.memory.embedding import (
@@ -11,7 +10,7 @@ from backend.core.memory.embedding import (
     ProviderEmbeddingFunction,
     report_write_failure,
 )
-from backend.database import CHROMA_PATH
+from backend.database import CHROMA_PATH, get_chroma_client
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ class TimelineMemory:
     """Manages the chronological activity tracking (Timeline Memory)."""
     
     def __init__(self):
-        self.client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+        self.client = get_chroma_client()
         self.ef = ProviderEmbeddingFunction("sg_cube_timeline")
         
         # Specific collection for chronological events
