@@ -97,12 +97,27 @@ class LongTermMemory:
             return False
 
     def search(self, query: str, mtype: Optional[MemoryType] = None, limit: int = 5,
-               use_rerank: bool = True, min_importance: float = 0.0) -> List[MemoryEntry]:
+                use_rerank: bool = True, min_importance: float = 0.0) -> List[MemoryEntry]:
         """Semantic search with optional reranking and temporal weighting."""
-        return [
-            c["entry"]
-            for c in self.search_scored(query, mtype, limit, use_rerank, min_importance)
-        ]
+        scored = self.search_scored(query, mtype, limit, use_rerank, min_importance)
+        results = [c["entry"] for c in scored]
+        # Publish MemoryHitEvent so the UI's Memory Engine panel gets hit stats.
+        try:
+            from backend.core.events import get_bus
+            from backend.daemon.ui_events import MemoryHitEvent, MemoryHit
+            hits = [MemoryHit(title=e.content, score=c["combined_score"],
+                           source="semantic_memory") for c, e in zip(scored, results)]
+            get_bus().publish(MemoryHitEvent(
+                query=query,
+                source="ltm",
+                results_count=len(results),
+                hits=hits,
+                collection="sg_cube_memories",
+                total_entries=self.count(),
+            ))
+        except Exception:
+            pass
+        return results
 
     def search_scored(self, query: str, mtype: Optional[MemoryType] = None, limit: int = 5,
                       use_rerank: bool = True, min_importance: float = 0.0) -> List[dict]:
