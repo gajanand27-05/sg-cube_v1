@@ -274,6 +274,56 @@ class AIMetricsEvent:
 
 
 @dataclass
+class PhoneFrameEvent:
+    """Phase 1: phone camera frame from /ws/phone_stream."""
+    frame_id: int          # monotonic frame counter
+    timestamp: float       # capture time (epoch)
+    mode: str              # "navigate" | "scan" | "read" | "idle"
+    fps_received: float = 0.0
+
+
+@dataclass
+class ObstacleEvent:
+    """Phase 2: detected obstacle from YOLO."""
+    label: str
+    direction: str         # "left" | "straight" | "right"
+    distance_m: float
+    confidence: float
+    priority: str          # "critical" | "warning"
+
+
+@dataclass
+class ModeChangeEvent:
+    """Phase 3: vision mode toggled."""
+    mode: str              # "navigate" | "scan" | "read" | "idle"
+
+
+@dataclass
+class HapticEvent:
+    """Phase 3: haptic feedback to phone."""
+    pulses: int            # 1 = critical, 2 = warning
+
+
+@dataclass
+class VisionHealthEvent:
+    """Phase 4: vision diagnostics telemetry."""
+    fps_received: float
+    fps_processed: float
+    detector_latency_ms: float
+    tts_queue_depth: int
+    dropped_frames: int
+    mode: str
+
+
+@dataclass
+class OcrReadEvent:
+    """Phase 3: OCR text extracted in Read mode."""
+    text: str
+    confidence: float
+    source: str = "ocr"
+
+
+@dataclass
 class CanvasUpdateEvent:
     """Phase 3: assistant populated the canvas via render_canvas.
 

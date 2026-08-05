@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.server.config import settings
-from backend.server.routes import admin, agents, auth, diagnostics, execute, files, memory, orchestrate, remote, system, ui, vision, voice, replay
+from backend.server.routes import admin, agents, auth, diagnostics, execute, files, memory, orchestrate, phone_stream, remote, system, ui, vision, voice, replay
 
 # Bootstrap tool registry — triggers all @tool decorators before any agent runs.
 import backend.core.tools  # noqa: F401
