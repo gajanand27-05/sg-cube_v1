@@ -221,7 +221,23 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         return False
 
     print(f"[ai] response: {response.spoken_text} (latency: {response.latency_ms}ms, tools: {len(response.tool_calls)})")
-    
+
+    # Publish IntentResolved so the UI tier counters (cache/rule/llm) work.
+    # Voice path bypasses the router, so we publish it here. source_layer
+    # is always "llm" since voice goes straight to the planner.
+    try:
+        from backend.daemon.ui_events import IntentResolved
+        get_bus().publish(
+            IntentResolved(
+                action=response.intent.get("action", "agent_complete"),
+                target=command,
+                source_layer="llm",
+            ),
+            priority=Priority.NORMAL,
+        )
+    except Exception:
+        pass
+
     # Publish execution events for each tool call. `response.tool_calls`
     # is a list[ToolCall] (dataclass, see brain.py) — attribute access,
     # not dict.get. Prefer the ToolResult's own .message string, fall back
