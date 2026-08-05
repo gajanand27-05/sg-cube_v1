@@ -17,6 +17,12 @@ import { LiveTranscriptionPanel } from "@/components/LiveTranscriptionPanel";
 import { ConfidencePanel } from "@/components/ConfidencePanel";
 import { LatencyPanel } from "@/components/LatencyPanel";
 import { ActivityTimelinePanel } from "@/components/ActivityTimelinePanel";
+import { VoiceModulePanel } from "@/components/VoiceModulePanel";
+import { VoiceControlsPanel } from "@/components/VoiceControlsPanel";
+import { ModuleStatusPanel } from "@/components/ModuleStatusPanel";
+import { QuickActionsPanel } from "@/components/QuickActionsPanel";
+import { ResponseModePanel } from "@/components/ResponseModePanel";
+import { ArchitecturePanel } from "@/components/ArchitecturePanel";
 
 export default function App() {
   return (
@@ -30,13 +36,13 @@ export default function App() {
         {/* LEFT COLUMN */}
         <div className="flex flex-col gap-3 min-h-0">
           <Panel title="Voice Module" className="flex-[2]">
-            <Placeholder label="mic viz · waveform · wake word · sensitivity" />
+            <VoiceModulePanel />
           </Panel>
           <Panel title="Voice Controls" className="flex-1">
-            <Placeholder label="mute · pause · settings · history" />
+            <VoiceControlsPanel />
           </Panel>
           <Panel title="Module Status" className="flex-1">
-            <Placeholder label="status · model · language · input · noise filter" />
+            <ModuleStatusPanel />
           </Panel>
         </div>
 
@@ -55,7 +61,7 @@ export default function App() {
             </Panel>
             <div className="flex flex-col gap-3">
               <Panel title="Response Mode" className="flex-1">
-                <Placeholder label="LOCAL-FIRST" />
+                <ResponseModePanel />
               </Panel>
               <Panel title="Latency" className="flex-1">
                 <LatencyPanel />
@@ -68,7 +74,7 @@ export default function App() {
               <ActivityTimelinePanel />
             </Panel>
             <Panel title="Quick Actions">
-              <Placeholder label="web search · screen reader · file manager · open apps · take note · calculator" />
+              <QuickActionsPanel />
             </Panel>
           </div>
         </div>
@@ -89,7 +95,7 @@ export default function App() {
             <VisionModulePanel />
           </Panel>
           <Panel title="SG-Cube Architecture" className="flex-1">
-            <Placeholder label="voice · ai core · memory · vision · tools" />
+            <ArchitecturePanel />
           </Panel>
         </div>
       </main>
@@ -101,10 +107,4 @@ export default function App() {
   );
 }
 
-function Placeholder({ label }: { label: string }) {
-  return (
-    <div className="flex items-center justify-center h-full min-h-16 text-hud-text-muted text-xs uppercase tracking-widest font-mono">
-      {label}
-    </div>
-  );
-}
+
