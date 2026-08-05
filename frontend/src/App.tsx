@@ -15,7 +15,6 @@ import {
 } from "@/components/VisionModulePanel";
 import { LiveTranscriptionPanel } from "@/components/LiveTranscriptionPanel";
 import { ConfidencePanel } from "@/components/ConfidencePanel";
-import { LatencyPanel } from "@/components/LatencyPanel";
 import { ActivityTimelinePanel } from "@/components/ActivityTimelinePanel";
 import { VoiceModulePanel } from "@/components/VoiceModulePanel";
 import { VoiceControlsPanel } from "@/components/VoiceControlsPanel";
@@ -23,6 +22,7 @@ import { ModuleStatusPanel } from "@/components/ModuleStatusPanel";
 import { QuickActionsPanel } from "@/components/QuickActionsPanel";
 import { ResponseModePanel } from "@/components/ResponseModePanel";
 import { ArchitecturePanel } from "@/components/ArchitecturePanel";
+import { SystemStatsPanel } from "@/components/SystemStatsPanel";
 
 export default function App() {
   return (
@@ -63,8 +63,8 @@ export default function App() {
               <Panel title="Response Mode" className="flex-1">
                 <ResponseModePanel />
               </Panel>
-              <Panel title="Latency" className="flex-1">
-                <LatencyPanel />
+              <Panel title="System" className="flex-1">
+                <SystemStatsPanel />
               </Panel>
             </div>
           </div>

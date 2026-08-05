@@ -3,6 +3,7 @@ import { cn } from "@/lib/cn";
 import { statusPillClass, statusToneClasses } from "@/components/Panel";
 import type { DetectedObject } from "@/lib/uiEvents";
 import { useUiEventEnvelope } from "@/hooks/useUiEvents";
+import { Camera, CameraOff, Zap } from "lucide-react";
 
 type StatusTone = "success" | "warning" | "danger" | "cyan" | "muted";
 type VisionStatus = { status: string; tone: StatusTone };
@@ -44,6 +45,68 @@ export function VisionStatusPill() {
   const { status, tone } = useVisionStatus();
   return (
     <span className={cn(statusPillClass, statusToneClasses[tone])}>{status}</span>
+  );
+}
+
+/** Phone feed overlay zone. Mounts inside VisionModulePanel when enabled.
+ *  Phase 1: placeholder with enable button → live stream from phone_stream.py */
+export function PhoneFeedOverlayZone() {
+  const [enabled, setEnabled] = useState(false);
+
+  if (!enabled) {
+    return (
+      <details className="group">
+        <summary className="flex items-center justify-between cursor-pointer px-2.5 py-1.5
+                             rounded-sm border border-hud-border-dim/60 hover:border-hud-cyan 
+                             transition-colors bg-bg-panel/30 select-none">
+          <div className="flex items-center gap-2">
+            <Camera className="w-3.5 h-3.5 text-hud-text-dim" />
+            <span className="text-[10px] font-mono text-hud-text">Phone Feed</span>
+          </div>
+          <Zap className="w-3.5 h-3.5 text-hud-warning" />
+        </summary>
+        <div className="p-2 flex flex-col gap-2">
+          <p className="text-[10px] font-mono text-hud-text-dim leading-relaxed">
+            Connect phone camera feed via WS. Requires{' '}
+            <code className="border border-hud-border-dim rounded px-0.5">phone_stream.py</code>{' '}
+            backend endpoint.
+          </p>
+          <button
+            onClick={() => setEnabled(true)}
+            className="w-full flex items-center justify-center gap-2 px-2 py-1.5 rounded-sm 
+                       border border-hud-success bg-bg-raised/50 hover:bg-bg-raised
+                       transition-colors"
+          >
+            <Camera className="w-3.5 h-3.5 text-hud-success" />
+            <span className="text-[10px] font-mono text-hud-success">Enable Feed (Phase 1)</span>
+          </button>
+        </div>
+      </details>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <span className="hud-label">Phone Feed</span>
+        <button
+          onClick={() => setEnabled(false)}
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded-sm border border-hud-danger 
+                     bg-bg-overlay/50 hover:bg-bg-raised transition-colors"
+        >
+          <CameraOff className="w-3 h-3 text-hud-danger" />
+          <span className="text-[9px] font-mono text-hud-danger">Disconnect</span>
+        </button>
+      </div>
+
+      {/* Feed placeholder — Phase 1: replace with live image from WS */}
+      <div className="relative w-full h-[160px] rounded-sm border border-dashed border-hud-cyan/30 
+                      bg-bg-overlay/30 flex flex-col items-center justify-center gap-2">
+        <Camera className="w-6 h-6 text-hud-cyan/30 animate-pulse" />
+        <span className="text-[10px] font-mono text-hud-text-dim">Waiting for frames...</span>
+        <span className="text-[9px] font-mono text-hud-text-dim/50">WS: /ws/phone_stream</span>
+      </div>
+    </div>
   );
 }
 
@@ -131,6 +194,9 @@ export function VisionModulePanel() {
           )}
         </span>
       </div>
+
+      {/* Row 5 — Phone feed overlay zone (Phase 1) */}
+      <PhoneFeedOverlayZone />
     </div>
   );
 }

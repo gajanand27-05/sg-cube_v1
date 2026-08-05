@@ -1,5 +1,5 @@
 import { useUiConnectionState, useUiEvent } from "@/hooks/useUiEvents";
-import { Layers, Brain, Database, Eye, Mic } from "lucide-react";
+import { Layers, Brain, Database, Eye, Mic, Activity } from "lucide-react";
 
 /** Architecture overview panel. Shows module health and connections. */
 export function ArchitecturePanel() {
@@ -20,13 +20,25 @@ export function ArchitecturePanel() {
 
   return (
     <div className="flex flex-col gap-4 min-h-0 h-full">
+      {/* Health bar */}
       <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${metrics ? "bg-hud-success" : "bg-hud-danger"}`}
-            style={{ backgroundColor: "currentColor" }} />
-          <span className="font-mono text-xs text-hud-text">
-            {active}/{modules.length} active
-          </span>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Activity className="w-3.5 h-3.5 text-hud-warning" />
+            <span className="font-mono text-xs text-hud-text">
+              {active}/{modules.length} active
+            </span>
+          </div>
+          <div className="flex gap-0.5">
+            {modules.map((m, i) => (
+              <div
+                key={m.name}
+                className={`w-1.5 h-3 rounded-sm ${
+                  m.status ? "bg-hud-success" : "bg-hud-text-dim"
+                }`}
+              />
+            ))}
+          </div>
         </div>
       </div>
 
