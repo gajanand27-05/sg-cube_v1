@@ -17,6 +17,7 @@ Design invariants:
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -106,10 +107,19 @@ def check_browser() -> PreflightCheck:
     except ImportError as e:
         return PreflightCheck("browser", PreflightStatus.DOWN,
                               f"playwright package missing: {e}")
-    try:
+    def _probe() -> str:
         with sync_playwright() as p:
             # executable_path throws if the Chromium download is absent.
-            path = p.chromium.executable_path
+            return p.chromium.executable_path
+
+    try:
+        # sync_playwright() refuses to start inside a running asyncio loop, and
+        # the lifespan calls preflight from exactly there — the check then
+        # reported "chromium not installed" at every boot even with chromium
+        # present. A short-lived thread has no running loop, so the same probe
+        # works from both the lifespan and the HTTP endpoint.
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            path = ex.submit(_probe).result(timeout=15)
         return PreflightCheck("browser", PreflightStatus.OK,
                               "chromium installed", detail={"executable_path": path})
     except Exception as e:
