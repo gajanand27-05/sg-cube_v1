@@ -30,7 +30,7 @@ export function ArchitecturePanel() {
             </span>
           </div>
           <div className="flex gap-0.5">
-            {modules.map((m, i) => (
+            {modules.map((m) => (
               <div
                 key={m.name}
                 className={`w-1.5 h-3 rounded-sm ${

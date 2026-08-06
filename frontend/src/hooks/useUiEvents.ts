@@ -26,6 +26,7 @@ const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | 
     inference_ms: "number",
     active_model: "string",
   },
+  wake_heard: { peak: "number" },
   intent_resolved: { source_layer: "string" },
   agent_thinking: { agent_name: "string", is_thinking: "boolean" },
   agent_reasoning: { reasoning: "string" },

@@ -132,8 +132,13 @@ export type ToolFinishedPayload = {
   latency_ms: number;
 };
 
+export type WakeHeardPayload = {
+  peak: number; // peak amplitude of the captured audio buffer, 0..32767
+};
+
 export type UiEventPayloadMap = {
   ai_metrics: AIMetricsPayload;
+  wake_heard: WakeHeardPayload;
   intent_resolved: IntentResolvedPayload;
   agent_thinking: AgentThinkingPayload;
   agent_reasoning: AgentReasoningPayload;

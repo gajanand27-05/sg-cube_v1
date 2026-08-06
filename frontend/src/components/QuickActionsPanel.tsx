@@ -15,7 +15,7 @@ export function QuickActionsPanel() {
     { id: "chat", label: "Chat", icon: MessageSquare, query: "" },
   ];
 
-  const handleAction = (id: string, query: string) => {
+  const handleAction = (id: string) => {
     setLastAction(id);
     setActionTime(Date.now());
 
@@ -40,7 +40,7 @@ export function QuickActionsPanel() {
           return (
             <button
               key={action.id}
-              onClick={() => handleAction(action.id, action.query)}
+              onClick={() => handleAction(action.id)}
               className="flex items-center gap-2 px-2 py-1.5 rounded-sm border border-hud-border-dim 
                          hover:border-hud-cyan transition-colors bg-bg-panel/30 hover:bg-bg-raised/50"
             >

@@ -5,13 +5,10 @@ import { Cpu, Cloud, Globe, Zap } from "lucide-react";
 export function ResponseModePanel() {
   const connection = useUiConnectionState();
   const metrics = useUiEvent("ai_metrics");
-  const vision = useUiEvent("vision_update");
-  const memory = useUiEvent("memory_hit");
 
   const mode = connection === "open" ? "LOCAL-FIRST" : "STANDBY";
   const isOnline = connection === "open";
   const model = metrics?.active_model ?? "—";
-  const hasData = vision !== null || memory !== null;
 
   return (
     <div className="flex flex-col gap-4 min-h-0 h-full">

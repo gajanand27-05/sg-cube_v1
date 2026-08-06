@@ -1,10 +1,9 @@
-import { SystemStatsPayload } from "@/lib/uiEvents";
 import { useUiEvent } from "@/hooks/useUiEvents";
-import { Cpu, HardDrive } from "lucide-react";
+import { Cpu, HardDrive, MemoryStick } from "lucide-react";
 
 /** System stats readout. Shows CPU/RAM/Disk from SystemStatsEvent. */
 export function SystemStatsPanel() {
-  const stats = useUiEvent<SystemStatsEvent>("system_stats");
+  const stats = useUiEvent("system_stats");
 
   const cpu = stats?.cpu_percent ?? null;
   const mem = stats?.memory_percent ?? null;
