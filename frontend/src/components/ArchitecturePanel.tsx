@@ -1,7 +1,29 @@
+import { useState } from "react";
 import { useUiConnectionState, useUiEvent } from "@/hooks/useUiEvents";
-import { Layers, Brain, Database, Eye, Mic, Activity } from "lucide-react";
+import { Layers, Brain, Database, Eye, Mic, Activity, Network } from "lucide-react";
+import { ArchitectureMapOverlay } from "@/components/ArchitectureMapOverlay";
+import { Panel } from "@/components/Panel";
 
-/** Architecture overview panel. Shows module health and connections. */
+/** Panel + click-to-open system map. The wrapper owns the click so the
+ *  header ("SG-Cube Architecture" title) is a target too, not just the body —
+ *  Panel's header renders outside the body children. */
+export function ArchitectureSection() {
+  const [mapOpen, setMapOpen] = useState(false);
+  return (
+    <div
+      className="flex-1 flex flex-col min-h-0 cursor-pointer group"
+      onClick={() => setMapOpen(true)}
+      title="Open system architecture map"
+    >
+      <Panel title="SG-Cube Architecture" className="flex-1">
+        <ArchitecturePanel />
+      </Panel>
+      {mapOpen && <ArchitectureMapOverlay onClose={() => setMapOpen(false)} />}
+    </div>
+  );
+}
+
+/** Architecture overview panel body. Shows module health and connections. */
 export function ArchitecturePanel() {
   const connection = useUiConnectionState();
   const metrics = useUiEvent("ai_metrics");
@@ -64,6 +86,16 @@ export function ArchitecturePanel() {
             </div>
           );
         })}
+      </div>
+
+      <div
+        className="mt-auto flex items-center justify-center gap-2 px-2 py-1.5 rounded-sm
+                   border border-hud-border-dim group-hover:border-hud-cyan transition-colors"
+      >
+        <Network className="w-3.5 h-3.5 text-hud-cyan-glow" />
+        <span className="text-[10px] font-mono text-hud-cyan-glow uppercase tracking-[0.15em]">
+          System Map
+        </span>
       </div>
     </div>
   );

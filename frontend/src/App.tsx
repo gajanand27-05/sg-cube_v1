@@ -21,7 +21,7 @@ import { VoiceControlsPanel } from "@/components/VoiceControlsPanel";
 import { ModuleStatusPanel } from "@/components/ModuleStatusPanel";
 import { QuickActionsPanel } from "@/components/QuickActionsPanel";
 import { ResponseModePanel } from "@/components/ResponseModePanel";
-import { ArchitecturePanel } from "@/components/ArchitecturePanel";
+import { ArchitectureSection } from "@/components/ArchitecturePanel";
 import { SystemStatsPanel } from "@/components/SystemStatsPanel";
 
 export default function App() {
@@ -94,9 +94,7 @@ export default function App() {
           <Panel title="Vision Module" number="03" statusSlot={<VisionStatusPill />}>
             <VisionModulePanel />
           </Panel>
-          <Panel title="SG-Cube Architecture" className="flex-1">
-            <ArchitecturePanel />
-          </Panel>
+          <ArchitectureSection />
         </div>
       </main>
       </ErrorBoundary>
