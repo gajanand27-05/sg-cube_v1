@@ -48,7 +48,11 @@ export default function App() {
 
         {/* CENTER COLUMN */}
         <div className="flex flex-col gap-3 min-h-0">
-          <Panel title="Live Transcription" className="flex-[2]" bodyClassName="p-4 h-full">
+          {/* Fixed-height body: this panel used to be flex-[2] and absorbed all
+              the column's slack, ballooning to ~490px of mostly empty space.
+              220px comfortably fits the You/Onyx pair at 3+ lines each; longer
+              content scrolls inside the lanes (bottom-follow). */}
+          <Panel title="Live Transcription" bodyClassName="p-4 h-[220px]">
             <LiveTranscriptionPanel />
           </Panel>
 
