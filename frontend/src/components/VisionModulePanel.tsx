@@ -48,16 +48,36 @@ export function VisionStatusPill() {
   );
 }
 
+/** Backend HTTP base — same host the WS hook targets, http instead of ws. */
+const API_BASE =
+  ((import.meta.env.VITE_API_URL as string | undefined) ?? "").length > 0
+    ? (import.meta.env.VITE_API_URL as string)
+    : "http://127.0.0.1:8001";
+
+const FEED_STALE_MS = 3000;
+
 /** Phone feed overlay zone. Mounts inside VisionModulePanel when enabled.
- *  Phase 1: placeholder with enable button → live stream from phone_stream.py */
+ *
+ *  PhoneFrameEvent carries metadata only; on each new frame_id the <img>
+ *  refetches /vision/phone_frame (Cache-Control: no-store on the backend, plus
+ *  the frame_id query param as a belt-and-braces cache buster). */
 export function PhoneFeedOverlayZone() {
   const [enabled, setEnabled] = useState(false);
+  const env = useUiEventEnvelope("phone_frame");
+  const frame = env?.payload ?? null;
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!enabled) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [enabled]);
 
   if (!enabled) {
     return (
       <details className="group">
         <summary className="flex items-center justify-between cursor-pointer px-2.5 py-1.5
-                             rounded-sm border border-hud-border-dim/60 hover:border-hud-cyan 
+                             rounded-sm border border-hud-border-dim/60 hover:border-hud-cyan
                              transition-colors bg-bg-panel/30 select-none">
           <div className="flex items-center gap-2">
             <Camera className="w-3.5 h-3.5 text-hud-text-dim" />
@@ -67,31 +87,48 @@ export function PhoneFeedOverlayZone() {
         </summary>
         <div className="p-2 flex flex-col gap-2">
           <p className="text-[10px] font-mono text-hud-text-dim leading-relaxed">
-            Connect phone camera feed via WS. Requires{' '}
-            <code className="border border-hud-border-dim rounded px-0.5">phone_stream.py</code>{' '}
-            backend endpoint.
+            On the phone (same Wi-Fi), open{' '}
+            <code className="border border-hud-border-dim rounded px-0.5">
+              http://&lt;pc-ip&gt;:8001/phone
+            </code>{' '}
+            and start streaming, then enable the feed here.
           </p>
           <button
             onClick={() => setEnabled(true)}
-            className="w-full flex items-center justify-center gap-2 px-2 py-1.5 rounded-sm 
+            className="w-full flex items-center justify-center gap-2 px-2 py-1.5 rounded-sm
                        border border-hud-success bg-bg-raised/50 hover:bg-bg-raised
                        transition-colors"
           >
             <Camera className="w-3.5 h-3.5 text-hud-success" />
-            <span className="text-[10px] font-mono text-hud-success">Enable Feed (Phase 1)</span>
+            <span className="text-[10px] font-mono text-hud-success">Enable Feed</span>
           </button>
         </div>
       </details>
     );
   }
 
+  const ageMs = frame === null ? null : now - frame.timestamp * 1000;
+  const live = ageMs !== null && ageMs < FEED_STALE_MS;
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="hud-label">Phone Feed</span>
+        <div className="flex items-center gap-2">
+          <span className="hud-label">Phone Feed</span>
+          {frame !== null && (
+            <span
+              className={cn(
+                "text-[9px] font-mono uppercase tracking-[0.12em]",
+                live ? "text-hud-success" : "text-hud-warning",
+              )}
+            >
+              {live ? `live · ${frame.fps_received.toFixed(1)} fps · ${frame.mode}` : "stale"}
+            </span>
+          )}
+        </div>
         <button
           onClick={() => setEnabled(false)}
-          className="flex items-center gap-1 px-1.5 py-0.5 rounded-sm border border-hud-danger 
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded-sm border border-hud-danger
                      bg-bg-overlay/50 hover:bg-bg-raised transition-colors"
         >
           <CameraOff className="w-3 h-3 text-hud-danger" />
@@ -99,13 +136,25 @@ export function PhoneFeedOverlayZone() {
         </button>
       </div>
 
-      {/* Feed placeholder — Phase 1: replace with live image from WS */}
-      <div className="relative w-full h-[160px] rounded-sm border border-dashed border-hud-cyan/30 
-                      bg-bg-overlay/30 flex flex-col items-center justify-center gap-2">
-        <Camera className="w-6 h-6 text-hud-cyan/30 animate-pulse" />
-        <span className="text-[10px] font-mono text-hud-text-dim">Waiting for frames...</span>
-        <span className="text-[9px] font-mono text-hud-text-dim/50">WS: /ws/phone_stream</span>
-      </div>
+      {frame === null ? (
+        <div className="relative w-full h-[160px] rounded-sm border border-dashed border-hud-cyan/30
+                        bg-bg-overlay/30 flex flex-col items-center justify-center gap-2">
+          <Camera className="w-6 h-6 text-hud-cyan/30 animate-pulse" />
+          <span className="text-[10px] font-mono text-hud-text-dim">Waiting for frames...</span>
+          <span className="text-[9px] font-mono text-hud-text-dim/50">
+            phone → http://&lt;pc-ip&gt;:8001/phone
+          </span>
+        </div>
+      ) : (
+        <img
+          src={`${API_BASE}/vision/phone_frame?f=${frame.frame_id}`}
+          alt={`Phone camera frame ${frame.frame_id} (${frame.mode})`}
+          className={cn(
+            "w-full rounded-sm border object-contain bg-black",
+            live ? "border-hud-cyan/40" : "border-hud-warning/40 opacity-60",
+          )}
+        />
+      )}
     </div>
   );
 }

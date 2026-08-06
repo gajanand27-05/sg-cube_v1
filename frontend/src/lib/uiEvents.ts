@@ -136,9 +136,17 @@ export type WakeHeardPayload = {
   peak: number; // peak amplitude of the captured audio buffer, 0..32767
 };
 
+export type PhoneFramePayload = {
+  frame_id: number;      // monotonic; fetch /vision/phone_frame when it changes
+  timestamp: number;     // server receive time (epoch seconds)
+  mode: string;          // "navigate" | "scan" | "read" | "idle"
+  fps_received: number;
+};
+
 export type UiEventPayloadMap = {
   ai_metrics: AIMetricsPayload;
   wake_heard: WakeHeardPayload;
+  phone_frame: PhoneFramePayload;
   intent_resolved: IntentResolvedPayload;
   agent_thinking: AgentThinkingPayload;
   agent_reasoning: AgentReasoningPayload;

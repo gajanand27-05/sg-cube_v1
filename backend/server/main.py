@@ -96,6 +96,8 @@ app.include_router(system.router)
 app.include_router(files.router)
 app.include_router(diagnostics.router)
 app.include_router(replay.router)
+app.include_router(phone_stream.router)       # WS /ws/phone_stream
+app.include_router(phone_stream.page_router)  # /phone capture page + /vision/phone_frame
 
 # Phase E: Optionally mount MCP server at /mcp
 try:

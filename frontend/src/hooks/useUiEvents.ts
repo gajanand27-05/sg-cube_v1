@@ -27,6 +27,7 @@ const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | 
     active_model: "string",
   },
   wake_heard: { peak: "number" },
+  phone_frame: { frame_id: "number", mode: "string", fps_received: "number" },
   intent_resolved: { source_layer: "string" },
   agent_thinking: { agent_name: "string", is_thinking: "boolean" },
   agent_reasoning: { reasoning: "string" },
