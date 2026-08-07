@@ -143,10 +143,19 @@ export type PhoneFramePayload = {
   fps_received: number;
 };
 
+export type ObstaclePayload = {
+  label: string;
+  direction: "left" | "straight" | "right";
+  distance_m: number;
+  confidence: number;
+  priority: "critical" | "warning";
+};
+
 export type UiEventPayloadMap = {
   ai_metrics: AIMetricsPayload;
   wake_heard: WakeHeardPayload;
   phone_frame: PhoneFramePayload;
+  obstacle: ObstaclePayload;
   intent_resolved: IntentResolvedPayload;
   agent_thinking: AgentThinkingPayload;
   agent_reasoning: AgentReasoningPayload;

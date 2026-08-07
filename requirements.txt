@@ -42,6 +42,9 @@ Pillow==11.0.0
 # ── VisionClaw Phase 1: phone-connect QR (renders via Pillow above) ──
 qrcode==8.2
 
+# ── VisionClaw Phase 2: YOLOv8n obstacle detection on phone frames (CPU) ──
+ultralytics==8.4.115
+
 # ── Phase 10c: in-app actions (YouTube first-result resolver) ──
 yt-dlp==2026.3.3
 

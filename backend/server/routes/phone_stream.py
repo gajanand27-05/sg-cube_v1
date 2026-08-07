@@ -16,6 +16,7 @@ and the HUD fetches the image over HTTP.
 Access: private/loopback peers only (the phone is on the LAN; no JWT flow on
 a phone browser). Same posture as routes/remote.py.
 """
+import asyncio
 import io
 import json
 import logging
@@ -28,6 +29,7 @@ from fastapi.responses import HTMLResponse, Response
 
 from backend.core.events import get_bus
 from backend.core.vision.frame_ingest import frame_ingestor
+from backend.core.vision.obstacle_detector import detection_runner
 from backend.daemon.ui_events import ModeChangeEvent, VisionHealthEvent
 from backend.server.routes.remote import _is_private_host
 
@@ -67,7 +69,11 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
 
             if msg.get("bytes") is not None:
                 frames_seen += 1
-                frame_ingestor.ingest_frame(msg["bytes"], mode=mode)
+                meta = frame_ingestor.ingest_frame(msg["bytes"], mode=mode)
+                if meta is not None:
+                    # Phase 2: YOLO on accepted frames. submit() returns
+                    # immediately if a detection is already in flight.
+                    asyncio.create_task(detection_runner.submit(msg["bytes"], mode))
 
             elif msg.get("text") is not None:
                 try:
@@ -90,7 +96,7 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
                 health = VisionHealthEvent(
                     fps_received=meta.fps_received if meta else 0.0,
                     fps_processed=min(meta.fps_received if meta else 0.0, frame_ingestor.max_fps),
-                    detector_latency_ms=0.0,  # Phase 2 fills this in
+                    detector_latency_ms=detection_runner.last_latency_ms,
                     tts_queue_depth=0,        # Phase 3 fills this in
                     dropped_frames=stats["frames_dropped"],
                     mode=mode,

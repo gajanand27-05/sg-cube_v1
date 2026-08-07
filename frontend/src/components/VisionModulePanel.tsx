@@ -115,6 +115,31 @@ function PhoneConnectHint() {
   );
 }
 
+const OBSTACLE_TTL_MS = 4000;
+
+/** Latest confirmed YOLO obstacle, overlaid on the feed. Fades out when no
+ *  fresh event arrives — a stale obstacle chip is worse than none. */
+function ObstacleChip({ now }: { now: number }) {
+  const env = useUiEventEnvelope("obstacle");
+  if (env === null) return null;
+  const ageMs = now - Date.parse(env.timestamp);
+  if (!Number.isFinite(ageMs) || ageMs > OBSTACLE_TTL_MS) return null;
+  const o = env.payload;
+  const arrow = o.direction === "left" ? "←" : o.direction === "right" ? "→" : "↑";
+  return (
+    <span
+      className={cn(
+        "absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded-sm border font-mono text-[10px]",
+        o.priority === "critical"
+          ? "border-hud-danger text-hud-danger bg-bg-base/80"
+          : "border-hud-warning text-hud-warning bg-bg-base/70",
+      )}
+    >
+      {arrow} {o.label} · {o.distance_m.toFixed(1)}m
+    </span>
+  );
+}
+
 /** Phone feed overlay zone. Mounts inside VisionModulePanel when enabled.
  *
  *  PhoneFrameEvent carries metadata only; on each new frame_id the <img>
@@ -199,14 +224,17 @@ export function PhoneFeedOverlayZone() {
           <PhoneConnectHint />
         </div>
       ) : (
-        <img
-          src={`${API_BASE}/vision/phone_frame?f=${frame.frame_id}`}
-          alt={`Phone camera frame ${frame.frame_id} (${frame.mode})`}
-          className={cn(
-            "w-full rounded-sm border object-contain bg-black",
-            live ? "border-hud-cyan/40" : "border-hud-warning/40 opacity-60",
-          )}
-        />
+        <div className="relative">
+          <img
+            src={`${API_BASE}/vision/phone_frame?f=${frame.frame_id}`}
+            alt={`Phone camera frame ${frame.frame_id} (${frame.mode})`}
+            className={cn(
+              "w-full rounded-sm border object-contain bg-black",
+              live ? "border-hud-cyan/40" : "border-hud-warning/40 opacity-60",
+            )}
+          />
+          <ObstacleChip now={now} />
+        </div>
       )}
     </div>
   );
