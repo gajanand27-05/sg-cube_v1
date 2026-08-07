@@ -20,6 +20,7 @@ import io
 import json
 import logging
 import socket
+import sys
 import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -145,7 +146,14 @@ async def phone_connect_qr():
     url = _phone_url()
     if url is None:
         return Response(status_code=404)
-    import qrcode  # deferred: cold import builds tables
+    try:
+        import qrcode  # deferred: cold import builds tables
+    except ImportError:
+        # The daemon may run on a different interpreter than the one that
+        # pip-installed qrcode (this repo has a system-vs-venv split). The HUD
+        # treats 404 as "no QR, URL text only" — never a 500 traceback.
+        log.warning("qrcode not installed for %s — run: pip install qrcode", sys.executable)
+        return Response(status_code=404)
 
     img = qrcode.make(url, box_size=6, border=2)
     buf = io.BytesIO()

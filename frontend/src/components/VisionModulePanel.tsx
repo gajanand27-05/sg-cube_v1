@@ -92,6 +92,10 @@ function PhoneConnectHint() {
         src={`${API_BASE}/vision/phone_connect_qr.png`}
         alt={`QR code for ${info.url}`}
         className="w-[88px] h-[88px] rounded-sm border border-hud-border-dim bg-white p-0.5 shrink-0"
+        onError={(e) => {
+          // QR generation unavailable (404) — the URL text still works.
+          (e.target as HTMLImageElement).style.display = "none";
+        }}
       />
       <div className="flex flex-col gap-1.5 min-w-0">
         <span className="text-[10px] font-mono text-hud-text-dim leading-relaxed">
