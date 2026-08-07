@@ -68,10 +68,11 @@ def test_phone_connect_returns_concrete_url(client):
     r = client.get("/vision/phone_connect")
     assert r.status_code == 200
     data = r.json()
-    # A real dotted-quad URL, never a placeholder like <pc-ip>
+    # A real dotted-quad URL, never a placeholder like <pc-ip>. https when the
+    # TLS listener is enabled (default), http otherwise.
     assert data["url"] is None or (
-        data["url"].startswith("http://")
-        and data["url"].endswith(":8001/phone" if ":8001" in data["url"] else "/phone")
+        data["url"].startswith(("https://", "http://"))
+        and data["url"].endswith("/phone")
         and "<" not in data["url"]
     )
 

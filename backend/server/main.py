@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -53,8 +54,39 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning("Preflight itself crashed (unexpected): %s", e)
 
+    # Phone HTTPS: a second uvicorn server for the SAME app, TLS on
+    # phone_tls_port, run as a task on THIS loop — no extra thread, no extra
+    # event loop (the vision-loop-under-uvicorn hang taught that lesson).
+    tls_server = None
+    tls_task = None
+    if settings.enable_phone_tls:
+        try:
+            import uvicorn as _uvicorn
+            from backend.server.routes.phone_stream import _lan_ip
+            from backend.server.tls import ensure_self_signed_cert
+
+            pair = ensure_self_signed_cert(_lan_ip())
+            if pair is not None:
+                cert_file, key_file = pair
+                tls_server = _uvicorn.Server(_uvicorn.Config(
+                    app, host=settings.app_host, port=settings.phone_tls_port,
+                    ssl_certfile=cert_file, ssl_keyfile=key_file,
+                    log_level="warning", lifespan="off",  # this lifespan already ran
+                ))
+                tls_task = asyncio.create_task(tls_server.serve())
+                log.info("Phone HTTPS listening on %s:%d", settings.app_host, settings.phone_tls_port)
+        except Exception as e:
+            log.warning("Phone HTTPS failed to start (plain HTTP still up): %s", e)
+
     yield
 
+    if tls_server is not None:
+        tls_server.should_exit = True
+        if tls_task is not None:
+            try:
+                await asyncio.wait_for(tls_task, timeout=5)
+            except (asyncio.TimeoutError, Exception):
+                pass
     stop_services(service_handle)
     await bus.stop()
     log.info("Shutting down")

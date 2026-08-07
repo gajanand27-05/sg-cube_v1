@@ -123,9 +123,15 @@ def _lan_ip() -> str | None:
 
 
 def _phone_url() -> str | None:
+    """HTTPS when the TLS listener is enabled (camera works after the phone
+    accepts the one-time cert warning), plain HTTP otherwise."""
     from backend.server.config import settings
     ip = _lan_ip()
-    return None if ip is None else f"http://{ip}:{settings.app_port}/phone"
+    if ip is None:
+        return None
+    if settings.enable_phone_tls:
+        return f"https://{ip}:{settings.phone_tls_port}/phone"
+    return f"http://{ip}:{settings.app_port}/phone"
 
 
 @page_router.get("/vision/phone_connect")
@@ -181,8 +187,9 @@ async def get_phone_frame():
 
 @page_router.get("/phone")
 async def phone_capture_page():
-    """Phone-side capture page. Open http://<pc-ip>:8001/phone on the phone."""
-    return HTMLResponse(content=_PHONE_PAGE)
+    """Phone-side capture page — scan the QR in the HUD's Vision panel."""
+    from backend.server.config import settings
+    return HTMLResponse(content=_PHONE_PAGE.replace("{{TLS_PORT}}", str(settings.phone_tls_port)))
 
 
 # Self-contained on purpose: the phone loads exactly one document, nothing else.
@@ -252,10 +259,12 @@ function connect() {
 async function start() {
   err.textContent = "";
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    err.textContent = "Camera API unavailable. Phone browsers require HTTPS or an "
-      + "allowlisted origin for camera access over plain HTTP.\\n"
-      + "Android Chrome fix: open chrome://flags/#unsafely-treat-insecure-origin-as-secure, "
-      + "add " + location.origin + " , relaunch Chrome, reload this page.";
+    err.textContent = "Camera API unavailable — phone browsers only allow the camera on HTTPS.\\n"
+      + (location.protocol === "https:"
+        ? "Unexpected: this page IS https. Try reloading, or a different browser."
+        : "Open the HTTPS version instead: https://" + location.hostname + ":{{TLS_PORT}}/phone\\n"
+          + "(accept the one-time security warning: Advanced \\u2192 Proceed). "
+          + "Rescanning the QR on the HUD also takes you there.");
     return;
   }
   try {
