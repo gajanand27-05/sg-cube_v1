@@ -16,8 +16,10 @@ and the HUD fetches the image over HTTP.
 Access: private/loopback peers only (the phone is on the LAN; no JWT flow on
 a phone browser). Same posture as routes/remote.py.
 """
+import io
 import json
 import logging
+import socket
 import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -106,6 +108,50 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
         log.error("Phone stream error: %s", e)
     finally:
         log.info("Phone stream session ended: %d frames received", frames_seen)
+
+
+def _lan_ip() -> str | None:
+    """This machine's LAN IPv4 — the address a phone on the same Wi-Fi uses.
+    UDP connect() picks the interface with the default route; no packet is sent."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
+
+def _phone_url() -> str | None:
+    from backend.server.config import settings
+    ip = _lan_ip()
+    return None if ip is None else f"http://{ip}:{settings.app_port}/phone"
+
+
+@page_router.get("/vision/phone_connect")
+async def phone_connect_info():
+    """The concrete URL the phone should open — the HUD shows this (and the QR
+    below) instead of a placeholder the user would have to transcribe."""
+    url = _phone_url()
+    from backend.server.config import settings
+    return {
+        "url": url,
+        "reachable_from_lan": settings.app_host not in ("127.0.0.1", "localhost"),
+    }
+
+
+@page_router.get("/vision/phone_connect_qr.png")
+async def phone_connect_qr():
+    """QR of the phone URL — scan with the phone camera, no typing."""
+    url = _phone_url()
+    if url is None:
+        return Response(status_code=404)
+    import qrcode  # deferred: cold import builds tables
+
+    img = qrcode.make(url, box_size=6, border=2)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return Response(content=buf.getvalue(), media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
 
 
 @page_router.get("/vision/phone_frame")

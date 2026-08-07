@@ -64,6 +64,27 @@ def test_invalid_json_does_not_kill_stream(client):
     assert client.get("/vision/phone_frame").status_code == 200
 
 
+def test_phone_connect_returns_concrete_url(client):
+    r = client.get("/vision/phone_connect")
+    assert r.status_code == 200
+    data = r.json()
+    # A real dotted-quad URL, never a placeholder like <pc-ip>
+    assert data["url"] is None or (
+        data["url"].startswith("http://")
+        and data["url"].endswith(":8001/phone" if ":8001" in data["url"] else "/phone")
+        and "<" not in data["url"]
+    )
+
+
+def test_phone_connect_qr_is_png(client):
+    if client.get("/vision/phone_connect").json()["url"] is None:
+        pytest.skip("no LAN interface on this machine")
+    r = client.get("/vision/phone_connect_qr.png")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
 def test_phone_page_served(client):
     r = client.get("/phone")
     assert r.status_code == 200

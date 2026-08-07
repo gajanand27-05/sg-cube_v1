@@ -56,6 +56,61 @@ const API_BASE =
 
 const FEED_STALE_MS = 3000;
 
+type PhoneConnect = { url: string | null; reachable_from_lan: boolean };
+
+/** The concrete address the phone should open, straight from the backend —
+ *  never a placeholder the user has to transcribe (that shipped once and the
+ *  literal "<pc-ip>" ended up typed into a phone). */
+function usePhoneConnect(): PhoneConnect | null {
+  const [info, setInfo] = useState<PhoneConnect | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch(`${API_BASE}/vision/phone_connect`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => alive && d && setInfo(d))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return info;
+}
+
+/** QR + copyable URL block shown wherever the phone needs connecting. */
+function PhoneConnectHint() {
+  const info = usePhoneConnect();
+  if (info === null || info.url === null) {
+    return (
+      <span className="text-[10px] font-mono text-hud-text-dim">
+        backend unreachable — start it, then reopen this panel
+      </span>
+    );
+  }
+  return (
+    <div className="flex items-center gap-3">
+      <img
+        src={`${API_BASE}/vision/phone_connect_qr.png`}
+        alt={`QR code for ${info.url}`}
+        className="w-[88px] h-[88px] rounded-sm border border-hud-border-dim bg-white p-0.5 shrink-0"
+      />
+      <div className="flex flex-col gap-1.5 min-w-0">
+        <span className="text-[10px] font-mono text-hud-text-dim leading-relaxed">
+          Scan with the phone camera (same Wi-Fi), or open:
+        </span>
+        <code className="text-[10px] font-mono text-hud-cyan-glow border border-hud-border-dim
+                         rounded px-1.5 py-1 select-all break-all">
+          {info.url}
+        </code>
+        {!info.reachable_from_lan && (
+          <span className="text-[9px] font-mono text-hud-danger leading-relaxed">
+            ⚠ backend is bound to localhost — set APP_HOST=0.0.0.0 in .env and restart
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Phone feed overlay zone. Mounts inside VisionModulePanel when enabled.
  *
  *  PhoneFrameEvent carries metadata only; on each new frame_id the <img>
@@ -86,13 +141,7 @@ export function PhoneFeedOverlayZone() {
           <Zap className="w-3.5 h-3.5 text-hud-warning" />
         </summary>
         <div className="p-2 flex flex-col gap-2">
-          <p className="text-[10px] font-mono text-hud-text-dim leading-relaxed">
-            On the phone (same Wi-Fi), open{' '}
-            <code className="border border-hud-border-dim rounded px-0.5">
-              http://&lt;pc-ip&gt;:8001/phone
-            </code>{' '}
-            and start streaming, then enable the feed here.
-          </p>
+          <PhoneConnectHint />
           <button
             onClick={() => setEnabled(true)}
             className="w-full flex items-center justify-center gap-2 px-2 py-1.5 rounded-sm
@@ -137,13 +186,13 @@ export function PhoneFeedOverlayZone() {
       </div>
 
       {frame === null ? (
-        <div className="relative w-full h-[160px] rounded-sm border border-dashed border-hud-cyan/30
-                        bg-bg-overlay/30 flex flex-col items-center justify-center gap-2">
-          <Camera className="w-6 h-6 text-hud-cyan/30 animate-pulse" />
-          <span className="text-[10px] font-mono text-hud-text-dim">Waiting for frames...</span>
-          <span className="text-[9px] font-mono text-hud-text-dim/50">
-            phone → http://&lt;pc-ip&gt;:8001/phone
-          </span>
+        <div className="relative w-full rounded-sm border border-dashed border-hud-cyan/30
+                        bg-bg-overlay/30 flex flex-col items-center justify-center gap-2 p-3">
+          <div className="flex items-center gap-2">
+            <Camera className="w-4 h-4 text-hud-cyan/30 animate-pulse" />
+            <span className="text-[10px] font-mono text-hud-text-dim">Waiting for frames...</span>
+          </div>
+          <PhoneConnectHint />
         </div>
       ) : (
         <img
