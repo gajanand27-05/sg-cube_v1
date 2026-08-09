@@ -110,6 +110,33 @@ Recorded here rather than left in commit `dc6349f`'s message, where it was invis
 
 # Phase 5E — data-gated (DO NOT build without usage data)
 
+> **2026-08-09 — the measurement blocker is removed.** These tickets all say
+> "use it for a day, then read the numbers", and until now that was
+> unanswerable: `/diagnostics/dogfooding` reported counters accumulated since
+> the first ever launch (2026-07-02), blending in the turn-stale bug, the
+> OpenRouter 402 period, the day the embedding backend was down and the TTS
+> loop crash. It read **77 successes in 2138 wake attempts, 588 crashes,
+> ~39s mean command latency** — figures that describe a stack that no longer
+> exists, and that would have aimed every fix below at the wrong thing.
+>
+> The ledger now carries a resettable **window** beside the lifetime totals.
+> Before a real day of use:
+>
+> ```
+> POST /diagnostics/dogfooding/reset_window?label=<commit sha>
+> ```
+>
+> then read `window_rates` (never `rates`) from `GET /diagnostics/dogfooding`.
+> A rate of `None` means nothing was measured; `0` means actively broken —
+> they are not the same and the ledger keeps them apart.
+>
+> Still genuinely unmeasurable, and worth knowing before you plan around it:
+> `/diagnostics/latency` is an in-memory ring buffer (`latency.py`) that dies
+> with the process, and `/diagnostics/tools` counters reset on restart. So
+> T-latency-optimization and T-tool-surface-pruning can be aimed within one
+> long session, but not across a week of restarts, without persisting those
+> two as well.
+
 These are reliability items that cannot be aimed correctly until the two manual test docs are run and the assistant has been used for real for a day. Building any of them against my imagination — instead of against what actually breaks — is the "hardening the wrong things" failure mode the Phase 5 spec explicitly warned against. Left as explicit tickets so future-me knows what's waiting and why it's waiting.
 
 ## T-barge-in-tuning (data-gated: Phase 4 Scenario A2)

@@ -80,8 +80,23 @@ def get_diagnostics():
 
 @router.get("/dogfooding")
 def get_dogfooding():
-    """Lightweight counter summary from the persistent ledger."""
+    """Lightweight counter summary from the persistent ledger.
+
+    Read `window_rates`, not `rates`, when judging the current build: `rates`
+    runs from the first ever launch and blends in every era the assistant has
+    been through.
+    """
     return dogfooding_ledger.snapshot()
+
+
+@router.post("/dogfooding/reset_window")
+def reset_dogfooding_window(label: str | None = None):
+    """Zero the measurement window — call before a real day of use.
+
+    Lifetime counters are untouched. `label` is free text for what you are
+    about to measure (a commit sha reads best).
+    """
+    return dogfooding_ledger.reset_window(label)
 
 
 @router.get("/tools")
