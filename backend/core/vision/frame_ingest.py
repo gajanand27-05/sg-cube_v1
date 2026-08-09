@@ -100,6 +100,19 @@ class FrameIngestor:
         with self._lock:
             return self._latest, self._latest_meta
 
+    def reset(self) -> None:
+        """Forget the buffered frame. Called when the phone disconnects so the
+        HUD gets a 404 (no feed) instead of a stale image that looks live.
+
+        Cumulative counters survive on purpose — they are session statistics
+        the health event reports, not per-connection state.
+        """
+        with self._lock:
+            self._latest = None
+            self._latest_meta = None
+            self._last_accept = 0.0
+            self._recent_offers.clear()
+
     @property
     def stats(self) -> dict:
         with self._lock:

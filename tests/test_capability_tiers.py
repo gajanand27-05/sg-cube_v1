@@ -29,6 +29,16 @@ if str(_project_root) not in sys.path:
 TRUSTED_ALLOWLIST = {
     "set_volume", "set_brightness", "open_app", "focus_window",
     "remember", "take_note", "set_reminder",
+    # Camera control is trusted deliberately: the whole point is hands-free
+    # ("connect phone camera"), and a confirmation prompt would defeat it for
+    # the blind-assistance user this feature exists for. It is reversible, and
+    # it cannot start a camera unseen — the phone must already be paired with
+    # the page open and permission granted, and the running stream is visible
+    # on both the phone and the HUD.
+    # Residual risk, worth knowing: T-wake-word-executes-ambient-audio means a
+    # misheard transcript can reach a tool, so this can be started by a
+    # mishearing. The preconditions above are what bound that, not the prompt.
+    "connect_phone_camera", "disconnect_phone_camera",
 }
 
 

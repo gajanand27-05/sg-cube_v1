@@ -30,6 +30,7 @@ from fastapi.responses import HTMLResponse, Response
 from backend.core.events import get_bus
 from backend.core.vision.frame_ingest import frame_ingestor
 from backend.core.vision.obstacle_detector import detection_runner
+from backend.core.vision.phone_session import VALID_MODES, PhoneSession, registry
 from backend.daemon.ui_events import ModeChangeEvent, VisionHealthEvent
 from backend.server.routes.remote import _is_private_host
 
@@ -38,7 +39,6 @@ router = APIRouter(prefix="/ws", tags=["phone_stream"])
 page_router = APIRouter(tags=["phone_stream"])
 
 HEALTH_INTERVAL_S = 5.0
-VALID_MODES = {"navigate", "scan", "read", "idle"}
 
 
 def _peer_allowed(host: str | None) -> bool:
@@ -57,7 +57,12 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
     await ws.accept()
     log.info("Phone stream client connected: %s", ws.client.host if ws.client else "?")
 
-    mode = "idle"
+    # The page opens this socket on load, before the camera starts, so that
+    # "connect phone camera" has something to talk to. Registration is
+    # therefore about the page being open — not about frames flowing.
+    session = PhoneSession(ws)
+    registry.add(session)
+
     frames_seen = 0
     last_health = time.monotonic()
 
@@ -69,11 +74,12 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
 
             if msg.get("bytes") is not None:
                 frames_seen += 1
-                meta = frame_ingestor.ingest_frame(msg["bytes"], mode=mode)
+                session.streaming = True
+                meta = frame_ingestor.ingest_frame(msg["bytes"], mode=session.mode)
                 if meta is not None:
                     # Phase 2: YOLO on accepted frames. submit() returns
                     # immediately if a detection is already in flight.
-                    asyncio.create_task(detection_runner.submit(msg["bytes"], mode))
+                    asyncio.create_task(detection_runner.submit(msg["bytes"], session.mode))
 
             elif msg.get("text") is not None:
                 try:
@@ -81,10 +87,24 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
                 except json.JSONDecodeError:
                     log.warning("Invalid JSON from phone: %.200s", msg["text"])
                     continue
-                if data.get("type") == "mode_change" and data.get("mode") in VALID_MODES:
-                    mode = data["mode"]
-                    get_bus().publish(ModeChangeEvent(mode=mode))
-                    log.info("Phone vision mode -> %s", mode)
+                kind = data.get("type")
+                if kind == "mode_change" and data.get("mode") in VALID_MODES:
+                    session.mode = data["mode"]
+                    get_bus().publish(ModeChangeEvent(mode=session.mode))
+                    log.info("Phone vision mode -> %s", session.mode)
+                elif kind == "status":
+                    # The phone's answer to a pushed command. Load-bearing: it
+                    # is the only thing that distinguishes "command delivered"
+                    # from "camera actually running", and the tool reports the
+                    # latter to the user.
+                    session.note_status(
+                        streaming=bool(data.get("streaming")),
+                        error=data.get("error"),
+                    )
+                    if data.get("mode") in VALID_MODES:
+                        session.mode = data["mode"]
+                    log.info("Phone status: streaming=%s error=%s",
+                             session.streaming, data.get("error"))
                 else:
                     log.warning("Unknown phone control message: %.100s", msg["text"])
 
@@ -99,7 +119,7 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
                     detector_latency_ms=detection_runner.last_latency_ms,
                     tts_queue_depth=0,        # Phase 3 fills this in
                     dropped_frames=stats["frames_dropped"],
-                    mode=mode,
+                    mode=session.mode,
                 )
                 get_bus().publish(health)
                 await ws.send_text(json.dumps({
@@ -114,6 +134,15 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
     except Exception as e:
         log.error("Phone stream error: %s", e)
     finally:
+        registry.remove(session)
+        # Drop the last frame and the detector's confirmation state. Without
+        # this, /vision/phone_frame keeps serving a minutes-old image with HTTP
+        # 200 after the phone drops off Wi-Fi, so the HUD shows a frozen picture
+        # that reads as a live feed — the worst failure mode for a navigation
+        # aid — and the next session's first frame can satisfy 2-frame
+        # confirmation against the previous session's detections.
+        frame_ingestor.reset()
+        detection_runner.reset()
         log.info("Phone stream session ended: %d frames received", frames_seen)
 
 
@@ -236,7 +265,7 @@ _PHONE_PAGE = """<!doctype html>
 const FPS = 2, MAX_W = 800, QUALITY = 0.6;
 const v = document.getElementById("v"), c = document.getElementById("c");
 const st = document.getElementById("status"), err = document.getElementById("err");
-let ws = null, timer = null, sent = 0, running = false;
+let ws = null, timer = null, sent = 0, running = false, mode = "idle";
 
 function wsUrl() {
   return (location.protocol === "https:" ? "wss" : "ws") + "://" + location.host + "/ws/phone_stream";
@@ -244,34 +273,61 @@ function wsUrl() {
 
 function setStatus() {
   st.textContent = (ws && ws.readyState === 1 ? "connected" : "disconnected")
-    + " | frames sent: " + sent;
+    + (running ? " | streaming" : " | camera idle") + " | frames sent: " + sent;
 }
 
+// Tell the server what actually happened. The assistant reports this back to
+// the user, so a command that was delivered but failed on the device must not
+// look like success.
+function report(error) {
+  if (ws && ws.readyState === 1)
+    ws.send(JSON.stringify({ type: "status", streaming: running, mode: mode,
+                             error: error || null }));
+}
+
+// The control socket is open whenever this page is open, streaming or not —
+// that is what lets "connect phone camera" reach the phone without a QR scan.
+// It always reconnects, because the page being backgrounded must not
+// permanently deafen the phone.
 function connect() {
   ws = new WebSocket(wsUrl());
   ws.binaryType = "arraybuffer";
-  ws.onopen = setStatus;
-  ws.onclose = () => { setStatus(); if (running) setTimeout(connect, 2000); };
-  ws.onmessage = (m) => {
-    try {
-      const d = JSON.parse(m.data);
-      if (d.type === "health")
-        st.textContent = "connected | sent: " + sent + " | server accepted: "
-          + d.frames_accepted + " (dropped " + d.frames_dropped + ")";
-    } catch {}
+  ws.onopen = () => { setStatus(); report(null); };
+  ws.onclose = () => { setStatus(); setTimeout(connect, 2000); };
+  ws.onmessage = async (m) => {
+    let d; try { d = JSON.parse(m.data); } catch { return; }
+    if (d.type === "health") {
+      st.textContent = "connected | sent: " + sent + " | server accepted: "
+        + d.frames_accepted + " (dropped " + d.frames_dropped + ")";
+    } else if (d.type === "command") {
+      if (d.mode) setMode(d.mode);
+      if (d.action === "start") { if (!running) await start(); else report(null); }
+      else if (d.action === "stop") { stop(); }
+      else report(null);
+    }
   };
+}
+
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll("#modes button").forEach(x =>
+    x.classList.toggle("active", x.dataset.mode === m));
+  if (ws && ws.readyState === 1)
+    ws.send(JSON.stringify({ type: "mode_change", mode: m }));
 }
 
 async function start() {
   err.textContent = "";
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    err.textContent = "Camera API unavailable — phone browsers only allow the camera on HTTPS.\\n"
+    const msg = "Camera API unavailable — phone browsers only allow the camera on HTTPS.\\n"
       + (location.protocol === "https:"
         ? "Unexpected: this page IS https. Try reloading, or a different browser."
         : "Open the HTTPS version instead: https://" + location.hostname + ":{{TLS_PORT}}/phone\\n"
           + "(accept the one-time security warning: Advanced \\u2192 Proceed). "
           + "Rescanning the QR on the HUD also takes you there.");
-    return;
+    err.textContent = msg;
+    report("camera API unavailable (needs HTTPS)");
+    return false;
   }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -280,10 +336,12 @@ async function start() {
     v.srcObject = stream;
   } catch (e) {
     err.textContent = "Camera permission failed: " + e;
-    return;
+    // Browsers only grant the camera without a tap once permission is already
+    // remembered for this origin, so this is the expected first-run answer.
+    report("camera permission denied — tap Start Streaming on the phone once");
+    return false;
   }
   running = true;
-  connect();
   timer = setInterval(() => {
     if (!ws || ws.readyState !== 1 || v.videoWidth === 0) return;
     const scale = Math.min(1, MAX_W / v.videoWidth);
@@ -295,26 +353,28 @@ async function start() {
     }, "image/jpeg", QUALITY);
   }, 1000 / FPS);
   document.getElementById("toggle").textContent = "Stop Streaming";
+  if (mode === "idle") setMode("navigate");
+  setStatus();
+  report(null);
+  return true;
 }
 
 function stop() {
   running = false;
   clearInterval(timer); timer = null;
   if (v.srcObject) { v.srcObject.getTracks().forEach(t => t.stop()); v.srcObject = null; }
-  if (ws) ws.close();
+  // The control socket deliberately stays open, so the assistant can start the
+  // camera again later without the phone being touched.
   document.getElementById("toggle").textContent = "Start Streaming";
   setStatus();
+  report(null);
 }
 
 document.getElementById("toggle").onclick = () => (running ? stop() : start());
 document.querySelectorAll("#modes button").forEach(b => {
-  b.onclick = () => {
-    document.querySelectorAll("#modes button").forEach(x => x.classList.remove("active"));
-    b.classList.add("active");
-    if (ws && ws.readyState === 1)
-      ws.send(JSON.stringify({ type: "mode_change", mode: b.dataset.mode }));
-  };
+  b.onclick = () => setMode(b.dataset.mode);
 });
+connect();
 </script>
 </body>
 </html>"""

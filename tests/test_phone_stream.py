@@ -32,6 +32,23 @@ def client():
     phone_stream.frame_ingestor = orig
 
 
+def _wait_for_frame(client, timeout: float = 5.0):
+    """Poll until the WS receive loop has ingested the frame.
+
+    These fetch while the socket is still OPEN. They used to read after the
+    `with` block on the basis that closing flushes the receive loop, but the
+    disconnect handler now clears the buffer (a stale frame served as HTTP 200
+    reads as a live feed — see test_phone_camera_voice_control), so post-close
+    is a 404 by design. Mid-session is also the real HUD's access pattern.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        r = client.get("/vision/phone_frame")
+        if r.status_code == 200 or time.monotonic() > deadline:
+            return r
+        time.sleep(0.05)
+
+
 def test_no_frame_yet_404(client):
     assert client.get("/vision/phone_frame").status_code == 404
 
@@ -39,8 +56,7 @@ def test_no_frame_yet_404(client):
 def test_binary_frame_reaches_http_fetch(client):
     with client.websocket_connect("/ws/phone_stream") as ws:
         ws.send_bytes(JPEG)
-        # receive loop is async on the same connection; closing flushes it
-    r = client.get("/vision/phone_frame")
+        r = _wait_for_frame(client)
     assert r.status_code == 200
     assert r.content == JPEG
     assert r.headers["content-type"] == "image/jpeg"
@@ -52,7 +68,7 @@ def test_mode_change_tags_subsequent_frames(client):
     with client.websocket_connect("/ws/phone_stream") as ws:
         ws.send_text('{"type": "mode_change", "mode": "navigate"}')
         ws.send_bytes(JPEG)
-    r = client.get("/vision/phone_frame")
+        r = _wait_for_frame(client)
     assert r.status_code == 200
     assert r.headers["x-frame-mode"] == "navigate"
 
@@ -61,7 +77,7 @@ def test_invalid_json_does_not_kill_stream(client):
     with client.websocket_connect("/ws/phone_stream") as ws:
         ws.send_text("{not json")
         ws.send_bytes(JPEG)
-    assert client.get("/vision/phone_frame").status_code == 200
+        assert _wait_for_frame(client).status_code == 200
 
 
 def test_phone_connect_returns_concrete_url(client):

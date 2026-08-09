@@ -20,12 +20,28 @@ treat distances as coarse ("about 2 meters"), not measurements.
 import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from backend.core.events import get_bus, Priority
 from backend.daemon.ui_events import ObstacleEvent
 
 log = logging.getLogger(__name__)
+
+# Alerts play on their own thread, never on the caller's loop.
+#
+# tts_piper.speak() branches on asyncio.get_running_loop(): with a loop it
+# schedules playback as a task on THAT loop, and _audio_player's stream.write()
+# blocks for the length of the audio. submit() runs on the uvicorn loop, so the
+# obvious call stalls the HTTP server and both WebSockets for every alert —
+# exactly the trade T-tts-loop-globals refused. On a worker thread there is no
+# running loop, so speak() takes its asyncio.run() path and owns its own loop,
+# the same shape as the daemon's per-capture handle_wake.
+#
+# Dedicated single worker, not the default executor: detect() already runs
+# there, and a 2s utterance must never occupy a slot detection needs. One
+# worker also serializes alerts, so two criticals can't talk over each other.
+_speech_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="obstacle-tts")
 
 # COCO label -> typical real-world height in meters (distance estimation).
 KNOWN_HEIGHTS = {
@@ -71,8 +87,15 @@ def _get_model():
     return _model
 
 
-def detect(jpeg: bytes) -> list[Obstacle]:
-    """Run YOLO on one JPEG frame. Blocking (~40-150ms CPU) — call off-loop."""
+def detect(jpeg: bytes, all_labels: bool = False) -> list[Obstacle]:
+    """Run YOLO on one JPEG frame. Blocking (~40-150ms CPU) — call off-loop.
+
+    By default only the KNOWN_HEIGHTS classes come back: navigation needs a
+    distance, and distance needs a known real-world height. `all_labels=True`
+    keeps everything the model saw — used for "what do you see", where naming a
+    laptop matters more than ranging it. Those carry distance_m=0.0 (meaning
+    unknown, never "at your feet") and priority "info".
+    """
     import cv2
     import numpy as np
 
@@ -87,18 +110,23 @@ def detect(jpeg: bytes) -> list[Obstacle]:
         names = r.names
         for box in r.boxes:
             label = names[int(box.cls[0])]
-            if label not in KNOWN_HEIGHTS:
+            known = label in KNOWN_HEIGHTS
+            if not known and not all_labels:
                 continue
             x1, y1, x2, y2 = (float(v) for v in box.xyxy[0])
             cx = (x1 + x2) / 2
             direction = "left" if cx < frame_w / 3 else "right" if cx > 2 * frame_w / 3 else "straight"
             box_h = max(1.0, y2 - y1)
-            distance = KNOWN_HEIGHTS[label] * (_FOCAL_FACTOR * frame_h) / box_h
-            priority = (
-                "critical"
-                if label in MOVING_HAZARDS and distance < CRITICAL_DISTANCE_M
-                else "warning"
-            )
+            if known:
+                distance = KNOWN_HEIGHTS[label] * (_FOCAL_FACTOR * frame_h) / box_h
+                priority = (
+                    "critical"
+                    if label in MOVING_HAZARDS and distance < CRITICAL_DISTANCE_M
+                    else "warning"
+                )
+            else:
+                distance = 0.0   # unknown — no height to range against
+                priority = "info"
             out.append(Obstacle(
                 label=label,
                 direction=direction,
@@ -118,6 +146,13 @@ class DetectionRunner:
         self._prev: set[tuple[str, str]] = set()  # (label, direction) last frame
         self._last_spoken: dict[str, float] = {}
         self.last_latency_ms: float = 0.0
+
+    def reset(self) -> None:
+        """Drop per-session state on phone disconnect. Without this the first
+        frame of a new session can be 'confirmed' against the previous
+        session's detections, and cooldowns carry over."""
+        self._prev.clear()
+        self._last_spoken.clear()
 
     async def submit(self, jpeg: bytes, mode: str) -> None:
         """Called from the WS loop for every accepted frame. Never blocks."""
@@ -168,11 +203,29 @@ class DetectionRunner:
         self._last_spoken[o.label] = now
         where = {"left": "on your left", "right": "on your right", "straight": "ahead"}[o.direction]
         meters = max(1, round(o.distance_m))
-        try:
+        self._speak_offloop(f"{o.label} {where}. {meters} meters.")
+
+    def _speak_offloop(self, phrase: str) -> None:
+        """Hand `phrase` to the speech thread. Deliberately not awaited: the
+        alert must not hold up the next frame, and submit() is still holding
+        _busy while this runs."""
+        def _run() -> None:
             from backend.ai_modules.speech import tts_piper
-            tts_piper.speak(f"{o.label} {where}. {meters} meters.")
-        except Exception as e:
-            log.warning("Obstacle alert TTS failed: %s", e)
+            tts_piper.speak(phrase)
+
+        try:
+            fut = _speech_pool.submit(_run)
+        except RuntimeError as e:  # pool shut down during process teardown
+            log.warning("Obstacle alert TTS not dispatched: %s", e)
+            return
+        # Nothing awaits the future, so an exception inside would vanish.
+        fut.add_done_callback(self._log_speech_failure)
+
+    @staticmethod
+    def _log_speech_failure(fut) -> None:
+        exc = fut.exception()
+        if exc is not None:
+            log.warning("Obstacle alert TTS failed: %s", exc)
 
 
 detection_runner = DetectionRunner()

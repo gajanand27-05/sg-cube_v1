@@ -65,6 +65,12 @@ def test_runner_skips_outside_detection_modes(monkeypatch):
     asyncio.run(runner.submit(b"f", "read"))
 
 
+def _flush_speech_pool():
+    """Alerts are dispatched to a single-worker pool, so a task queued behind
+    them is done only once they are."""
+    od._speech_pool.submit(lambda: None).result(timeout=10)
+
+
 def test_speak_cooldown(monkeypatch):
     spoken = []
     runner = od.DetectionRunner()
@@ -72,5 +78,51 @@ def test_speak_cooldown(monkeypatch):
     monkeypatch.setattr(tts, "speak", lambda text: spoken.append(text))
     runner._maybe_speak([_obs(dist=2.0)])
     runner._maybe_speak([_obs(dist=1.0)])  # same label, inside cooldown
+    _flush_speech_pool()
     assert len(spoken) == 1
     assert "person" in spoken[0] and "ahead" in spoken[0]
+
+
+def test_alert_never_speaks_on_the_callers_event_loop(monkeypatch):
+    """tts_piper.speak() branches on asyncio.get_running_loop(): with a loop it
+    schedules playback there, and playback blocks for the length of the audio.
+    submit() runs on the uvicorn loop, so speaking inline would stall the HTTP
+    server and both WebSockets on every alert.
+
+    Asserting 'speak was called' passes with the bug present — the load-bearing
+    assertion is which loop the call lands on.
+    """
+    seen = {}
+    import backend.ai_modules.speech.tts_piper as tts
+
+    def fake_speak(text):
+        try:
+            seen["loop"] = asyncio.get_running_loop()
+        except RuntimeError:
+            seen["loop"] = None  # what we want: speak() takes its own-loop path
+        seen["text"] = text
+
+    monkeypatch.setattr(tts, "speak", fake_speak)
+    monkeypatch.setattr(od, "detect", lambda _b: [_obs()])
+
+    class Bus:
+        def publish(self, ev, priority=None):
+            pass
+    monkeypatch.setattr(od, "get_bus", lambda: Bus())
+
+    runner = od.DetectionRunner()
+
+    async def two_frames():
+        await runner.submit(b"f1", "navigate")
+        await runner.submit(b"f2", "navigate")  # second sighting confirms + speaks
+        return asyncio.get_running_loop()
+
+    caller_loop = asyncio.run(two_frames())
+    _flush_speech_pool()
+
+    assert seen.get("text"), "the confirmed critical obstacle was never spoken"
+    assert seen["loop"] is None, (
+        f"speak() ran with a live event loop ({seen['loop']!r}) — playback would "
+        "block that loop; it must run on a thread with no loop of its own"
+    )
+    assert seen["loop"] is not caller_loop
