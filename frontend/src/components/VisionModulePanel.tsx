@@ -2,7 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
 import { statusPillClass, statusToneClasses } from "@/components/Panel";
 import type { DetectedObject } from "@/lib/uiEvents";
-import { useUiEventEnvelope } from "@/hooks/useUiEvents";
+import {
+  useUiEvent,
+  useUiEventEnvelope,
+  useUiEventListener,
+} from "@/hooks/useUiEvents";
 import { Camera, CameraOff, Zap } from "lucide-react";
 
 type StatusTone = "success" | "warning" | "danger" | "cyan" | "muted";
@@ -240,6 +244,89 @@ export function PhoneFeedOverlayZone() {
   );
 }
 
+const HAPTIC_FLASH_MS = 1500;
+
+/** The backend sends -1 for anything it could not measure, precisely so this
+ *  never renders as a real 0. Anything negative or non-finite is "unmeasured"
+ *  and comes back as null, which the callers print as an em-dash. */
+function measured(value: number | undefined): number | null {
+  if (value === undefined || !Number.isFinite(value) || value < 0) return null;
+  return value;
+}
+
+function fmt(value: number | null, digits: number, unit = ""): string {
+  return value === null ? "—" : `${value.toFixed(digits)}${unit}`;
+}
+
+/** Phase 3/4 telemetry: current vision mode, health counters, and a brief
+ *  flash when a haptic pulse is sent to the phone.
+ *
+ *  Hook choice follows T-panel-listener-state-lost-on-remount: mode and health
+ *  are standing state, so they use the cache-seeded useUiEvent and survive an
+ *  HMR/StrictMode remount. The haptic flash is transient by definition — it
+ *  must NOT be replayed from the cache on remount — so it stays a listener. */
+function VisionModeHealthRow() {
+  const modeEvent = useUiEvent("mode_change");
+  const health = useUiEvent("vision_health");
+  const [haptic, setHaptic] = useState<{ pulses: number; at: number } | null>(
+    null,
+  );
+
+  useUiEventListener("haptic", (p) => {
+    setHaptic({ pulses: p.pulses, at: Date.now() });
+  });
+
+  useEffect(() => {
+    if (haptic === null) return;
+    const id = setTimeout(() => setHaptic(null), HAPTIC_FLASH_MS);
+    return () => clearTimeout(id);
+  }, [haptic]);
+
+  // mode_change is the authoritative toggle; vision_health carries the mode too
+  // and is the only source if the panel mounted after the last toggle.
+  const mode = modeEvent?.mode ?? health?.mode ?? null;
+
+  const fpsIn = fmt(measured(health?.fps_received), 1);
+  const fpsOut = fmt(measured(health?.fps_processed), 1);
+  const latency = fmt(measured(health?.detector_latency_ms), 0, "ms");
+  const dropped = fmt(measured(health?.dropped_frames), 0);
+  const queue = fmt(measured(health?.tts_queue_depth), 0);
+  // -1 until the phone clock handshake lands, so it goes through the same gate.
+  const age = fmt(measured(health?.frame_age_ms), 0, "ms");
+  // Staleness drops, NOT the fps-throttle drops above — throttling is expected
+  // at 2fps, stale frames mean the link is too slow to guide someone safely.
+  const stale = fmt(measured(health?.frames_dropped_stale), 0);
+
+  return (
+    <div className="flex flex-col gap-1 min-w-0">
+      <div className="flex items-center justify-between gap-2">
+        <span className="hud-label">Vision mode</span>
+        <div className="flex items-center gap-1.5 min-w-0">
+          {haptic !== null && (
+            <span
+              key={haptic.at}
+              className="px-1.5 py-0.5 rounded-sm border border-hud-warning text-[9px]
+                         uppercase tracking-[0.12em] text-hud-warning font-mono hud-crossfade"
+            >
+              haptic ×{haptic.pulses}
+            </span>
+          )}
+          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-hud-cyan-glow truncate">
+            {mode ?? <span className="text-hud-text-dim">—</span>}
+          </span>
+        </div>
+      </div>
+      <span
+        className="font-mono text-[10px] text-hud-text-dim leading-relaxed"
+        title="frames received / processed per second · detector latency · frames dropped by the fps throttle · TTS queue depth · end-to-end frame age · frames dropped for being stale. “—” means the backend could not measure it."
+      >
+        {fpsIn} / {fpsOut} fps · det {latency} · drop {dropped} · q {queue} · age{" "}
+        {age} · stale {stale}
+      </span>
+    </div>
+  );
+}
+
 export function VisionModulePanel() {
   const env = useUiEventEnvelope("vision_update");
   const payload = env?.payload ?? null;
@@ -325,7 +412,10 @@ export function VisionModulePanel() {
         </span>
       </div>
 
-      {/* Row 5 — Phone feed overlay zone (Phase 1) */}
+      {/* Row 5 — Vision mode + health telemetry (Phase 3/4) */}
+      <VisionModeHealthRow />
+
+      {/* Row 6 — Phone feed overlay zone (Phase 1) */}
       <PhoneFeedOverlayZone />
     </div>
   );

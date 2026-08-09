@@ -90,6 +90,8 @@ class VisionHealthSnapshot:
             "tts_queue_depth": self.tts_queue_depth if self.tts_queue_depth is not None else -1,
             "dropped_frames": self.dropped_frames,
             "mode": self.mode or "idle",
+            "frame_age_ms": self.frame_age_ms if self.frame_age_ms is not None else -1.0,
+            "frames_dropped_stale": self.frames_dropped_stale,
         }
 
 

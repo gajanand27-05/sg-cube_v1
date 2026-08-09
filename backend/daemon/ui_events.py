@@ -306,13 +306,25 @@ class HapticEvent:
 
 @dataclass
 class VisionHealthEvent:
-    """Phase 4: vision diagnostics telemetry."""
+    """Phase 4: vision diagnostics telemetry.
+
+    Unmeasured numeric values arrive as -1, never 0 — see
+    VisionHealthSnapshot.event_fields(). A HUD rendering 0 fps reads as
+    "measured zero", which is the lie the whole vision-health path exists to
+    prevent. Consumers must gate on `< 0` before formatting.
+    """
     fps_received: float
     fps_processed: float
     detector_latency_ms: float
     tts_queue_depth: int
     dropped_frames: int
     mode: str
+    # End-to-end age of the last frame (server receive minus phone capture,
+    # clock-corrected). -1 until the clock handshake completes — without it
+    # staleness is measured but never surfaced, which was the state Phase 4
+    # shipped in.
+    frame_age_ms: float = -1.0
+    frames_dropped_stale: int = 0
 
 
 @dataclass

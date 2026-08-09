@@ -151,11 +151,42 @@ export type ObstaclePayload = {
   priority: "critical" | "warning";
 };
 
+export type ModeChangePayload = {
+  mode: string; // "navigate" | "scan" | "read" | "idle"
+};
+
+export type HapticPayload = {
+  pulses: number; // 1 = critical, 2 = warning
+};
+
+/** Phase 4 diagnostics. Every numeric field is -1 when the backend could not
+ *  measure it — that sentinel exists so the UI never renders an unmeasured
+ *  value as a real 0. Render it as an em-dash, never as a number. */
+export type VisionHealthPayload = {
+  fps_received: number;
+  fps_processed: number;
+  detector_latency_ms: number;
+  tts_queue_depth: number;
+  /** fps-throttle drops — normal and expected at 2fps. */
+  dropped_frames: number;
+  /** End-to-end frame age (server receive minus phone capture, clock-offset
+   *  corrected). -1 until the clock handshake with the phone completes. */
+  frame_age_ms: number;
+  /** Cumulative frames dropped for exceeding the 1.5s staleness gate. Always
+   *  >= 0, never -1. Distinct from dropped_frames: this one means the link is
+   *  too slow to guide someone safely. */
+  frames_dropped_stale: number;
+  mode: string;
+};
+
 export type UiEventPayloadMap = {
   ai_metrics: AIMetricsPayload;
   wake_heard: WakeHeardPayload;
   phone_frame: PhoneFramePayload;
   obstacle: ObstaclePayload;
+  mode_change: ModeChangePayload;
+  haptic: HapticPayload;
+  vision_health: VisionHealthPayload;
   intent_resolved: IntentResolvedPayload;
   agent_thinking: AgentThinkingPayload;
   agent_reasoning: AgentReasoningPayload;

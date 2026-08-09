@@ -29,6 +29,21 @@ const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | 
   wake_heard: { peak: "number" },
   phone_frame: { frame_id: "number", mode: "string", fps_received: "number" },
   obstacle: { label: "string", direction: "string", distance_m: "number", priority: "string" },
+  mode_change: { mode: "string" },
+  haptic: { pulses: "number" },
+  // -1 is a legitimate value here (backend's "not measured" sentinel) — for
+  // frame_age_ms it is the normal state until the phone clock handshake
+  // completes — so the number check must stay a finiteness check, never
+  // "> 0". VisionModulePanel renders it as an em-dash rather than a number.
+  vision_health: {
+    fps_received: "number",
+    fps_processed: "number",
+    detector_latency_ms: "number",
+    dropped_frames: "number",
+    frame_age_ms: "number",
+    frames_dropped_stale: "number",
+    mode: "string",
+  },
   intent_resolved: { source_layer: "string" },
   agent_thinking: { agent_name: "string", is_thinking: "boolean" },
   agent_reasoning: { reasoning: "string" },

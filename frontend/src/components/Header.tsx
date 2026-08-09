@@ -1,8 +1,22 @@
 import { useEffect, useState } from "react";
 import { Clock, Activity } from "lucide-react";
+import { cn } from "@/lib/cn";
+import { statusToneClasses } from "@/components/Panel";
+import { useUiConnectionState } from "@/hooks/useUiEvents";
+
+/** Same tone vocabulary the panels use, keyed by the WS connection state.
+ *  This used to be a hardcoded "System Online" — it claimed the system was up
+ *  with the backend unreachable. */
+const CONNECTION_LABELS = {
+  open: { label: "System Online", detail: "All systems operational", tone: "success" },
+  connecting: { label: "Connecting", detail: "Reaching backend...", tone: "warning" },
+  closed: { label: "System Offline", detail: "Backend unreachable", tone: "danger" },
+} as const;
 
 export function Header() {
   const [now, setNow] = useState(() => new Date());
+  const connection = useUiConnectionState();
+  const { label, detail, tone } = CONNECTION_LABELS[connection];
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -41,12 +55,24 @@ export function Header() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Activity className="w-4 h-4 text-hud-success animate-pulse-glow" />
+          <Activity
+            className={cn(
+              "w-4 h-4",
+              statusToneClasses[tone],
+              // Only pulse while there is something live to pulse about.
+              connection !== "closed" && "animate-pulse-glow",
+            )}
+          />
           <div className="text-right leading-tight">
-            <div className="text-xs font-semibold text-hud-success uppercase tracking-wider">
-              System Online
+            <div
+              className={cn(
+                "text-xs font-semibold uppercase tracking-wider",
+                statusToneClasses[tone],
+              )}
+            >
+              {label}
             </div>
-            <div className="text-[10px] text-hud-text-dim">All systems operational</div>
+            <div className="text-[10px] text-hud-text-dim">{detail}</div>
           </div>
         </div>
         <MiniChart />
