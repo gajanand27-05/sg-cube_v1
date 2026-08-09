@@ -1,12 +1,13 @@
 import logging
 
 import psutil
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from backend.core.auth.deps import require_local_peer
 from backend.daemon.main import get_service_status
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/system", tags=["system"])
+router = APIRouter(prefix="/system", tags=["system"], dependencies=[Depends(require_local_peer)])
 
 
 @router.get("/stats")

@@ -2,15 +2,18 @@ import base64
 import logging
 
 import pygetwindow as gw
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
+from backend.core.auth.deps import require_local_peer
 from backend.core.memory.screen_memory import screen_memory
 from backend.core.vision.capture import capture_screen
 from backend.daemon import vision_loop
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/vision", tags=["vision"])
+# /screenshot hands out a live JPEG of the user's desktop and carries no
+# credential — loopback only. See backend/core/auth/deps.peer_allowed.
+router = APIRouter(prefix="/vision", tags=["vision"], dependencies=[Depends(require_local_peer)])
 
 
 @router.get("/screenshot")

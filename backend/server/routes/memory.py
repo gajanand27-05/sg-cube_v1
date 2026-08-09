@@ -1,13 +1,14 @@
 import logging
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
+from backend.core.auth.deps import require_local_peer
 from backend.core.events import get_bus
 from backend.core.memory.manager import memory as memory_manager
 from backend.daemon.ui_events import MemoryHitEvent, MemoryHit
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/memory", tags=["memory"])
+router = APIRouter(prefix="/memory", tags=["memory"], dependencies=[Depends(require_local_peer)])
 
 
 def _iso(ts) -> str | None:

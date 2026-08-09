@@ -91,6 +91,12 @@ class Settings(BaseSettings):
     # flag proved unreliable. Self-signed; phone accepts a one-time warning.
     enable_phone_tls: bool = True
     phone_tls_port: int = 8443
+    # Desktop-sensitive routes (/vision, /memory, /system, /agents,
+    # /diagnostics, WS /ws/ui) are loopback-only because the HUD sends no
+    # credential. Turn this on if you open the HUD via this machine's LAN IP
+    # instead of localhost — it widens the guard to RFC1918 peers, which means
+    # anything on the same Wi-Fi can screenshot this desktop. Off by default.
+    allow_lan_hud: bool = False
     enable_clipboard: bool = True   # clipboard change tracking
     enable_telemetry: bool = True   # CPU/mem/disk broadcast to UI
     enable_watcher: bool = True     # proactive agent triggers

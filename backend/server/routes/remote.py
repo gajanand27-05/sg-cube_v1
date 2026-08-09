@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from backend.core.auth.deps import _is_private_host  # noqa: F401  (re-export: routes/phone_stream.py imports it from here)
 from backend.core.events import get_bus
 from backend.core.state import AssistantState, StateChangedEvent
 from backend.daemon.trigger import handle_wake, on_wake_detected
@@ -26,15 +27,10 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/remote", tags=["remote"])
 
 
-def _is_private_host(host: str) -> bool:
-    """True for loopback / RFC1918 peers. The old startswith('172.') check
-    also matched public 172.x space outside 172.16.0.0/12."""
-    import ipaddress
-    try:
-        addr = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return addr.is_loopback or addr.is_private
+# 16kHz mono int16 PCM = 32000 B/s, so this is ~60s of speech — far past any
+# real utterance. A client that streams binary and never sends end_of_speech
+# would otherwise grow this bytearray until the process OOMs.
+MAX_AUDIO_BUFFER_BYTES = 32_000 * 60
 
 
 class RemoteConnection:
@@ -89,12 +85,6 @@ class RemoteManager:
             bus.subscribe(event_type, self._broadcast_event)
         self._event_bridge_setup = True
 
-    def _get_bus(self):
-        """Get bus, setting up bridge if needed."""
-        if not self._event_bridge_setup:
-            self._setup_event_bridge()
-        return get_bus()
-
     def _broadcast_event(self, event):
         """Forward local event to remote clients as JSON."""
         data = {
@@ -128,7 +118,13 @@ class RemoteManager:
     async def connect(self, websocket: WebSocket, device_id: str):
         if not self.loop:
             self.loop = asyncio.get_running_loop()
-            
+
+        # The bus->device bridge used to hang off _get_bus(), which nothing
+        # ever called — so subscribe() never ran and a connected Android
+        # client received zero events, silently. connect() is the reachable
+        # path (same fix as ws_ui.UIEventManager.connect).
+        self._setup_event_bridge()
+
         await websocket.accept()
         conn = RemoteConnection(websocket, device_id)
         self.active_connections[device_id] = conn
@@ -214,6 +210,12 @@ async def websocket_endpoint(websocket: WebSocket, device_id: str):
             elif "bytes" in message:
                 # Accumulate audio chunks (PCM 16kHz)
                 conn.audio_buffer.extend(message["bytes"])
+                if len(conn.audio_buffer) > MAX_AUDIO_BUFFER_BYTES:
+                    log.warning(
+                        f"Device {device_id} exceeded {MAX_AUDIO_BUFFER_BYTES} B "
+                        f"without end_of_speech — dropping buffer"
+                    )
+                    conn.audio_buffer.clear()
 
     except WebSocketDisconnect:
         manager.disconnect(device_id)

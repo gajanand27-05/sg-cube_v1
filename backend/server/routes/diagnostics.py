@@ -8,15 +8,16 @@ import time
 from collections import defaultdict
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from backend.core.auth.deps import require_local_peer
 from backend.core.observability import engine as obs_engine
 from backend.core.dogfooding import ledger as dogfooding_ledger
 from backend.core.tools.registry import REGISTRY
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/diagnostics", tags=["diagnostics"])
+router = APIRouter(prefix="/diagnostics", tags=["diagnostics"], dependencies=[Depends(require_local_peer)])
 
 # ── Tool usage tracking ──────────────────────────────────────────────
 _tool_usage: dict[str, dict[str, Any]] = defaultdict(
