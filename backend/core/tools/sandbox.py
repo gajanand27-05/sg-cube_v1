@@ -1,4 +1,4 @@
-import uuid
+import secrets
 from typing import Any
 
 from backend.core.events import get_bus
@@ -36,7 +36,9 @@ class PermissionGuard:
             return ToolResult.blocked(f"Tool {name!r} is marked CRITICAL and requires manual approval via the Guardian Agent.")
 
         if tool.security == SecurityLevel.CAUTION:
-            token = str(uuid.uuid4())[:8]
+            # Not uuid4()[:8]: 8 hex chars is 32 bits, and this token is the
+            # only thing standing between a caller and executing a CAUTION tool.
+            token = secrets.token_urlsafe(16)
             self._pending[token] = (name, args)
             
             # Publish event so the UI can show a confirmation dialog

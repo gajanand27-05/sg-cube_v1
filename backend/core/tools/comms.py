@@ -1,6 +1,6 @@
 """Communications tools (Phase 11c) — clipboard + WhatsApp + email."""
 import re
-import subprocess
+import webbrowser
 from urllib.parse import quote_plus
 
 import pyperclip
@@ -56,7 +56,10 @@ def send_whatsapp(contact: str, message: str) -> ToolResult:
         return ToolResult.blocked("contact must be a phone number with country code (digits only after country prefix)")
 
     url = f"https://wa.me/{phone}?text={quote_plus(message)}"
-    subprocess.Popen(f'start "" "{url}"', shell=True)
+    # No shell. `start "" "<url>"` via shell=True let an LLM-supplied url close
+    # the quote and append `& <command>`; webbrowser.open hands the string to
+    # ShellExecute/xdg-open directly, so there is no command line to break out of.
+    webbrowser.open(url)
     return ToolResult.success(f"opened WhatsApp chat with +{phone}")
 
 
@@ -74,5 +77,5 @@ def send_email(to: str, subject: str = "", body: str = "") -> ToolResult:
     url = f"mailto:{to.strip()}"
     if parts:
         url += "?" + "&".join(parts)
-    subprocess.Popen(f'start "" "{url}"', shell=True)
+    webbrowser.open(url)  # no shell — see send_whatsapp
     return ToolResult.success(f"opened email composer for {to}")

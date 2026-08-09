@@ -11,7 +11,10 @@ from pydantic import BaseModel
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/replay", tags=["replay"])
 
-REPLAY_DIR = Path(__file__).resolve().parents[2] / "backend" / "database" / "replays"
+# parents[2] is `backend/` already, so the old `parents[2] / "backend" / ...`
+# pointed at backend/backend/database/replays — a directory nothing writes.
+# Must match backend/core/replay/recorder.py's REPLAY_DIR.
+REPLAY_DIR = Path(__file__).resolve().parents[2] / "database" / "replays"
 
 # Audit HIGH-1: request_id flows into REPLAY_DIR / f"{id}.json" — a "../"
 # payload escapes the replays dir. One guard for every trace-taking endpoint.

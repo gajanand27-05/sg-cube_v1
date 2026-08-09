@@ -20,6 +20,10 @@ VOICE_DIR = Path(__file__).parent / "piper_voices"
 VOICE_NAME = "en_US-ryan-high"
 
 _voice: PiperVoice | None = None
+# threading.Lock, not asyncio: _get_voice() is reached from the server loop, the
+# per-capture asyncio.run loop and the proactive handler's own thread (see
+# T-tts-loop-globals). Only a threading primitive is valid across all three.
+_voice_lock = threading.Lock()
 
 
 # ── Playback session ownership (T-tts-loop-globals) ────────────────────
@@ -232,15 +236,20 @@ def recent_spoken_snapshot() -> list[tuple[str, float | None]]:
 
 def _get_voice() -> PiperVoice:
     global _voice
+    # Double-checked locking: two overlapping turns both saw None and both ran
+    # PiperVoice.load — a second onnx session for no reason, and the loser's
+    # handle discarded mid-load.
     if _voice is None:
-        model_path = VOICE_DIR / f"{VOICE_NAME}.onnx"
-        config_path = VOICE_DIR / f"{VOICE_NAME}.onnx.json"
-        if not model_path.exists() or not config_path.exists():
-            raise RuntimeError(
-                f"Piper voice files missing in {VOICE_DIR}. "
-                f"Expected {VOICE_NAME}.onnx + .onnx.json"
-            )
-        _voice = PiperVoice.load(str(model_path), config_path=str(config_path))
+        with _voice_lock:
+            if _voice is None:
+                model_path = VOICE_DIR / f"{VOICE_NAME}.onnx"
+                config_path = VOICE_DIR / f"{VOICE_NAME}.onnx.json"
+                if not model_path.exists() or not config_path.exists():
+                    raise RuntimeError(
+                        f"Piper voice files missing in {VOICE_DIR}. "
+                        f"Expected {VOICE_NAME}.onnx + .onnx.json"
+                    )
+                _voice = PiperVoice.load(str(model_path), config_path=str(config_path))
     return _voice
 
 

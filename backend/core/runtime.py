@@ -115,13 +115,26 @@ class Runtime:
             task.result = ToolResult.error(str(e), confidence=0.0, confidence_reason=["Internal crash"])
             
         finally:
+            # A BaseException (KeyboardInterrupt, GeneratorExit) escapes the
+            # excepts above with task.result still None. The publishes below
+            # dereference it, so the AttributeError raised *inside* finally
+            # would replace the original exception — the crash report becomes
+            # "NoneType has no attribute 'message'" and the real cause is gone.
+            if task.result is None:
+                task.status = TaskStatus.FAILED
+                task.result = ToolResult.error(
+                    f"Tool {name} exited without a result",
+                    confidence=0.0,
+                    confidence_reason=["No result recorded"],
+                )
+
             task.end_time = time.perf_counter()
             latency = int((task.end_time - task.start_time) * 1000)
             get_bus().publish(ToolFinishedEvent(
                 tool_name=name,
-                status=task.result.status.value if task.result else "error",
-                result=task.result.message if task.result else None,
-                error=task.result.reason if task.result and task.result.status != ToolStatus.SUCCESS else None,
+                status=task.result.status.value,
+                result=task.result.message,
+                error=task.result.reason if task.result.status != ToolStatus.SUCCESS else None,
                 latency_ms=latency,
             ))
             
@@ -140,14 +153,18 @@ class Runtime:
             # Phase G2: Track tool usage for diagnostics heatmap
             try:
                 from backend.server.routes.diagnostics import record_tool_usage
-                success = task.result is not None and task.result.status == ToolStatus.SUCCESS
+                success = task.result.status == ToolStatus.SUCCESS
                 record_tool_usage(name, success, latency)
             except Exception:
                 pass
 
-            # Clean up (optionally keep for history)
-            # del self._tasks[task_id]
-            
+            # `runtime` is a module-level singleton and each Task pins a whole
+            # ToolResult payload, so leaving finished tasks here leaks for the
+            # life of the process. Dropped rather than kept as bounded history:
+            # cancel_task is the only reader and cancelling a finished task is
+            # a no-op, so nothing consumes the history.
+            self._tasks.pop(task_id, None)
+
         return task.result
 
     def cancel_task(self, task_id: str):

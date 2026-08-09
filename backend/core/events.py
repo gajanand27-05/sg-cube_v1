@@ -65,20 +65,41 @@ class AsyncEventBus:
             self._subscribers[event_type].append(callback)
             log.debug(f"Subscribed {callback.__name__} to {event_type.__name__}")
 
-    def publish(self, event: Any, priority: Priority = Priority.NORMAL) -> None:
-        """Non-blocking publish — returns immediately.
+    def _enqueue(self, priority: Priority, item: "QueuedEvent") -> None:
+        try:
+            self._queues[priority].put_nowait(item)
+        except asyncio.QueueFull:
+            log.warning(f"Event queue full (priority={priority.name}) — dropping {type(item.event).__name__}")
 
-        Called from sync contexts (voice thread, etc.).
+    def publish(self, event: Any, priority: Priority = Priority.NORMAL) -> None:
+        """Non-blocking publish — returns immediately. Safe from any thread.
+
+        `asyncio.Queue` is *not* thread-safe. `put_nowait` wakes a parked
+        `get()` via `loop.call_soon`, which only schedules on the loop's own
+        thread — calling it from the voice thread leaves the wakeup sitting in
+        `_ready` until the loop happens to wake for another reason. The
+        `timeout=0.5` in `_worker` is what hid this, at the cost of up to 500ms
+        of delivery latency per cross-thread event. So hop the loop properly.
         """
-        if self._loop is None or self._loop.is_closed():
-            log.warning("Event bus not started — dropping event")
+        item = QueuedEvent(priority, event, type(event))
+        loop = self._loop
+
+        if loop is None or loop.is_closed():
+            # Not started yet (or already torn down): no workers are parked, so
+            # there is no wakeup to schedule. Buffer it in the queue — a
+            # pre-start event is delivered as soon as start() spawns workers.
+            self._enqueue(priority, item)
             return
 
-        # Thread-safe: put_nowait from sync context
         try:
-            self._queues[priority].put_nowait(QueuedEvent(priority, event, type(event)))
-        except asyncio.QueueFull:
-            log.warning(f"Event queue full (priority={priority.name}) — dropping {type(event).__name__}")
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+
+        if running is loop:
+            self._enqueue(priority, item)  # already on the bus loop's thread
+        else:
+            loop.call_soon_threadsafe(self._enqueue, priority, item)
 
     async def _worker(self, priority: Priority) -> None:
         """Process events from a specific priority queue."""
@@ -140,6 +161,7 @@ class AsyncEventBus:
 # Global instance
 bus: AsyncEventBus | None = None
 _initialized = False
+_bus_lock = threading.Lock()
 
 
 def init_event_bus(
@@ -156,8 +178,13 @@ def init_event_bus(
 
 def get_bus() -> AsyncEventBus:
     global bus, _initialized
+    # Double-checked locking: publishers call this from several threads. An
+    # unguarded check lets two of them each build a bus, and whichever loses the
+    # assignment race keeps a handle to an orphan — its subscribers never see
+    # events published on the winner.
     if bus is None:
-        # Auto-initialize if not already initialized
-        bus = AsyncEventBus()
-        _initialized = True
+        with _bus_lock:
+            if bus is None:
+                bus = AsyncEventBus()
+                _initialized = True
     return bus

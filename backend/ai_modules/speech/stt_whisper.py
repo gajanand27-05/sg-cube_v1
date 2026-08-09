@@ -1,3 +1,4 @@
+import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Generator
@@ -41,18 +42,24 @@ _COMMAND_PROMPT = (
 
 # ── Phase C1: silero-vad integration ──
 _SILERO_VAD = None
+_silero_lock = threading.Lock()
 
 
 def _get_silero_vad():
     global _SILERO_VAD
+    # Double-checked locking: the wake-word listener and the capture thread both
+    # reach this. Unguarded, both see None and both run torch.hub.load — two
+    # model loads racing on the same hub cache directory.
     if _SILERO_VAD is None:
-        import torch
-        _SILERO_VAD, _ = torch.hub.load(
-            repo_or_dir="snakers4/silero-vad",
-            model="silero_vad",
-            force_reload=False,
-            onnx=True,
-        )
+        with _silero_lock:
+            if _SILERO_VAD is None:
+                import torch
+                _SILERO_VAD, _ = torch.hub.load(
+                    repo_or_dir="snakers4/silero-vad",
+                    model="silero_vad",
+                    force_reload=False,
+                    onnx=True,
+                )
     return _SILERO_VAD
 
 

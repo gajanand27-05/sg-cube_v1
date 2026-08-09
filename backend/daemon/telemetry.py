@@ -1,7 +1,15 @@
 import threading
 import time
 import logging
+from pathlib import Path
+
 import psutil
+
+# psutil.disk_usage('/') does not fail on Windows — it silently resolves to the
+# root of whatever drive the *current working directory* is on, so the daemon
+# reported C: or D: depending on where it was launched from. Anchor to the drive
+# the install actually lives on ('/' on POSIX, 'D:\\' here).
+DISK_ROOT = Path(__file__).resolve().anchor or "/"
 
 from backend.core.events import get_bus, Priority
 from backend.daemon.ui_events import SystemStatsEvent
@@ -46,7 +54,7 @@ class TelemetryLoop:
                 memory_total_gb = mem.total / (1024 ** 3)
 
                 # Disk
-                disk = psutil.disk_usage('/')
+                disk = psutil.disk_usage(DISK_ROOT)
                 disk_percent = disk.percent
                 disk_used_gb = disk.used / (1024 ** 3)
                 disk_total_gb = disk.total / (1024 ** 3)
