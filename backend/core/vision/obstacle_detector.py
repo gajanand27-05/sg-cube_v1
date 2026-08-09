@@ -297,7 +297,14 @@ class DetectionRunner:
         if frame is None:
             return ""
         loop = asyncio.get_running_loop()
+        t0 = time.monotonic()
         seen = await loop.run_in_executor(None, detect, frame, True)
+        self.last_latency_ms = round((time.monotonic() - t0) * 1000, 1)
+        self.detections_done += 1
+        # Scan inference counts too. Without this a scan-only session reports
+        # fps_processed: null while genuinely doing work — the exact
+        # "looks half-wired" signal vision_health exists to prevent.
+        vision_health.note_frame_processed(latency_ms=self.last_latency_ms)
         phrase = describe(seen)
         if not registry.silent:
             self._speak_offloop(phrase)

@@ -53,7 +53,18 @@ def _find_devices():
     return play, cap
 
 
-PLAYBACK_DEVICE, CAPTURE_DEVICE = _find_devices()
+# Resolved at CALL time, never cached at import.
+#
+# The docstring above says the by-name lookup lets this "survive device
+# re-enumeration" — caching the result at module scope defeated exactly that.
+# Collection now finishes ~28s before these tests actually open the device, and
+# that window grows with the suite; anything that re-enumerates PortAudio in
+# between (Bluetooth, a monitor sleeping, a driver restart) shrinks the device
+# list and leaves the cached index pointing past the end.
+def _devices():
+    return _find_devices()
+
+
 SAMPLE_RATE = 22050
 DURATION = 2.0
 
@@ -78,7 +89,7 @@ def _play_and_capture(duration: float) -> np.ndarray:
 
     def _record():
         with sd.InputStream(
-            device=CAPTURE_DEVICE,
+            device=_devices()[1],
             channels=1,
             samplerate=SAMPLE_RATE,
             blocksize=int(SAMPLE_RATE * 0.05),
@@ -98,7 +109,7 @@ def _play_and_capture(duration: float) -> np.ndarray:
 
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration), endpoint=False)
     audio = np.sin(2 * np.pi * 880 * t).astype(np.float32)
-    sd.play(audio, samplerate=SAMPLE_RATE, device=PLAYBACK_DEVICE)
+    sd.play(audio, samplerate=SAMPLE_RATE, device=_devices()[0])
     sd.wait()
 
     thread.join(timeout=duration + 5)
@@ -118,7 +129,7 @@ def test_e2e_loopback_captures_playback():
     The echo gate itself is verified in test_e2e_echo_gate_suppresses_and_expires
     and test_e2e_loopback_with_echo_gate.
     """
-    if PLAYBACK_DEVICE is None or CAPTURE_DEVICE is None:
+    if any(d is None for d in _devices()):
         pytest.skip("Stereo Mix / Speakers not found — enable Stereo Mix in mmsys.cpl")
     # Play a tone while capturing it back via Stereo Mix
     captured = _play_and_capture(DURATION)
@@ -161,7 +172,7 @@ def test_e2e_echo_gate_suppresses_and_expires():
 def test_e2e_loopback_with_echo_gate():
     """Complete chain: play tone via speaker -> capture via Stereo Mix ->
     run echo gate against a recorded transcript."""
-    if PLAYBACK_DEVICE is None or CAPTURE_DEVICE is None:
+    if any(d is None for d in _devices()):
         pytest.skip("Stereo Mix / Speakers not found — enable Stereo Mix in mmsys.cpl")
     # 1. Play a tone while capturing it back via Stereo Mix
     captured = _play_and_capture(DURATION)

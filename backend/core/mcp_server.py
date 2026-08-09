@@ -67,7 +67,37 @@ def get_mcp_app():
         log.warning("fastmcp %s exposes neither http_app nor sse_app — /mcp disabled",
                     getattr(__import__("fastmcp"), "__version__", "?"))
         return None
-    return factory()
+    return _QuietDisconnect(factory())
+
+
+class _QuietDisconnect:
+    """Swallow fastmcp 2.1.2's None-response TypeError on client disconnect.
+
+    Its SSE handler returns None instead of a Response, so Starlette's
+    request_response does `await response(...)` on None
+    (starlette/routing.py:62) and logs a full ASGI traceback every time a
+    client goes away. The stream itself has already completed correctly by
+    then — the only casualty is the log, and an MCP client that reconnects on
+    a timer produces one traceback per reconnect, which is exactly the noise
+    that buries real errors.
+
+    Deliberately narrow: only this exact TypeError is dropped, and only after
+    the app has run. Delete this wrapper once fastmcp is upgraded to a version
+    whose handler returns a Response.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await self.app(scope, receive, send)
+        except TypeError as e:
+            msg = str(e)
+            if "NoneType" in msg and "not callable" in msg:
+                log.debug("fastmcp SSE handler returned None on disconnect")
+                return
+            raise
 
 
 try:

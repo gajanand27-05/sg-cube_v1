@@ -69,10 +69,19 @@ class PhoneSession:
         log.info("Phone clock offset %.0fms (rtt %.0fms)", self.clock_offset_ms, rtt)
 
     def frame_age_ms(self, capture_ms: float | None, now_ms: float) -> float | None:
-        """How old the frame is, on the server's clock. None if unmeasurable."""
+        """How old the frame is, on the server's clock. None if unmeasurable.
+
+        Deliberately NOT clamped at zero. A small negative age is ordinary
+        round-trip jitter, but a persistently negative one means the offset
+        estimate has the wrong sign — and clamping would report that as 0.0,
+        i.e. as a perfectly fresh frame. That is the one failure this module
+        could not otherwise detect, and reporting it as absence-of-problem
+        breaks the same "never fake a measurement" rule the rest of the
+        vision-health path follows.
+        """
         if capture_ms is None or self.clock_offset_ms is None:
             return None
-        return max(0.0, now_ms - (capture_ms - self.clock_offset_ms))
+        return now_ms - (capture_ms - self.clock_offset_ms)
 
     def note_status(self, streaming: bool, error: str | None = None) -> None:
         """Called when the phone reports back what it actually did."""

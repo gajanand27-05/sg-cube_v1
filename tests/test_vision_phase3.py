@@ -171,6 +171,24 @@ def test_entering_scan_mode_describes_the_scene_once(client, monkeypatch):
     assert "chair" in said[0]
 
 
+def test_scan_inference_is_visible_to_vision_health(client, monkeypatch):
+    """A scan-only session does real inference. If scan_once doesn't report it,
+    /diagnostics/vision shows fps_processed: null while the detector is busy —
+    the half-wired look the health module exists to rule out."""
+    from backend.core.vision.vision_health import vision_health
+
+    monkeypatch.setattr(od, "detect", lambda _b, all_labels=False: [_obs("chair", "left", 0.0, "info")])
+    monkeypatch.setattr(od.DetectionRunner, "_speak_offloop", lambda self, p: None)
+    frame_ingest.frame_ingestor.ingest_frame(JPEG, mode="scan")
+
+    vision_health.reset()
+    before = vision_health.snapshot().frames_processed
+    asyncio.run(od.DetectionRunner().scan_once())
+    after = vision_health.snapshot().frames_processed
+
+    assert after == before + 1, "scan inference was invisible to vision_health"
+
+
 def test_scan_with_no_frame_says_nothing_rather_than_guessing(client):
     runner = od.DetectionRunner()
     assert asyncio.run(runner.scan_once()) == ""
