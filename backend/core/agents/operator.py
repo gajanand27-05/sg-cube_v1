@@ -25,11 +25,12 @@ class OperatorAgent(BaseInternalAgent):
             res = await call_tool(name, args, request_id=request_id)
             latency_ms = int((time.perf_counter() - t0) * 1000)
 
-            # Publish to ObservabilityEngine so ConfidenceEvent fires.
-            # The engine aggregates per-call stats and publishes ConfidenceEvent.
+            # Latency only. Tool quality is reported by Runtime.run_tool, which
+            # every call_tool goes through — reporting it here too double-counted
+            # the calls Operator happens to make (and only those), so one success
+            # plus one crash read as 66.7% instead of 50%.
             try:
                 from backend.core.observability import engine as obs
-                obs.report_tool_quality(request_id, res.confidence, f"{res.status}: {name}")
                 obs.report_latency(request_id, latency_ms)
             except Exception:
                 pass

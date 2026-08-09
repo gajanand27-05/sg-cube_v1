@@ -90,20 +90,12 @@ class Runtime:
             
             task.result = res
             task.status = TaskStatus.COMPLETED if res.status == ToolStatus.SUCCESS else TaskStatus.FAILED
-            
-            # ── Observability Integration ────────────────────────────
-            from backend.core.observability import engine as obs_engine
-            # Use actual tool confidence if available
-            obs_engine.report_tool_quality(rid, res.confidence, f"Status: {res.status}")
-            # ─────────────────────────────────────────────────────────
-            
+
         except asyncio.TimeoutError:
             log.error(f"Task {name} ({task_id}) timed out after {timeout}s")
             task.status = TaskStatus.FAILED
             task.result = ToolResult.error(f"Execution timed out after {timeout}s", confidence=0.0, confidence_reason=["Timeout reached"])
-            from backend.core.observability import engine as obs_engine
-            obs_engine.report_tool_quality(task_id, 0.0, "Timeout")
-            
+
         except asyncio.CancelledError:
             log.info(f"Task {name} ({task_id}) was cancelled")
             task.status = TaskStatus.CANCELLED
@@ -130,6 +122,30 @@ class Runtime:
 
             task.end_time = time.perf_counter()
             latency = int((task.end_time - task.start_time) * 1000)
+
+            # ── Observability: the ONLY report_tool_quality site ─────────
+            # Every tool execution funnels through run_tool, so reporting here
+            # covers success, non-success results, timeouts and crashes with one
+            # call — the previous split (success branch + timeout branch, plus a
+            # second report in Operator) counted some calls twice and others not
+            # at all. Reported under `rid` so the UI sees the request it started,
+            # not the internal task_id. Cancellations are a user action, not a
+            # tool failure, so they stay out of the success rate.
+            # Wrapped: this runs in `finally`, where a raising subscriber would
+            # replace the tool's real exception.
+            if task.status != TaskStatus.CANCELLED:
+                try:
+                    from backend.core.observability import engine as obs_engine
+                    obs_engine.report_tool_quality(
+                        rid,
+                        task.result.confidence,
+                        f"Status: {task.result.status.value}",
+                        success=task.result.status == ToolStatus.SUCCESS,
+                    )
+                except Exception:
+                    log.debug("observability report failed for %s", name, exc_info=True)
+            # ─────────────────────────────────────────────────────────────
+
             get_bus().publish(ToolFinishedEvent(
                 tool_name=name,
                 status=task.result.status.value,

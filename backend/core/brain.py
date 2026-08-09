@@ -204,26 +204,25 @@ class Brain:
 
     def recall(self, query: str, mtype: MemoryType = None, limit: int = 5,
                min_importance: float = 0.0) -> List[MemoryEntry]:
-        """Retrieve relevant memories with importance scoring."""
-        results = memory_manager.ltm.search(query, mtype=mtype, limit=limit * 2)
-        
-        # Filter by importance and apply access tracking
-        filtered = []
-        for entry in results:
-            if entry.importance >= min_importance:
-                entry.access()
-                filtered.append(entry)
-        
-        # Sort by combined score (relevance * importance * confidence * recency)
-        filtered.sort(key=lambda e: e.relevance * e.importance * e.confidence, reverse=True)
-        return filtered[:limit]
+        """Retrieve relevant memories, honoring LTM.search's composite ranking."""
+        # Delegated, not reimplemented. This used to re-sort ltm.search's output
+        # by `relevance * importance * confidence`, which dropped the semantic
+        # and temporal signals entirely (`relevance` is a stored constant, 1.0
+        # for every entry the writers create) — so an off-topic high-importance
+        # memory outranked the one that actually answered the query. The audit
+        # recorded that as fixed; the fix had gone to MemoryManager.recall and
+        # never to this copy. Three methods on this class had drifted the same
+        # way, so they now share one implementation instead of four.
+        return memory_manager.recall(query, mtype=mtype, limit=limit,
+                                     min_importance=min_importance)
 
     def forget(self, memory_id: str) -> bool:
-        """Mark a memory as forgotten (soft delete)."""
-        # ChromaDB doesn't have easy delete by custom ID, so we'd need to query first
-        # For now, we'll mark as forgotten in metadata if we can find it
-        # This is a placeholder - full implementation needs ID tracking
-        return False
+        """Delete a memory by id. True if it existed and was removed."""
+        # Was `return False` unconditionally, with a "placeholder" comment. The
+        # audit logged that as fixed, and it was — on MemoryManager.forget, not
+        # on this copy. Delegating rather than re-implementing so there is one
+        # behaviour, not two that drift.
+        return memory_manager.forget(memory_id)
 
     def learn(self, user_query: str, tool_results: list[dict], success: bool = True) -> None:
         """Learn from successful (or failed) tool executions.
@@ -250,14 +249,13 @@ class Brain:
 
     def strengthen_memory(self, query: str, amount: float = 0.1) -> int:
         """Strengthen memories matching a query (e.g., after successful use)."""
-        results = self.recall(query, limit=10, min_importance=0.0)
-        count = 0
-        for entry in results:
-            entry.strengthen(amount)
-            # Re-store with updated importance
-            memory_manager.ltm.store(entry)
-            count += 1
-        return count
+        # Was `ltm.store(entry)` on an entry that already has an id. store()
+        # calls collection.add(), not upsert, so the strengthened importance
+        # was never persisted — and on a Chroma build that accepts duplicate
+        # ids it would instead have re-grown the duplicate rows that
+        # T-memory-duplicate-rows spent a session purging. MemoryManager
+        # already does this correctly via ltm.strengthen_memory(id, amount).
+        return memory_manager.strengthen_memory(query, amount)
 
     def consolidate_memories(self) -> dict:
         """Periodic memory consolidation: merge duplicates, decay old, archive junk."""
