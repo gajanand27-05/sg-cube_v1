@@ -12,18 +12,11 @@ every use after that is voice-only.
 """
 import asyncio
 import logging
-from collections import Counter
 
 from backend.core.tools.registry import CapabilityTier, ToolResult, tool
 from backend.core.vision.phone_session import VALID_MODES, registry
 
 log = logging.getLogger(__name__)
-
-_WHERE = {"left": "on your left", "right": "on your right", "straight": "ahead"}
-
-
-def _phrase(count: int, label: str) -> str:
-    return label if count == 1 else f"{count} {label}s"
 
 
 def _hint() -> str:
@@ -71,7 +64,7 @@ async def describe_scene() -> ToolResult:
     "what's around me". Needs the phone camera to be streaming already.
     """
     from backend.core.vision.frame_ingest import frame_ingestor
-    from backend.core.vision.obstacle_detector import detect
+    from backend.core.vision.obstacle_detector import describe, detect
 
     frame, meta = frame_ingestor.latest_frame()
     if frame is None:
@@ -85,24 +78,51 @@ async def describe_scene() -> ToolResult:
         return ToolResult.success(message="nothing recognizable in view",
                                   data={"objects": [], "frame_id": meta.frame_id})
 
-    # Group by (label, direction) so the sentence is "two chairs on your left",
-    # not the same word four times.
-    grouped = Counter((o.label, o.direction) for o in seen)
-    parts = [f"{_phrase(n, label)} {_WHERE[direction]}"
-             for (label, direction), n in grouped.most_common()]
-    nearest = min((o for o in seen if o.distance_m > 0), key=lambda o: o.distance_m,
-                  default=None)
-    message = ", ".join(parts) + "."
-    if nearest is not None:
-        message += f" Nearest is the {nearest.label}, about {max(1, round(nearest.distance_m))} meters."
     return ToolResult.success(
-        message=message,
+        message=describe(seen),
         data={
             "objects": [{"label": o.label, "direction": o.direction,
                          "distance_m": o.distance_m, "confidence": o.confidence}
                         for o in seen],
             "frame_id": meta.frame_id,
         },
+    )
+
+
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)
+async def set_vision_mode(mode: str) -> ToolResult:
+    """Switch what the phone camera is doing.
+
+    "navigate" speaks obstacles continuously as you walk, "scan" describes the
+    scene once, "read" is text/sign reading, "idle" stops analysis.
+    Use for "switch to scan mode", "start navigating", "stop analysing".
+    """
+    if mode not in VALID_MODES:
+        return ToolResult.error(
+            f"unknown vision mode {mode!r} — use one of: {', '.join(sorted(VALID_MODES))}"
+        )
+    if registry.count == 0:
+        return ToolResult.error(f"no phone camera connected.{_hint()}")
+    await registry.push({"type": "command", "action": "mode", "mode": mode})
+    return ToolResult.success(message=f"vision mode is now {mode}",
+                              data={"mode": mode})
+
+
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)
+async def set_silent_vision(silent: bool = True) -> ToolResult:
+    """Stop (or resume) spoken obstacle alerts while keeping the phone's
+    vibration warnings. Use for "silent mode", "stop talking but keep warning
+    me", "quiet mode", "you can talk again".
+
+    Vibration deliberately continues in silent mode — removing the alert
+    entirely would leave the user unwarned in exactly the crowded public place
+    where silence was requested.
+    """
+    registry.silent = bool(silent)
+    return ToolResult.success(
+        message=("silent mode on — alerts are vibration only"
+                 if registry.silent else "speaking alerts again"),
+        data={"silent": registry.silent},
     )
 
 

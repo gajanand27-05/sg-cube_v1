@@ -47,6 +47,17 @@ class SentenceQueue:
         self._spoke_anything: bool = False
 
     @property
+    def depth(self) -> int:
+        """Sentences still waiting to be spoken.
+
+        Read-only and safe from any thread or loop: asyncio.Queue.qsize() is a
+        deque length, so it never touches the loop this queue is bound to —
+        the hazard T-tts-loop-globals documents. It transiently counts the
+        end-of-turn sentinel, so 1 can mean "about to drain".
+        """
+        return self._queue.qsize()
+
+    @property
     def spoke_anything(self) -> bool:
         """Did any sentence get past enqueue? Used by trigger to decide
         whether to fall back to speaking a full response after the stream."""
@@ -136,3 +147,11 @@ def get_sentence_queue() -> SentenceQueue:
     if _QUEUE is None:
         _QUEUE = SentenceQueue()
     return _QUEUE
+
+
+def sentence_queue_depth() -> Optional[int]:
+    """Current queue depth for diagnostics, or None if no turn has built a
+    queue yet. Deliberately does NOT construct the singleton — reading a
+    metric must not create the thing it measures.
+    """
+    return None if _QUEUE is None else _QUEUE.depth

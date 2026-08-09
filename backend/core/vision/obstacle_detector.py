@@ -20,11 +20,14 @@ treat distances as coarse ("about 2 meters"), not measurements.
 import asyncio
 import logging
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from backend.core.events import get_bus, Priority
-from backend.daemon.ui_events import ObstacleEvent
+from backend.core.vision.phone_session import registry
+from backend.core.vision.vision_health import vision_health
+from backend.daemon.ui_events import HapticEvent, ObstacleEvent
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +66,10 @@ MOVING_HAZARDS = {"person", "bicycle", "car", "motorcycle", "bus", "truck", "dog
 CRITICAL_DISTANCE_M = 2.5
 MODEL_CONF = 0.50
 SPEAK_COOLDOWN_S = 4.0
+# Plan: "haptic relay — WS sends vibrate when obstacle <1m". Deliberately much
+# tighter than CRITICAL_DISTANCE_M: speech warns, a buzz means stop now.
+HAPTIC_DISTANCE_M = 1.0
+HAPTIC_COOLDOWN_S = 1.5   # shorter than speech — a buzz can repeat, a sentence can't
 _FOCAL_FACTOR = 1.0  # f_px ≈ frame_height * this; see ponytail note above
 
 
@@ -137,6 +144,30 @@ def detect(jpeg: bytes, all_labels: bool = False) -> list[Obstacle]:
     return out
 
 
+_WHERE = {"left": "on your left", "right": "on your right", "straight": "ahead"}
+
+
+def describe(obstacles: list[Obstacle]) -> str:
+    """One spoken sentence for a set of detections.
+
+    Shared by the "what do you see" tool and scan mode so the assistant cannot
+    describe the same scene two different ways depending on how it was asked.
+    """
+    if not obstacles:
+        return "Nothing recognizable in view."
+    grouped = Counter((o.label, o.direction) for o in obstacles)
+    parts = [f"{label if n == 1 else str(n) + ' ' + label + 's'} {_WHERE[direction]}"
+             for (label, direction), n in grouped.most_common()]
+    out = ", ".join(parts) + "."
+    # Only rangeable objects get a distance — a 0.0 "unknown" must never be
+    # spoken as though the thing were at the user's feet.
+    nearest = min((o for o in obstacles if o.distance_m > 0),
+                  key=lambda o: o.distance_m, default=None)
+    if nearest is not None:
+        out += f" Nearest is the {nearest.label}, about {max(1, round(nearest.distance_m))} meters."
+    return out
+
+
 class DetectionRunner:
     """Per-frame orchestration: skip-if-busy, 2-frame confirmation, event
     publishing, spoken alerts with cooldown. One instance per process."""
@@ -145,7 +176,9 @@ class DetectionRunner:
         self._busy = False
         self._prev: set[tuple[str, str]] = set()  # (label, direction) last frame
         self._last_spoken: dict[str, float] = {}
+        self._last_buzz: float = 0.0
         self.last_latency_ms: float = 0.0
+        self.detections_done: int = 0
 
     def reset(self) -> None:
         """Drop per-session state on phone disconnect. Without this the first
@@ -153,6 +186,29 @@ class DetectionRunner:
         session's detections, and cooldowns carry over."""
         self._prev.clear()
         self._last_spoken.clear()
+        self._last_buzz = 0.0
+        self.detections_done = 0
+
+    def _maybe_buzz(self, confirmed: list[Obstacle]) -> None:
+        """Vibrate the phone when something is inside arm's reach.
+
+        Runs even in silent mode — silence is about not speaking in public, and
+        removing the alert entirely would leave a blind user in a public space
+        with no warning at all.
+        """
+        close = [o for o in confirmed
+                 if 0 < o.distance_m < HAPTIC_DISTANCE_M and o.label in MOVING_HAZARDS]
+        if not close:
+            return
+        now = time.monotonic()
+        if now - self._last_buzz < HAPTIC_COOLDOWN_S:
+            return
+        self._last_buzz = now
+        pulses = 1 if any(o.priority == "critical" for o in close) else 2
+        get_bus().publish(HapticEvent(pulses=pulses), priority=Priority.HIGH)
+        # The bus event drives the HUD; the phone has to be told separately —
+        # it is a WebSocket client, not a bus subscriber.
+        registry.push_soon({"type": "command", "action": "vibrate", "pulses": pulses})
 
     async def submit(self, jpeg: bytes, mode: str) -> None:
         """Called from the WS loop for every accepted frame. Never blocks."""
@@ -166,6 +222,11 @@ class DetectionRunner:
             loop = asyncio.get_running_loop()
             obstacles = await loop.run_in_executor(None, detect, jpeg)
             self.last_latency_ms = round((time.monotonic() - t0) * 1000, 1)
+            self.detections_done += 1
+            # The WS loop cannot report this: it create_task()s submit() and
+            # never learns whether inference ran or returned early on _busy —
+            # and that skip gap is exactly what fps_processed measures.
+            vision_health.note_frame_processed(latency_ms=self.last_latency_ms)
 
             current = {(o.label, o.direction) for o in obstacles}
             confirmed = [o for o in obstacles if (o.label, o.direction) in self._prev]
@@ -184,6 +245,7 @@ class DetectionRunner:
                     priority=Priority.HIGH,
                 )
             if mode == "navigate":
+                self._maybe_buzz(confirmed)
                 self._maybe_speak(confirmed)
         except Exception as e:
             log.error("Obstacle detection failed: %s", e)
@@ -193,6 +255,8 @@ class DetectionRunner:
     def _maybe_speak(self, confirmed: list[Obstacle]) -> None:
         """Speak the nearest critical obstacle, per-label cooldown. Plan rule:
         terse and certain — 'Person ahead. 2 meters.' — never hedged."""
+        if registry.silent:
+            return  # public-space mode: the buzz already fired, stay quiet
         critical = [o for o in confirmed if o.priority == "critical"]
         if not critical:
             return
@@ -220,6 +284,24 @@ class DetectionRunner:
             return
         # Nothing awaits the future, so an exception inside would vanish.
         fut.add_done_callback(self._log_speech_failure)
+
+    async def scan_once(self) -> str:
+        """Describe the current view once and speak it — scan mode's whole job.
+
+        Distinct from navigate: navigate speaks only what can hurt you, as it
+        appears. Scan answers "what is around me" on demand, so it reports
+        everything the model saw, not just the rangeable hazards.
+        """
+        from backend.core.vision.frame_ingest import frame_ingestor
+        frame, _meta = frame_ingestor.latest_frame()
+        if frame is None:
+            return ""
+        loop = asyncio.get_running_loop()
+        seen = await loop.run_in_executor(None, detect, frame, True)
+        phrase = describe(seen)
+        if not registry.silent:
+            self._speak_offloop(phrase)
+        return phrase
 
     @staticmethod
     def _log_speech_failure(fut) -> None:

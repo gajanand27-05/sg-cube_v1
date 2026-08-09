@@ -5,10 +5,21 @@ Three surfaces:
   GET  /phone              — self-contained capture page for the phone browser
   GET  /vision/phone_frame — latest accepted frame as image/jpeg (HUD polls this)
 
-Wire protocol on the WS (phone -> server):
-  binary message : one JPEG frame
-  text message   : {"type": "mode_change", "mode": "navigate"|"scan"|"read"|"idle"}
-Server -> phone: {"type": "health", ...} every HEALTH_INTERVAL_S while streaming.
+Wire protocol on the WS.
+
+phone -> server:
+  binary          : one JPEG frame
+  {"type": "frame_ts", "t": <phone epoch ms>}      immediately before its frame
+  {"type": "mode_change", "mode": navigate|scan|read|idle}
+  {"type": "time_sync_reply", "server_ms":…, "phone_ms":…}
+  {"type": "status", "streaming": bool, "error": str|null, "mode":…}
+server -> phone:
+  {"type": "time_sync", "server_ms":…}             once, on connect
+  {"type": "health", ...}                          every HEALTH_INTERVAL_S
+  {"type": "command", "action": start|stop|mode|vibrate, ...}
+
+The command channel is what makes "connect phone camera" work by voice: the
+page holds this socket open whenever it is open at all, streaming or not.
 
 Frame pixels never ride the event bus: PhoneFrameEvent carries metadata only
 and the HUD fetches the image over HTTP.
@@ -31,6 +42,7 @@ from backend.core.events import get_bus
 from backend.core.vision.frame_ingest import frame_ingestor
 from backend.core.vision.obstacle_detector import detection_runner
 from backend.core.vision.phone_session import VALID_MODES, PhoneSession, registry
+from backend.core.vision.vision_health import STALE_FRAME_MS, vision_health
 from backend.daemon.ui_events import ModeChangeEvent, VisionHealthEvent
 from backend.server.routes.remote import _is_private_host
 
@@ -65,6 +77,10 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
 
     frames_seen = 0
     last_health = time.monotonic()
+    # One round trip to learn the phone's clock offset. Until the reply lands,
+    # frame age is None (unmeasurable) rather than a fabricated zero.
+    sync_sent_ms = time.time() * 1000.0
+    await ws.send_text(json.dumps({"type": "time_sync", "server_ms": sync_sent_ms}))
 
     try:
         while True:
@@ -75,6 +91,18 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
             if msg.get("bytes") is not None:
                 frames_seen += 1
                 session.streaming = True
+                age_ms = session.frame_age_ms(session.pending_capture_ms,
+                                              time.time() * 1000.0)
+                session.pending_capture_ms = None
+                too_old = age_ms is not None and age_ms > STALE_FRAME_MS
+                # Counted before the drop decision: a stale frame is still a
+                # frame received, or the drop rate is unmeasurable.
+                vision_health.note_frame_received(age_ms=age_ms, dropped_stale=too_old)
+                if too_old:
+                    # Guiding someone using a 2s-old view of the street is
+                    # worse than saying nothing.
+                    log.debug("dropping stale frame: %.0fms old", age_ms)
+                    continue
                 meta = frame_ingestor.ingest_frame(msg["bytes"], mode=session.mode)
                 if meta is not None:
                     # Phase 2: YOLO on accepted frames. submit() returns
@@ -89,9 +117,31 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
                     continue
                 kind = data.get("type")
                 if kind == "mode_change" and data.get("mode") in VALID_MODES:
-                    session.mode = data["mode"]
+                    previous, session.mode = session.mode, data["mode"]
                     get_bus().publish(ModeChangeEvent(mode=session.mode))
                     log.info("Phone vision mode -> %s", session.mode)
+                    if session.mode == "scan" and previous != "scan":
+                        # Scan is once-triggered by definition: entering the
+                        # mode IS the trigger. Off the receive loop so a ~150ms
+                        # inference cannot stall incoming frames.
+                        asyncio.create_task(detection_runner.scan_once())
+                elif kind == "time_sync_reply":
+                    try:
+                        session.note_time_sync(
+                            sent_ms=float(data["server_ms"]),
+                            phone_ms=float(data["phone_ms"]),
+                            now_ms=time.time() * 1000.0,
+                        )
+                    except (KeyError, TypeError, ValueError) as e:
+                        log.warning("Bad time_sync_reply from phone: %s", e)
+                elif kind == "frame_ts":
+                    # Sent immediately before its binary frame. WS preserves
+                    # per-connection order, so pairing is deterministic and
+                    # needs no id.
+                    try:
+                        session.pending_capture_ms = float(data["t"])
+                    except (KeyError, TypeError, ValueError):
+                        session.pending_capture_ms = None
                 elif kind == "status":
                     # The phone's answer to a pushed command. Load-bearing: it
                     # is the only thing that distinguishes "command delivered"
@@ -111,22 +161,14 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
             now = time.monotonic()
             if now - last_health >= HEALTH_INTERVAL_S:
                 last_health = now
+                snap = vision_health.snapshot(mode=session.mode)
                 stats = frame_ingestor.stats
-                _, meta = frame_ingestor.latest_frame()
-                health = VisionHealthEvent(
-                    fps_received=meta.fps_received if meta else 0.0,
-                    fps_processed=min(meta.fps_received if meta else 0.0, frame_ingestor.max_fps),
-                    detector_latency_ms=detection_runner.last_latency_ms,
-                    tts_queue_depth=0,        # Phase 3 fills this in
-                    dropped_frames=stats["frames_dropped"],
-                    mode=session.mode,
-                )
-                get_bus().publish(health)
+                get_bus().publish(VisionHealthEvent(**snap.event_fields()))
                 await ws.send_text(json.dumps({
                     "type": "health",
                     "frames_accepted": stats["frames_processed"],
                     "frames_dropped": stats["frames_dropped"],
-                    "fps_received": meta.fps_received if meta else 0.0,
+                    "fps_received": snap.fps_received,
                 }))
 
     except WebSocketDisconnect:
@@ -143,6 +185,7 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
         # confirmation against the previous session's detections.
         frame_ingestor.reset()
         detection_runner.reset()
+        vision_health.reset()
         log.info("Phone stream session ended: %d frames received", frames_seen)
 
 
@@ -296,16 +339,30 @@ function connect() {
   ws.onclose = () => { setStatus(); setTimeout(connect, 2000); };
   ws.onmessage = async (m) => {
     let d; try { d = JSON.parse(m.data); } catch { return; }
-    if (d.type === "health") {
+    if (d.type === "time_sync") {
+      // Reply immediately — the server halves the round trip to estimate our
+      // clock offset. Any delay here inflates its estimate.
+      ws.send(JSON.stringify({ type: "time_sync_reply",
+                               server_ms: d.server_ms, phone_ms: Date.now() }));
+    } else if (d.type === "health") {
       st.textContent = "connected | sent: " + sent + " | server accepted: "
         + d.frames_accepted + " (dropped " + d.frames_dropped + ")";
     } else if (d.type === "command") {
+      if (d.action === "vibrate") { buzz(d.pulses || 1); return; }  // no ack: latency is the point
       if (d.mode) setMode(d.mode);
       if (d.action === "start") { if (!running) await start(); else report(null); }
       else if (d.action === "stop") { stop(); }
       else report(null);
     }
   };
+}
+
+// One long buzz = critical (stop), two short = warning. Distinguishable
+// through a pocket, which a single pattern is not. navigator.vibrate is
+// unsupported on iOS Safari, hence the guard — the spoken alert still fires.
+function buzz(pulses) {
+  if (!navigator.vibrate) return;
+  navigator.vibrate(pulses === 1 ? [400] : [120, 80, 120]);
 }
 
 function setMode(m) {
@@ -348,8 +405,16 @@ async function start() {
     c.width = Math.round(v.videoWidth * scale);
     c.height = Math.round(v.videoHeight * scale);
     c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+    // Stamp at draw time, not at send time: JPEG encoding is async and its
+    // duration is part of the frame's age.
+    const capturedAt = Date.now();
     c.toBlob((b) => {
-      if (b && ws && ws.readyState === 1) { ws.send(b); sent++; setStatus(); }
+      if (b && ws && ws.readyState === 1) {
+        // Ordered pair — WS preserves per-connection order, so the server
+        // attributes this timestamp to the very next binary message.
+        ws.send(JSON.stringify({ type: "frame_ts", t: capturedAt }));
+        ws.send(b); sent++; setStatus();
+      }
     }, "image/jpeg", QUALITY);
   }, 1000 / FPS);
   document.getElementById("toggle").textContent = "Stop Streaming";

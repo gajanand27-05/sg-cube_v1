@@ -39,11 +39,20 @@ TRUSTED_ALLOWLIST = {
     # misheard transcript can reach a tool, so this can be started by a
     # mishearing. The preconditions above are what bound that, not the prompt.
     "connect_phone_camera", "disconnect_phone_camera",
+    # Same rationale: mode and silence are hands-free controls on an already
+    # running camera, and both are trivially reversible by saying the opposite.
+    "set_vision_mode", "set_silent_vision",
 }
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro) if not asyncio.get_event_loop().is_running() else asyncio.run(coro)
+    # Plain asyncio.run. The old form asked asyncio.get_event_loop() for an
+    # ambient loop, which asyncio.run() sets back to None when it finishes — so
+    # any earlier test in the session that used asyncio.run made these tests
+    # fail with "There is no current event loop", and the suite only passed
+    # because collection order happened to put them first. No test here is ever
+    # called from inside a running loop, so there is nothing to fall back to.
+    return asyncio.run(coro)
 
 
 def test_every_tool_has_a_capability_tier():

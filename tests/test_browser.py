@@ -17,7 +17,10 @@ if str(_project_root) not in sys.path:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro) if not asyncio.get_event_loop().is_running() else asyncio.run(coro)
+    # See the identical note in test_capability_tiers.py: the old
+    # get_event_loop() form broke as soon as any earlier test used
+    # asyncio.run(), which clears the ambient loop.
+    return asyncio.run(coro)
 
 
 # ── FakePage: implements only what browser_read / browser_click / browser_type touch ─
