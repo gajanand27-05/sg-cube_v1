@@ -41,6 +41,11 @@ def get_mcp_server():
     except ImportError:
         log.warning("fastmcp not installed — MCP server unavailable")
         _mcp_server = None
+    except Exception as e:
+        # Not just ImportError: an API change inside fastmcp raises something
+        # else entirely, and letting it escape here made the module unimportable.
+        log.warning("MCP server unavailable: %s", e)
+        _mcp_server = None
     return _mcp_server
 
 
@@ -52,10 +57,24 @@ def get_mcp_app():
     server = get_mcp_server()
     if server is None:
         return None
-    return server.http_app()
+    # fastmcp renamed this between versions: 2.1.x exposes sse_app(), later
+    # releases http_app(). Calling the wrong one raised AttributeError at
+    # module scope (mcp_app is built at import), which made the whole module
+    # unimportable and left /mcp answering 404 — silently, because the caller
+    # logged the failure at debug level.
+    factory = getattr(server, "http_app", None) or getattr(server, "sse_app", None)
+    if factory is None:
+        log.warning("fastmcp %s exposes neither http_app nor sse_app — /mcp disabled",
+                    getattr(__import__("fastmcp"), "__version__", "?"))
+        return None
+    return factory()
 
 
-mcp_app = get_mcp_app()
+try:
+    mcp_app = get_mcp_app()
+except Exception as e:  # must never make this module unimportable
+    log.warning("MCP app unavailable: %s", e)
+    mcp_app = None
 
 
 # ── E2: Consume external MCP servers ─────────────────────────────────

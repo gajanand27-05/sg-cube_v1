@@ -73,7 +73,26 @@ async def lifespan(app: FastAPI):
                     ssl_certfile=cert_file, ssl_keyfile=key_file,
                     log_level="warning", lifespan="off",  # this lifespan already ran
                 ))
-                tls_task = asyncio.create_task(tls_server.serve())
+                async def _serve_tls(server=tls_server):
+                    # The bind happens inside this task, so the except below
+                    # cannot see it — and uvicorn answers a busy port with
+                    # sys.exit(1). SystemExit is a BaseException, so it slips
+                    # past `except Exception` AND asyncio re-raises it out of
+                    # the loop, killing the whole process before the main
+                    # listener is even bound. A stale sg_cube holding 8443 took
+                    # the entire app down with a bare traceback, which is the
+                    # exact opposite of what this fallback was written for.
+                    try:
+                        await server.serve()
+                    except SystemExit as e:
+                        log.warning(
+                            "Phone HTTPS could not bind %s:%d (plain HTTP still up): "
+                            "port busy or cert rejected (exit %s)",
+                            settings.app_host, settings.phone_tls_port, e.code)
+                    except Exception as e:
+                        log.warning("Phone HTTPS stopped (plain HTTP still up): %s", e)
+
+                tls_task = asyncio.create_task(_serve_tls())
                 log.info("Phone HTTPS listening on %s:%d", settings.app_host, settings.phone_tls_port)
         except Exception as e:
             log.warning("Phone HTTPS failed to start (plain HTTP still up): %s", e)
@@ -138,9 +157,11 @@ try:
         app.mount("/mcp", mcp_app)
         log.info("MCP server mounted at /mcp")
     else:
-        log.debug("MCP server not mounted: fastmcp not installed")
+        log.warning("MCP server not mounted: fastmcp unavailable — /mcp will 404")
 except Exception as e:
-    log.debug("MCP server not mounted: %s", e)
+    # Was log.debug, which is invisible at the default level: /mcp had been
+    # returning 404 for an unknown length of time with nothing in the log.
+    log.warning("MCP server not mounted (/mcp will 404): %s", e)
 
 
 @app.get("/health")
