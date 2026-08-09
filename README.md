@@ -235,7 +235,7 @@ frontend/
 │   └── pages/        # Dashboard, Chat, Vision, Memory, Agents, Files
 └── package.json
 tools/                # 30+ scripts (downloads, diagnostics, demos)
-tests/                # pytest — 35 tests across all phases
+tests/                # pytest — 342 tests across all phases
 ```
 
 ---
@@ -243,10 +243,11 @@ tests/                # pytest — 35 tests across all phases
 ## ▸ Test
 
 ```bash
-python -m pytest tests/ -v
+.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-All phases A–G covered (35 tests passing).
+Use the venv interpreter — it is the only one with `cv2` + `ultralytics`, which
+the vision tests need. All phases A–G covered (342 tests passing).
 
 | Phase | Feature | Status |
 |-------|---------|--------|

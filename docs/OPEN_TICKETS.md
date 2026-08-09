@@ -245,10 +245,11 @@ place pending a decision rather than deleted.
 spelling each, so the disagreement was invisible. Added `APOSTROPHE_PAIRS`,
 which asserts *pairs* rather than spellings. Suite 193 -> 200.
 
-**Also found**: `.venv/Scripts/python.exe -m pytest` reports "No module
-named pytest" — the project's own venv cannot run the project's own tests,
-so anyone following the README's `.venv\Scripts\activate` -> `pytest` path
-hits a wall. pytest exists only in the system interpreter.
+**Also found**: the venv is the required test runner. `.venv/Scripts/python.exe`
+has pytest 9.1.1 plus cv2 and ultralytics; the system interpreter has pytest but
+neither, so the vision tests (`tests/test_obstacle_detector.py`) die on
+`ModuleNotFoundError: No module named 'cv2'` there. Run
+`.venv\Scripts\python.exe -m pytest tests -q`.
 
 ## T-wake-word-executes-ambient-audio (opened 2026-07-19 — PARTIALLY MITIGATED)
 
