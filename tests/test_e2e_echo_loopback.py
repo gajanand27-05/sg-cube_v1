@@ -24,6 +24,14 @@ import time
 from pathlib import Path
 from threading import Thread
 
+import pytest
+
+# Opt-in: these play an audible 880Hz tone through the real output device. Run
+# with `pytest -m audio`. Excluded by default (see pytest.ini) because a normal
+# suite run should not make noise in the room — with the suite run twenty times
+# in a day it is just beeping.
+pytestmark = pytest.mark.audio
+
 import numpy as np
 import pytest
 import sounddevice as sd
