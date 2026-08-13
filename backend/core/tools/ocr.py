@@ -1,8 +1,13 @@
 """OCR tool (Phase 11e) — extract text from the screen.
 
-Requires the Tesseract binary on PATH (separate Windows installer:
-https://github.com/UB-Mannheim/tesseract/wiki). If it's missing we return a
-helpful error rather than crashing the agent loop.
+Needs the Tesseract BINARY, which pip cannot install. Resolution is shared
+with vision/ocr_reader.py via tesseract_path(): the UB-Mannheim Windows
+installer does NOT add itself to PATH, so `pytesseract`'s own lookup fails on
+a perfectly good install. This tool relied on that lookup and reported
+"Tesseract binary not found on PATH" with the engine sitting installed at the
+default location — the resolver was added for the phone-camera OCR path on
+2026-08-13 and not applied here, so screen OCR stayed broken while phone OCR
+worked.
 """
 import pyautogui
 
@@ -22,6 +27,16 @@ def ocr_screen() -> ToolResult:
     except ImportError:
         return ToolResult.error("pytesseract not installed (pip install pytesseract)")
 
+    from backend.core.vision.ocr_reader import tesseract_path
+
+    binary = tesseract_path()
+    if binary is None:
+        return ToolResult.error(
+            "Tesseract is not installed. Install it with "
+            "`winget install UB-Mannheim.TesseractOCR`, or set TESSERACT_CMD."
+        )
+    pytesseract.pytesseract.tesseract_cmd = binary
+
     try:
         image = pyautogui.screenshot()
     except Exception as e:
@@ -30,7 +45,9 @@ def ocr_screen() -> ToolResult:
     try:
         text = pytesseract.image_to_string(image) or ""
     except pytesseract.TesseractNotFoundError:
-        return ToolResult.error("Tesseract binary not found on PATH. Install it from https://github.com/UB-Mannheim/tesseract/wiki")
+        return ToolResult.error(
+            f"Tesseract at {binary!r} would not run — the install looks broken."
+        )
     except Exception as e:
         return ToolResult.error(f"OCR failed: {e}")
 
