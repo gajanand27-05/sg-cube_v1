@@ -53,11 +53,14 @@ class AgentContext:
     # `capabilities` is the one the planner reads — it renders exactly this
     # list into the prompt, so a tool missing here does not exist as far as
     # the assistant is concerned. `available_tools` is the raw REGISTRY view;
-    # the planner never touches it, and nothing in backend/ or tests/ reads it
-    # either. Kept rather than deleted only because plugins are auto-imported
-    # from backend/plugins/ at runtime and could reference it, which no static
-    # check can rule out. Do not add a tool here and expect the planner to see
-    # it — see tests/test_tool_reachability.py.
+    # the planner never touches it, and nothing in backend/ or tests/ reads it.
+    # Kept rather than deleted because plugins are auto-imported at runtime and
+    # could reference it. Checked 2026-08-13 rather than assumed: the two that
+    # exist (backend/plugins/hello_world.py, core/plugins/installed/spotify.py)
+    # touch none of these fields, so the reasoning is caution about future
+    # plugins, not evidence of a current reader. Same for active_window,
+    # running_apps and screen_objects. Do not add a tool here and expect the
+    # planner to see it — see tests/test_tool_reachability.py.
     available_tools: list[Tool] = field(default_factory=list)
     capabilities: list[Capability] = field(default_factory=list)
     
