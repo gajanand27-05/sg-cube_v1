@@ -89,6 +89,36 @@ async def describe_scene() -> ToolResult:
     )
 
 
+# tier: reads text from the phone frame — no side effects.
+@tool(tier=CapabilityTier.READONLY)
+async def ocr_read() -> ToolResult:
+    """Read text visible through the phone camera. Recognizes signs, labels,
+    documents. Use for "read this sign", "what does it say", "read the text",
+    "OCR this". Needs the phone camera to be streaming already."""
+    from backend.core.vision.frame_ingest import frame_ingestor
+    from backend.core.vision.ocr_reader import ocr_frame, ocr_text
+
+    frame, meta = frame_ingestor.latest_frame()
+    if frame is None:
+        hint = _hint() if registry.count == 0 else " Say 'connect phone camera' first."
+        return ToolResult.error(f"no camera frame available.{hint}")
+
+    loop = asyncio.get_running_loop()
+    lines = await loop.run_in_executor(None, ocr_frame, frame)
+    if not lines:
+        return ToolResult.success(message="no readable text in view",
+                                   data={"lines": [], "frame_id": meta.frame_id})
+
+    texts = [line.text for line in lines]
+    return ToolResult.success(
+        message=ocr_text(lines),
+        data={
+            "lines": [{"text": l.text, "confidence": l.confidence} for l in lines],
+            "frame_id": meta.frame_id,
+        },
+    )
+
+
 @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)
 async def set_vision_mode(mode: str) -> ToolResult:
     """Switch what the phone camera is doing.

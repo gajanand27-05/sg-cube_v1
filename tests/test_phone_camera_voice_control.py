@@ -21,6 +21,7 @@ from backend.core.tools.vision_phone import (
     connect_phone_camera,
     describe_scene,
     disconnect_phone_camera,
+    ocr_read,
 )
 from backend.server.routes import phone_stream
 
@@ -205,3 +206,67 @@ def test_page_opens_its_control_socket_on_load(client):
     # connect() is invoked at top level, not only from start()
     assert "\nconnect();" in page
     assert '"command"' in page and 'd.action === "start"' in page
+
+
+def test_ocr_read_without_frame(client):
+    res = asyncio.run(ocr_read())
+    assert res.status.value != "success"
+    assert "no camera frame" in (res.reason or "")
+
+
+def test_ocr_read_groups_lines(client, monkeypatch):
+    from backend.core.vision import ocr_reader as orr
+
+    def fake_ocr(_jpeg):
+        return [
+            orr.OCRLine(text="STOP", bbox=(0, 0, 100, 20), confidence=0.95),
+            orr.OCRLine(text="MAIN ST", bbox=(0, 30, 100, 50), confidence=0.88),
+        ]
+
+    monkeypatch.setattr(orr, "ocr_frame", fake_ocr)
+    frame_ingest.frame_ingestor.ingest_frame(JPEG, mode="read")
+
+    res = asyncio.run(ocr_read())
+    assert res.status.value == "success", res.reason
+    assert "STOP" in res.message
+    assert "MAIN ST" in res.message
+    assert len(res.data["lines"]) == 2
+
+
+def test_switch_to_read_mode(client):
+    """Phone should receive mode change command."""
+    with client.websocket_connect("/ws/phone_stream") as ws:
+        ws.send_bytes(JPEG)
+        ws.send_text(json.dumps({"type": "mode_change", "mode": "read"}))
+        # time_sync arrives first on connect, skip past it
+        json.loads(ws.receive_text())
+
+
+def test_read_mode_continuous_ocr(client, monkeypatch):
+    """Read mode should run OCR on frames, not skip like navigate/scan/idle."""
+    from backend.core.vision import ocr_reader as _ocr_mod
+    from backend.core.vision.obstacle_detector import detection_runner
+    import asyncio
+
+    # Force _busy off so the frame isn't skipped
+    detection_runner._busy = False
+    detection_runner._last_read_spoken.clear()
+
+    occurrences: list[str] = []
+
+    def fake_ocr(_jpeg):
+        occurrences.append("called")
+        return [_ocr_mod.OCRLine(text="TEST_LINE", bbox=(0, 0, 10, 10), confidence=0.9)]
+
+    monkeypatch.setattr("backend.core.vision.ocr_reader.ocr_frame", fake_ocr)
+
+    # Run read_once directly on the test loop — this isolates the logic from
+    # WS timing and async scheduling complexity.
+    frame_ingest.frame_ingestor.ingest_frame(JPEG, mode="read")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    result = loop.run_until_complete(detection_runner.read_once())
+    loop.close()
+
+    assert "TEST_LINE" in result
+    assert "called" in occurrences

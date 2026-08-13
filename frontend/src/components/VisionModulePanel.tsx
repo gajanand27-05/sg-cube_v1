@@ -139,7 +139,7 @@ function ObstacleChip({ now }: { now: number }) {
           : "border-hud-warning text-hud-warning bg-bg-base/70",
       )}
     >
-      {arrow} {o.label} · {o.distance_m.toFixed(1)}m
+      {arrow} {o.label} · {o.clipped ? "very close" : `${o.distance_m.toFixed(1)}m`}
     </span>
   );
 }
@@ -291,8 +291,17 @@ function VisionModeHealthRow() {
   const latency = fmt(measured(health?.detector_latency_ms), 0, "ms");
   const dropped = fmt(measured(health?.dropped_frames), 0);
   const queue = fmt(measured(health?.tts_queue_depth), 0);
-  // -1 until the phone clock handshake lands, so it goes through the same gate.
-  const age = fmt(measured(health?.frame_age_ms), 0, "ms");
+  // NOT measured(): for this one field a negative value is a real reading — a
+  // persistently negative age means the phone-clock offset was estimated with
+  // the wrong sign, the one fault vision-health cannot otherwise detect, and
+  // measured()'s `< 0` test rendered it as the same em-dash as "handshake not
+  // done yet". The backend now states outright whether it measured it; the
+  // sign test stays only as the fallback for a backend that doesn't.
+  const ageValue = health?.frame_age_ms;
+  const ageKnown =
+    health?.frame_age_measured ?? (ageValue !== undefined && ageValue >= 0);
+  const age =
+    ageKnown && Number.isFinite(ageValue) ? fmt(ageValue as number, 0, "ms") : "—";
   // Staleness drops, NOT the fps-throttle drops above — throttling is expected
   // at 2fps, stale frames mean the link is too slow to guide someone safely.
   const stale = fmt(measured(health?.frames_dropped_stale), 0);

@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from backend.core.events import get_bus, Priority
 from backend.core.vision.phone_session import registry
 from backend.core.vision.vision_health import vision_health
-from backend.daemon.ui_events import HapticEvent, ObstacleEvent
+from backend.daemon.ui_events import HapticEvent, ObstacleEvent, OcrReadEvent
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +72,26 @@ HAPTIC_DISTANCE_M = 1.0
 HAPTIC_COOLDOWN_S = 1.5   # shorter than speech — a buzz can repeat, a sentence can't
 _FOCAL_FACTOR = 1.0  # f_px ≈ frame_height * this; see ponytail note above
 
+# The pinhole estimate is distance = H * frame_h / box_h, and box_h can never
+# exceed frame_h — so the SMALLEST distance the model can ever report is the
+# object's own height H. For a person that is 1.70m, which put HAPTIC_DISTANCE_M
+# (1.0) out of reach for every class except the dog, and CRITICAL_DISTANCE_M
+# (2.5) out of reach for bus/truck (3.00). The alert was geometrically dead, not
+# mis-wired. Physically: inside ~H the object stops fitting in frame, its bbox
+# clips at the frame edges, box_h saturates, and the distance number bottoms out
+# instead of continuing to fall.
+#
+# A box touching BOTH the top and bottom edge therefore means "taller than the
+# view" = closer than its own height, and the number must be discarded rather
+# than trusted. Report a fixed inside-arm's-reach value instead.
+_CLIP_TOLERANCE_PX = 2.0
+CLIPPED_DISTANCE_M = 0.5
+# ponytail: a box clipped at only ONE edge (feet cut off — common with a tilted
+# phone) still under-measures box_h, so its distance is an OVER-estimate of
+# unknown size. Left as-is: it's an upper bound, and escalating on one edge
+# would buzz for every distant pedestrian whose feet are out of frame. Upgrade
+# path is real calibration + a ground-plane estimate, not another threshold.
+
 
 @dataclass
 class Obstacle:
@@ -80,6 +100,7 @@ class Obstacle:
     distance_m: float
     confidence: float
     priority: str       # "critical" | "warning"
+    clipped: bool = False   # bbox filled the frame vertically — closer than measurable
 
 
 _model = None
@@ -124,8 +145,12 @@ def detect(jpeg: bytes, all_labels: bool = False) -> list[Obstacle]:
             cx = (x1 + x2) / 2
             direction = "left" if cx < frame_w / 3 else "right" if cx > 2 * frame_w / 3 else "straight"
             box_h = max(1.0, y2 - y1)
+            clipped = y1 <= _CLIP_TOLERANCE_PX and y2 >= frame_h - _CLIP_TOLERANCE_PX
             if known:
-                distance = KNOWN_HEIGHTS[label] * (_FOCAL_FACTOR * frame_h) / box_h
+                distance = (
+                    CLIPPED_DISTANCE_M if clipped
+                    else KNOWN_HEIGHTS[label] * (_FOCAL_FACTOR * frame_h) / box_h
+                )
                 priority = (
                     "critical"
                     if label in MOVING_HAZARDS and distance < CRITICAL_DISTANCE_M
@@ -140,6 +165,7 @@ def detect(jpeg: bytes, all_labels: bool = False) -> list[Obstacle]:
                 distance_m=round(distance, 1),
                 confidence=round(float(box.conf[0]), 2),
                 priority=priority,
+                clipped=clipped,
             ))
     return out
 
@@ -164,7 +190,9 @@ def describe(obstacles: list[Obstacle]) -> str:
     nearest = min((o for o in obstacles if o.distance_m > 0),
                   key=lambda o: o.distance_m, default=None)
     if nearest is not None:
-        out += f" Nearest is the {nearest.label}, about {max(1, round(nearest.distance_m))} meters."
+        # A clipped box has no usable range — say so instead of inventing one.
+        how_far = "very close" if nearest.clipped else f"about {max(1, round(nearest.distance_m))} meters"
+        out += f" Nearest is the {nearest.label}, {how_far}."
     return out
 
 
@@ -177,6 +205,7 @@ class DetectionRunner:
         self._prev: set[tuple[str, str]] = set()  # (label, direction) last frame
         self._last_spoken: dict[str, float] = {}
         self._last_buzz: float = 0.0
+        self._last_read_spoken: set[str] = set()  # dedup lines across read frames
         self.last_latency_ms: float = 0.0
         self.detections_done: int = 0
 
@@ -187,6 +216,7 @@ class DetectionRunner:
         self._prev.clear()
         self._last_spoken.clear()
         self._last_buzz = 0.0
+        self._last_read_spoken.clear()
         self.detections_done = 0
 
     def _maybe_buzz(self, confirmed: list[Obstacle]) -> None:
@@ -212,6 +242,9 @@ class DetectionRunner:
 
     async def submit(self, jpeg: bytes, mode: str) -> None:
         """Called from the WS loop for every accepted frame. Never blocks."""
+        if mode == "read":
+            await self._read_submit(jpeg)
+            return
         if mode not in ("navigate", "scan"):
             return
         if self._busy:
@@ -241,6 +274,7 @@ class DetectionRunner:
                         distance_m=o.distance_m,
                         confidence=o.confidence,
                         priority=o.priority,
+                        clipped=o.clipped,
                     ),
                     priority=Priority.HIGH,
                 )
@@ -249,6 +283,39 @@ class DetectionRunner:
                 self._maybe_speak(confirmed)
         except Exception as e:
             log.error("Obstacle detection failed: %s", e)
+        finally:
+            self._busy = False
+
+    async def _read_submit(self, jpeg: bytes) -> None:
+        """Read mode: OCR each frame, speak only new lines."""
+        from backend.core.vision.ocr_reader import ocr_frame
+
+        if self._busy:
+            return
+        self._busy = True
+        try:
+            t0 = time.monotonic()
+            loop = asyncio.get_running_loop()
+            lines = await loop.run_in_executor(None, ocr_frame, jpeg)
+            self.last_latency_ms = round((time.monotonic() - t0) * 1000, 1)
+            self.detections_done += 1
+            vision_health.note_frame_processed(latency_ms=self.last_latency_ms)
+
+            new_phrases: list[str] = []
+            for line in lines:
+                if line.text not in self._last_read_spoken:
+                    self._last_read_spoken.add(line.text)
+                    new_phrases.append(line.text)
+                    bus = get_bus()
+                    bus.publish(OcrReadEvent(text=line.text, confidence=line.confidence),
+                                priority=Priority.HIGH)
+            if not new_phrases:
+                return
+            phrase = " ".join(new_phrases)
+            if not registry.silent:
+                self._speak_offloop(phrase)
+        except Exception as e:
+            log.error("OCR read failed: %s", e)
         finally:
             self._busy = False
 
@@ -266,16 +333,19 @@ class DetectionRunner:
             return
         self._last_spoken[o.label] = now
         where = {"left": "on your left", "right": "on your right", "straight": "ahead"}[o.direction]
-        meters = max(1, round(o.distance_m))
-        self._speak_offloop(f"{o.label} {where}. {meters} meters.")
+        how_far = "Very close." if o.clipped else f"{max(1, round(o.distance_m))} meters."
+        self._speak_offloop(f"{o.label} {where}. {how_far}", o.direction)
 
-    def _speak_offloop(self, phrase: str) -> None:
+    def _speak_offloop(self, phrase: str, direction: str = "straight") -> None:
         """Hand `phrase` to the speech thread. Deliberately not awaited: the
         alert must not hold up the next frame, and submit() is still holding
         _busy while this runs."""
         def _run() -> None:
-            from backend.ai_modules.speech import tts_piper
-            tts_piper.speak(phrase)
+            import backend.ai_modules.speech.tts_piper as tts_piper
+            if direction in ("left", "right"):
+                tts_piper.speak_panned(phrase, direction)
+            else:
+                tts_piper.speak(phrase)
 
         try:
             fut = _speech_pool.submit(_run)
@@ -284,6 +354,40 @@ class DetectionRunner:
             return
         # Nothing awaits the future, so an exception inside would vanish.
         fut.add_done_callback(self._log_speech_failure)
+
+    async def read_once(self) -> str:
+        """OCR the current view and speak recognized text — read mode's job.
+
+        Distinct from navigate/scan: reads signs, labels, documents aloud.
+        Deduplicates so the same line isn't spoken repeatedly across frames.
+        """
+        from backend.core.vision.frame_ingest import frame_ingestor
+        from backend.core.vision.ocr_reader import ocr_frame, ocr_text
+
+        frame, _meta = frame_ingestor.latest_frame()
+        if frame is None:
+            return ""
+        loop = asyncio.get_running_loop()
+        t0 = time.monotonic()
+        lines = await loop.run_in_executor(None, ocr_frame, frame)
+        self.last_latency_ms = round((time.monotonic() - t0) * 1000, 1)
+        self.detections_done += 1
+        vision_health.note_frame_processed(latency_ms=self.last_latency_ms)
+
+        if not lines:
+            return "No readable text in view."
+        # Speak only lines not spoken yet this session.
+        phrases: list[str] = []
+        for line in lines:
+            if line.text not in self._last_read_spoken:
+                phrases.append(line.text)
+                self._last_read_spoken.add(line.text)
+        if not phrases:
+            return ""
+        phrase = " ".join(phrases)
+        if not registry.silent:
+            self._speak_offloop(phrase)
+        return phrase
 
     async def scan_once(self) -> str:
         """Describe the current view once and speak it — scan mode's whole job.

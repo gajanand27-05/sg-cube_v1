@@ -90,7 +90,11 @@ class VisionHealthSnapshot:
             "tts_queue_depth": self.tts_queue_depth if self.tts_queue_depth is not None else -1,
             "dropped_frames": self.dropped_frames,
             "mode": self.mode or "idle",
+            # A negative frame age is a genuine reading (wrong-sign clock
+            # offset), so the -1 sentinel cannot carry "unmeasured" here on its
+            # own — the boolean does. See VisionHealthEvent.frame_age_measured.
             "frame_age_ms": self.frame_age_ms if self.frame_age_ms is not None else -1.0,
+            "frame_age_measured": self.frame_age_ms is not None,
             "frames_dropped_stale": self.frames_dropped_stale,
         }
 

@@ -434,7 +434,7 @@ def speak(text: str) -> dict:
     async def _run():
         async for _ in speak_stream(text):
             pass
-    
+
     import asyncio
     try:
         loop = asyncio.get_running_loop()
@@ -446,6 +446,44 @@ def speak(text: str) -> dict:
         # No running loop, run in new loop
         asyncio.run(_run())
         return {"status": "finished", "text": text}
+
+
+def speak_panned(text: str, direction: str) -> dict:
+    """Synthesize and play text, panned left/right based on `direction`.
+
+    Converts mono audio to stereo, applying per-channel gain so the alert
+    appears to come from the obstacle's direction. `direction` matches the
+    obstacle detector's output: "left", "right", or "straight" (center).
+    """
+    if direction == "left":
+        left_gain, right_gain = 1.0, 0.25
+    elif direction == "right":
+        left_gain, right_gain = 0.25, 1.0
+    else:
+        left_gain, right_gain = 0.707, 0.707  # -3dB center
+
+    voice = _get_voice()
+    chunks = list(voice.synthesize(text))
+    if not chunks:
+        return {"status": "error", "text": text}
+    rate = chunks[0].sample_rate
+    mono = np.concatenate([c.audio_int16_array for c in chunks]).astype(np.float32)
+
+    stereo = np.empty((len(mono), 2), dtype=np.int16)
+    stereo[:, 0] = np.clip(mono * left_gain, -32768, 32767)
+    stereo[:, 1] = np.clip(mono * right_gain, -32768, 32767)
+
+    # Record for echo suppression same way speak() does.
+    utterance = _note_spoken(text)
+    try:
+        with sd.OutputStream(samplerate=rate, channels=2, dtype="int16") as stream:
+            stream.write(stereo)
+    except Exception as e:
+        print(f"[TTS] Panned playback error: {e}")
+        _close_utterance(utterance)
+        return {"status": "error", "text": text}
+    _close_utterance(utterance)
+    return {"status": "finished", "text": text, "pan": direction}
 
 
 def stop_speech() -> None:

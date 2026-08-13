@@ -43,7 +43,7 @@ from backend.core.vision.frame_ingest import frame_ingestor
 from backend.core.vision.obstacle_detector import detection_runner
 from backend.core.vision.phone_session import VALID_MODES, PhoneSession, registry
 from backend.core.vision.vision_health import STALE_FRAME_MS, vision_health
-from backend.daemon.ui_events import ModeChangeEvent, VisionHealthEvent
+from backend.daemon.ui_events import ModeChangeEvent, OcrReadEvent, VisionHealthEvent
 from backend.server.routes.remote import _is_private_host
 
 log = logging.getLogger(__name__)
@@ -125,6 +125,9 @@ async def phone_stream_ws_endpoint(ws: WebSocket):
                         # mode IS the trigger. Off the receive loop so a ~150ms
                         # inference cannot stall incoming frames.
                         asyncio.create_task(detection_runner.scan_once())
+                    if session.mode == "read" and previous != "read":
+                        # Clear OCR dedup so the first frame speaks everything.
+                        detection_runner._last_read_spoken.clear()
                 elif kind == "time_sync_reply":
                     try:
                         session.note_time_sync(

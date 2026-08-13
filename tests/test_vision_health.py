@@ -228,3 +228,20 @@ def test_event_fields_never_fake_a_zero(health):
     assert fields["fps_received"] == -1.0
     assert fields["fps_processed"] == -1.0
     assert fields["detector_latency_ms"] == -1.0
+
+
+def test_a_negative_frame_age_is_a_reading_not_an_absence(health):
+    """phone_session.frame_age_ms deliberately refuses to clamp a negative age:
+    a persistently negative one means the clock-offset estimate has the wrong
+    sign, and that is the single fault this module could not otherwise detect.
+    The shared "-1 means unmeasured" convention then re-hid it — any consumer
+    gating on `< 0` maps the fault onto the same em-dash as "handshake hasn't
+    landed". frame_age_measured is what distinguishes them."""
+    unmeasured = health.snapshot().event_fields()
+    assert unmeasured["frame_age_ms"] == -1.0
+    assert unmeasured["frame_age_measured"] is False
+
+    health.note_frame_received(age_ms=-1.0)   # a real reading that IS -1.0
+    measured = health.snapshot().event_fields()
+    assert measured["frame_age_ms"] == -1.0   # identical to the sentinel...
+    assert measured["frame_age_measured"] is True   # ...and only this tells them apart

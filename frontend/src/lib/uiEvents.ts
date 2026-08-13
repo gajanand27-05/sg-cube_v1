@@ -149,6 +149,10 @@ export type ObstaclePayload = {
   distance_m: number;
   confidence: number;
   priority: "critical" | "warning";
+  /** Bbox filled the frame vertically — the object is closer than the pinhole
+   *  model can measure, so distance_m is a stand-in and must not be shown as
+   *  a reading. Optional: older backends don't send it. */
+  clipped?: boolean;
 };
 
 export type ModeChangePayload = {
@@ -170,8 +174,14 @@ export type VisionHealthPayload = {
   /** fps-throttle drops — normal and expected at 2fps. */
   dropped_frames: number;
   /** End-to-end frame age (server receive minus phone capture, clock-offset
-   *  corrected). -1 until the clock handshake with the phone completes. */
+   *  corrected). -1 until the clock handshake with the phone completes.
+   *  Unlike every other field here a NEGATIVE value can be a real reading —
+   *  it means the clock-offset estimate has the wrong sign — so gate on
+   *  frame_age_measured, never on the sign. */
   frame_age_ms: number;
+  /** Whether frame_age_ms is a reading at all. Optional: older backends
+   *  don't send it, and the caller falls back to the sign test. */
+  frame_age_measured?: boolean;
   /** Cumulative frames dropped for exceeding the 1.5s staleness gate. Always
    *  >= 0, never -1. Distinct from dropped_frames: this one means the link is
    *  too slow to guide someone safely. */

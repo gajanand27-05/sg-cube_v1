@@ -36,6 +36,83 @@ def test_detect_garbage_bytes_yield_nothing():
     assert od.detect(b"not a jpeg") == []
 
 
+# ── close-range geometry ─────────────────────────────────────────────
+#
+# The haptic alert was dead in production for 6 of 7 hazard classes. Not a
+# wiring bug: distance = H * frame_h / box_h and box_h <= frame_h, so the
+# smallest distance the model can report is H itself — 1.70m for a person,
+# with HAPTIC_DISTANCE_M at 1.0. Only the dog (0.50) could ever buzz.
+#
+# These go through the real detect() on a real image, because the previous
+# test for this built an Obstacle by hand and so passed with the bug present.
+
+@pytest.fixture(scope="module")
+def person_filling_frame(bus_bytes):
+    """A crop of bus.jpg where the pedestrian runs off both the top and the
+    bottom edge — what the camera actually sees when someone is within arm's
+    reach."""
+    import cv2
+    import numpy as np
+    img = cv2.imdecode(np.frombuffer(bus_bytes, np.uint8), cv2.IMREAD_COLOR)
+    ok, enc = cv2.imencode(".jpg", img[420:880, 30:270])  # person box is [49,399,245,903]
+    assert ok
+    return enc.tobytes()
+
+
+def test_person_too_close_to_fit_in_frame_is_not_reported_as_far_away(person_filling_frame):
+    people = [o for o in od.detect(person_filling_frame) if o.label == "person"]
+    assert people, "the crop must still detect a person, or this test proves nothing"
+    near = min(people, key=lambda o: o.distance_m)
+    assert near.clipped, "bbox runs off both frame edges — detect() must notice"
+    assert near.distance_m < od.HAPTIC_DISTANCE_M, (
+        f"person filling the frame reported at {near.distance_m}m; the pinhole "
+        f"estimate saturates at its own height (1.70m) and never reaches the "
+        f"{od.HAPTIC_DISTANCE_M}m haptic threshold"
+    )
+    assert near.priority == "critical"
+
+
+def test_haptic_fires_for_a_person_at_arms_length(person_filling_frame, monkeypatch):
+    """End of the chain: detection -> _maybe_buzz -> HapticEvent + phone push.
+    This is the assertion that was false in production."""
+    events, pushes = [], []
+
+    class Bus:
+        def publish(self, ev, priority=None):
+            events.append(ev)
+    monkeypatch.setattr(od, "get_bus", lambda: Bus())
+    monkeypatch.setattr(od.registry, "push_soon", lambda payload: pushes.append(payload))
+
+    od.DetectionRunner()._maybe_buzz(od.detect(person_filling_frame))
+
+    assert [e for e in events if isinstance(e, od.HapticEvent)], "no buzz for a person at arm's length"
+    assert pushes and pushes[0]["action"] == "vibrate"
+
+
+def test_unclipped_detections_keep_their_measured_distance(bus_bytes):
+    """The fix must not flatten every distance to the close-range constant —
+    the uncropped frame's pedestrians are metres away and stay that way."""
+    for o in od.detect(bus_bytes):
+        assert not o.clipped
+        assert o.distance_m > od.CLIPPED_DISTANCE_M
+
+
+def test_clipped_obstacle_is_spoken_as_very_close_not_as_a_measurement():
+    """CLIPPED_DISTANCE_M is a stand-in for 'closer than measurable'. Speaking
+    it as '1 meters' would state a precision the geometry cannot support."""
+    clipped = od.Obstacle(label="person", direction="straight",
+                          distance_m=od.CLIPPED_DISTANCE_M, confidence=0.9,
+                          priority="critical", clipped=True)
+    assert "very close" in od.describe([clipped]).lower()
+
+    spoken = []
+    runner = od.DetectionRunner()
+    runner._speak_offloop = lambda phrase, direction="straight": spoken.append(phrase)
+    runner._maybe_speak([clipped])
+    assert spoken and "very close" in spoken[0].lower(), spoken
+    assert "meters" not in spoken[0].lower()
+
+
 def _obs(label="person", direction="straight", dist=1.5, prio="critical"):
     return od.Obstacle(label=label, direction=direction, distance_m=dist,
                        confidence=0.9, priority=prio)

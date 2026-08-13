@@ -290,6 +290,10 @@ class ObstacleEvent:
     distance_m: float
     confidence: float
     priority: str          # "critical" | "warning"
+    # True when the bbox filled the frame vertically: the object is closer than
+    # the pinhole model can measure, so distance_m is a stand-in, not a reading.
+    # The HUD renders these as "very close" rather than a number.
+    clipped: bool = False
 
 
 @dataclass
@@ -324,6 +328,14 @@ class VisionHealthEvent:
     # staleness is measured but never surfaced, which was the state Phase 4
     # shipped in.
     frame_age_ms: float = -1.0
+    # frame_age_ms is the one field here where a negative value is real signal,
+    # not absence: a persistently negative age means the phone-clock offset was
+    # estimated with the wrong sign, and phone_session.frame_age_ms deliberately
+    # refuses to clamp it so that fault stays visible. The shared "-1 means
+    # unmeasured" convention then hid it again — a consumer gating on `< 0` maps
+    # the fault and the handshake-not-done state onto the same em-dash. This
+    # flag is what consumers must gate on for this field instead.
+    frame_age_measured: bool = False
     frames_dropped_stale: int = 0
 
 
