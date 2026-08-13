@@ -13,6 +13,18 @@ log = logging.getLogger(__name__)
 
 _TOOL_MODULES_BLACKLIST = {"__init__", "registry", "sandbox", "llm_helper"}
 
+# modname -> import error, for every tool module that did not load.
+#
+# Swallowing the ImportError is the right call — one broken module must not
+# take down the other 28 — but until now the only trace was a log.warning
+# nobody reads, and the consequence is severe and silent: every @tool in that
+# module is absent from REGISTRY, so the planner is never told the capability
+# exists and the assistant simply cannot do that thing. It does not error, it
+# does not decline; the tool is not in its world. preflight.check_tool_modules
+# reports this, which is the difference between a swallowed failure and a
+# recorded one.
+FAILED_TOOL_MODULES: dict[str, str] = {}
+
 
 def _discover_tools() -> None:
     """Auto-import all modules in backend.core.tools to trigger @tool decorators."""
@@ -30,7 +42,9 @@ def _discover_tools() -> None:
         try:
             importlib.import_module(f"{package_name}.{modname}")
             log.debug("Discovered tool module: %s", modname)
+            FAILED_TOOL_MODULES.pop(modname, None)
         except Exception as e:
+            FAILED_TOOL_MODULES[modname] = f"{type(e).__name__}: {e}"
             log.warning("Failed to import tool module %s: %s", modname, e)
 
 

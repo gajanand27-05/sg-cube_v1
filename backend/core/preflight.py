@@ -99,6 +99,38 @@ def check_ws_bridge() -> PreflightCheck:
                               f"bridge setup raised: {type(e).__name__}: {e}")
 
 
+def check_tool_modules() -> PreflightCheck:
+    """Did every tool module import?
+
+    backend.core.tools auto-imports its submodules to fire the @tool
+    decorators, and deliberately swallows a failing one so a single bad module
+    cannot take down the other 28. The cost is the quietest failure in the
+    system: every tool in that module is missing from REGISTRY, so the planner
+    is never told the capability exists. The assistant does not error and does
+    not decline — it behaves as though the feature was never built, which is
+    indistinguishable from a model that just chose not to use it.
+
+    DEGRADED rather than DOWN: the other tools still work.
+    """
+    try:
+        import backend.core.tools as tools_pkg
+        from backend.core.tools.registry import REGISTRY
+
+        failed = dict(tools_pkg.FAILED_TOOL_MODULES)
+        if failed:
+            names = ", ".join(sorted(failed))
+            return PreflightCheck("tool_modules", PreflightStatus.DEGRADED,
+                                  f"{len(failed)} tool module(s) failed to import "
+                                  f"({names}) — their tools are invisible to the planner",
+                                  detail={"failed": failed, "tools_registered": len(REGISTRY)})
+        return PreflightCheck("tool_modules", PreflightStatus.OK,
+                              f"all tool modules imported; {len(REGISTRY)} tools registered",
+                              detail={"tools_registered": len(REGISTRY)})
+    except Exception as e:
+        return PreflightCheck("tool_modules", PreflightStatus.DOWN,
+                              f"tool module check raised: {type(e).__name__}: {e}")
+
+
 def check_browser() -> PreflightCheck:
     """Chromium presence when ENABLE_BROWSER. Playwright itself is a
     Python package (so `import playwright` almost always works) — the
@@ -233,6 +265,7 @@ def run_preflight() -> list[PreflightCheck]:
     registry: dict[str, callable] = {
         "check_services":       check_services,
         "check_ws_bridge":      check_ws_bridge,
+        "check_tool_modules":   check_tool_modules,
         "check_browser":        check_browser,
         "check_ollama":         check_ollama,
         "check_llm_providers":  check_llm_providers,
