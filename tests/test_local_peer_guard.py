@@ -99,13 +99,15 @@ def test_remote_connect_sets_up_event_bridge():
     from backend.core.events import get_bus
     from backend.core.state import StateChangedEvent
 
-    remote.manager._event_bridge_setup = False
+    remote.manager._bridged_bus = None
     app = FastAPI()
     app.include_router(remote.router)
     with TestClient(app, client=LOOPBACK).websocket_connect("/remote/connect/dev1") as ws:
         assert ws.receive_json()["type"] == "ConfigSync"
 
-    assert remote.manager._event_bridge_setup is True
+    # The bus INSTANCE, not a bool: a bridge latched onto a discarded bus
+    # satisfies a flag check while dropping every event.
+    assert remote.manager._bridged_bus is get_bus()
     subs = get_bus()._subscribers[StateChangedEvent]
     assert remote.manager._broadcast_event in subs
 

@@ -69,13 +69,19 @@ class RemoteManager:
     def __init__(self):
         self.active_connections: Dict[str, RemoteConnection] = {}
         self.loop: Optional[asyncio.AbstractEventLoop] = None
-        self._event_bridge_setup = False
+        # The bus instance this bridge is subscribed to, not a bool — see the
+        # matching note in ws_ui.UIEventManager. init_event_bus() builds a NEW
+        # bus on every call, so a bool latch leaves the bridge attached to a
+        # discarded instance while every event silently goes nowhere.
+        # Deliberately duplicated rather than shared: the two managers differ
+        # in wire format and lifecycle, and one test covers both against drift.
+        self._bridged_bus = None
 
     def _setup_event_bridge(self):
         """Bridge Desktop EventBus to all connected Android devices."""
-        if self._event_bridge_setup:
-            return
         bus = get_bus()
+        if self._bridged_bus is bus:
+            return
         for event_type in [
             StateChangedEvent, CommandTranscribed, IntentResolved,
             Executed, SpokenResponse, TokenStreamEvent,
@@ -83,7 +89,7 @@ class RemoteManager:
             ClipboardChangedEvent, HandoverEvent
         ]:
             bus.subscribe(event_type, self._broadcast_event)
-        self._event_bridge_setup = True
+        self._bridged_bus = bus
 
     def _broadcast_event(self, event):
         """Forward local event to remote clients as JSON."""
@@ -116,7 +122,12 @@ class RemoteManager:
         return {"data": str(event)}
 
     async def connect(self, websocket: WebSocket, device_id: str):
-        if not self.loop:
+        # Rebind a dead loop, don't just fill an empty slot. _broadcast_event
+        # falls into its else branch when the stored loop is not running and
+        # logs "no active loop captured yet" at debug — so a replaced loop
+        # stops every device event forever behind a message that says the
+        # opposite of what happened.
+        if self.loop is None or not self.loop.is_running():
             self.loop = asyncio.get_running_loop()
 
         # The bus->device bridge used to hang off _get_bus(), which nothing
