@@ -7,6 +7,14 @@ navigate mode.
 
 Design constraints from the plan:
   * CPU-only, yolov8n (~6MB), inference well under the 500ms frame interval.
+    Measured 2026-08-13 on this machine, aspect preserved, bus.jpg: 55ms at
+    480p, 57ms at 720p, 59ms at 1080p, 63ms at 1440p — roughly 8x headroom,
+    and essentially FLAT against input resolution because ultralytics
+    letterboxes to the model's fixed 640px input before inference. Do NOT
+    copy ocr_reader's 720p downscale cap over here: OCR scales with pixel
+    count (445ms at 1080p vs 273ms at 720p, which is why it has one),
+    detection does not, so a cap would buy nothing and could cost small or
+    distant objects their few pixels.
   * conf > 0.5 model-side; publishing requires the SAME label+direction in two
     consecutive processed frames (2-frame confirmation against flicker).
   * Never blocks the WS receive loop — inference runs in the default executor,
@@ -116,7 +124,7 @@ def _get_model():
 
 
 def detect(jpeg: bytes, all_labels: bool = False) -> list[Obstacle]:
-    """Run YOLO on one JPEG frame. Blocking (~40-150ms CPU) — call off-loop.
+    """Run YOLO on one JPEG frame. Blocking (~55-65ms CPU measured) — call off-loop.
 
     By default only the KNOWN_HEIGHTS classes come back: navigation needs a
     distance, and distance needs a known real-world height. `all_labels=True`
