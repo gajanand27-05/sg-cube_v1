@@ -1,9 +1,13 @@
+import logging
+import time
 from typing import Any, List
 
-import time
-
 from backend.core.agents.base import BaseInternalAgent
+from backend.core.events import get_bus
 from backend.core.tools.registry import call as call_tool
+from backend.daemon.ui_events import AgentToolCallEvent
+
+log = logging.getLogger(__name__)
 
 
 class OperatorAgent(BaseInternalAgent):
@@ -34,6 +38,24 @@ class OperatorAgent(BaseInternalAgent):
                 obs.report_latency(request_id, latency_ms)
             except Exception:
                 pass
+
+            # AgentRegistry subscribes AgentToolCallEvent and fills the
+            # per-agent `tools` list that /agents/status serves, but nothing
+            # ever constructed one, so that list was always empty. I previously
+            # called this a design change because runtime.run_tool has no agent
+            # name — true, but the wrong layer to look at. The Operator knows
+            # its own name and every field the event needs.
+            try:
+                get_bus().publish(AgentToolCallEvent(
+                    agent_name=self.name,
+                    tool=name,
+                    args=args,
+                    result=str(getattr(res, "message", None) or getattr(res, "status", "")),
+                    latency_ms=latency_ms,
+                ))
+            except Exception as e:
+                # Telemetry must never cost the caller its tool result.
+                log.warning("AgentToolCallEvent publish failed: %s", e)
 
             results.append({
                 "name": name,

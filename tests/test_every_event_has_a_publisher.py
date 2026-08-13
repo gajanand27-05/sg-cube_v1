@@ -25,15 +25,13 @@ UI_EVENTS = ROOT / "backend" / "daemon" / "ui_events.py"
 
 # Events with no publisher, each here because someone decided so — not because
 # nobody noticed. Removing a name from this dict means it must now be published.
-INTENTIONALLY_UNPUBLISHED = {
-    "AgentToolCallEvent": (
-        "AgentRegistry._on_tool_event subscribes it and fills the per-agent "
-        "`tools` list served by /agents/status, but nothing constructs one, so "
-        "that list is always empty. Publishing it needs the agent name at "
-        "tool-execution time, which runtime.run_tool does not have — a design "
-        "change, not a wiring fix. ActivityTimelinePanel already works around "
-        "it via ToolStartedEvent/ToolFinishedEvent paired by name."
-    ),
+INTENTIONALLY_UNPUBLISHED: dict[str, str] = {
+    # AgentToolCallEvent lived here until 2026-08-13, on the reasoning that
+    # publishing it needed the agent name at tool-execution time and
+    # runtime.run_tool has none. That was the wrong layer: OperatorAgent knows
+    # its own name and every field the event carries, and now publishes it.
+    # Left as a reminder that "needs a design change" deserves re-checking
+    # before it becomes permanent.
 }
 
 
@@ -98,22 +96,59 @@ def test_the_audit_can_actually_see_publishers():
     assert {"ObstacleEvent", "HapticEvent", "SelfHealingEvent"} <= _constructed_names()
 
 
-def test_self_healing_event_has_exactly_one_definition():
-    """backend/core/healing.py used to define a second, incompatible
-    SelfHealingEvent. It was never constructed, and would have been a trap if it
-    ever were: the bus keys subscribers and ws_ui's TYPE_MAP on the class
-    object, so publishing that one would have gone out as wire type
-    "SelfHealingEvent" while every consumer waited on "self_healing"."""
-    definitions = []
+def test_no_event_class_is_defined_twice():
+    """A second class with the same name is silent death, not a style problem.
+
+    The bus keys subscribers — and ws_ui's TYPE_MAP keys wire names — on the
+    class OBJECT. A shadow definition is a different object, so publishers on
+    one side and subscribers on the other never meet, and nothing anywhere logs
+    it. This has now happened twice:
+
+      * healing.py's SelfHealingEvent (6720ca3) — never constructed, so it was
+        only a loaded gun.
+      * agents/base.py's InternalAgentEvent and TokenStreamEvent — actively
+        published by BaseInternalAgent._emit, so all twelve _emit call sites
+        across Guardian, Operator and Planner went nowhere: no "agent_status"
+        on the wire, /agents/status permanently empty.
+
+    The earlier version of this test named SelfHealingEvent specifically, which
+    is exactly why the second pair survived it. Checks every event class now.
+    """
+    # Only classes the bus actually DISPATCHES on. Nested payload types
+    # (DetectedObject, MemoryHit, ReliabilityMetrics) travel inside another
+    # event's fields, are never subscribed to, and so are harmless to define
+    # twice — DetectedObject legitimately exists in both context/types.py and
+    # ui_events.py for two unrelated purposes. Flagging those would be noise,
+    # and a noisy guard gets muted.
+    from backend.server.ws_ui import TYPE_MAP
+    event_names = {cls.__name__ for cls in TYPE_MAP}
+    definitions: dict[str, list[str]] = {}
     for path in (ROOT / "backend").rglob("*.py"):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):
             continue
         for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef) and node.name == "SelfHealingEvent":
-                definitions.append(path.relative_to(ROOT).as_posix())
-    assert definitions == ["backend/daemon/ui_events.py"], definitions
+            if isinstance(node, ast.ClassDef) and node.name in event_names:
+                definitions.setdefault(node.name, []).append(path.relative_to(ROOT).as_posix())
+
+    duplicated = {n: sorted(p) for n, p in definitions.items() if len(p) > 1}
+    assert not duplicated, (
+        "these event classes are defined in more than one place; publishers and "
+        "subscribers holding different ones will never meet:\n  "
+        + "\n  ".join(f"{n}: {paths}" for n, paths in sorted(duplicated.items()))
+    )
+
+
+def test_emitting_agents_publish_the_bridged_event_class():
+    """The specific consequence, pinned end to end: BaseInternalAgent._emit
+    must publish the class ws_ui actually bridges, not a look-alike."""
+    from backend.core.agents.base import InternalAgentEvent as emitted
+    from backend.daemon.ui_events import InternalAgentEvent as bridged
+    from backend.server.ws_ui import TYPE_MAP
+
+    assert emitted is bridged, "_emit publishes a shadow class the HUD never sees"
+    assert TYPE_MAP[emitted] == "agent_status"
 
 
 def test_every_apirouter_is_actually_mounted():
