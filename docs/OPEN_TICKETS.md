@@ -278,7 +278,9 @@ neither, so the vision tests (`tests/test_obstacle_detector.py`) die on
 `ModuleNotFoundError: No module named 'cv2'` there. Run
 `.venv\Scripts\python.exe -m pytest tests -q`.
 
-## T-wake-word-executes-ambient-audio (opened 2026-07-19 — PARTIALLY MITIGATED)
+## T-wake-word-executes-ambient-audio (opened 2026-07-19 — items 1-3 DONE, item 4 out of scope)
+
+> **Status 2026-08-13**: every actionable item below is now done (1 echo suppression, 2 follow-up content gate, 3 confirmation on non-wake turns). Item 4, acoustic echo cancellation, remains the real fix and remains out of scope. The "Not verified" note at the foot still stands — none of this has been observed against live multi-minute ambient audio, only unit-tested.
 
 **Observed**: during an unrelated HTTP query, the daemon executed `open_app` → "opened Terminal". The HTTP response's `tool_records` was `[]`, so it did not come from the request. The mic listener acted on ambient audio.
 
@@ -310,7 +312,7 @@ Each completed command also opens a 3s window where loudness alone re-triggers. 
 
 1. ~~**Suppress TTS echo**~~ — **DONE 2026-07-30** (commit `dc6349f`). `speak_stream()` records every utterance; `was_recently_spoken()` matches a transcript by token containment against the live speaking burst; `trigger.py:409` drops matches with `dropped TTS echo: %r`. Live-verified at the dispatch point. The open-air join is still unproven — see E1 in `leftovers.md`.
 2. **Gate the follow-up window on content, not loudness** — `rms > 500` inside a 3s window is far too permissive. **Now the top remaining item**: with echo suppression in, the observed live failures were Whisper hallucinating on near-silence after `stop_speech()` truncated the capture (`'Sorry about getting ready to talk about it.'`, `'I am working out.'` — the latter ran a full LLM turn). Those are not echo and this gate is what would stop them. — **DONE 2026-08-03.** The old gate was structurally dead *and* permissive: `elif in_followup: rms > 500` never ran (the wake branch's `rms > 50` catches every audiible frame first), and loudness alone opened a capture. Follow-up now shares the Vosk feed and requires `_has_followup_content()` — a partial with real 2+ char words — before a capture opens, so near-silence (empty partial) can't reach Whisper. `_FOLLOWUP_TRIGGER_RMS` deleted. Covered by `tests/test_followup_content_gate.py`. Remaining chain after this gate: real-sounding mis-transcriptions of genuine ambient speech, item 3 below.
-3. **Require confirmation for state-changing tools** when a turn originated from barge-in or follow-up rather than an explicit wake phrase.
+3. ~~**Require confirmation for state-changing tools** when a turn originated from barge-in or follow-up rather than an explicit wake phrase.~~ — **DONE 2026-08-13** (`2c3ba00`, tested in `c6d25f1`). `wake_word.py` records how the turn began in `state_manager._voice_trigger_source` (`"wake"` / `"followup"` / `"barge_in"`); `verifier.py` honours a tool's `trusted` flag only for `"wake"` and `None` (the text path, where there is no ambient audio to mis-hear). Every other origin falls through to the deep check and a confirmation prompt. `trigger.py` clears the source in its `finally` block, so one barge-in cannot make later turns confirm forever. An unrecognised source fails closed, so a new trigger kind added to `wake_word.py` cannot silently inherit the bypass. Covered by `tests/test_trigger_source_gate.py` — both directions, since being too strict trains the user to accept prompts without reading, which costs the safeguard its value.
 4. **Acoustic echo cancellation** — the real fix, already logged as out of scope.
 
 **Not verified**: no live multi-minute ambient-audio observation was run. The gate is unit-tested only.
@@ -414,7 +416,20 @@ Placed at package import rather than in an entry point because the bug fires fro
 
 **Tests**: `tests/test_log_encoding_safety.py` (4), run in subprocesses with `PYTHONIOENCODING=cp1252`. Includes a control that asserts the failure still reproduces *without* the fix, so the test cannot pass by quietly losing its teeth.
 
-## T-memory-zero-vectors (opened 2026-07-30 — WRITE PATH FIXED, DATA REPAIR OPEN)
+## T-memory-zero-vectors (opened 2026-07-30 — RESOLVED 2026-08-03)
+
+> Header corrected 2026-08-13: it still read "DATA REPAIR OPEN" long after the
+> body recorded the repair as done with numbers. A ticket list is read by
+> scanning headers, so the stale one was the version most people saw.
+>
+> Related, same day: local Ollama being unreachable — the condition that caused
+> this damage in the first place — used to cost ~2.18s per embed call on a
+> refused TCP connect, so every turn paid ~4.3s before the planner started and
+> the only symptom was slowness. `ollama_client` now caps the connect timeout
+> and trips a short breaker (`ca8b9c5`). That does not prevent zero vectors —
+> `embedding.py` raising instead of storing `[0.0] * 768` is what does that —
+> but it means the backend being down is now loud and fast rather than quiet
+> and slow.
 
 **Observed**, `tools/memory_health.py`: **32 of 37 rows in `sg_cube_memories` have a zero-norm embedding — 86%.** Only 5 long-term memories in the database are reachable by semantic search at all. `sg_cube_visual` has 3/209. `sg_cube_timeline` cannot be read at all (`InternalError: Error executing plan: Internal error: Error finding id` on `get(include=["embeddings"])`).
 
@@ -472,7 +487,13 @@ Two caveats on that: the HTTP `/chat` and proactive paths reach Commander *witho
 
 > **RESOLVED 2026-08-03** — purge-and-merge executed. `sg_cube_memories`: 37 → 6 rows (0 duplicates), `sg_cube_visual`: 306 → 286 (0 duplicates), `sg_cube_timeline`: 1058 → 917. The 5 recorded hallucination patterns are all gone (0 remaining each); the surviving `"what time is it"` rows are a legitimate repeated command in an event log, not junk. One-off purge tools remain available in `tools/_scratch/` (`purge_scan.py` dry-run, `purge_execute.py`, `dedupe_memories.py`, `dedupe_visual.py`) — git-ignored since 2026-08-13, not deleted.
 
-## T-timeline-index-desync (opened 2026-07-30 — UNDIAGNOSED)
+## T-timeline-index-desync (opened 2026-07-30 — RESOLVED 2026-08-03, root cause never isolated)
+
+> Header corrected 2026-08-13: it read "UNDIAGNOSED" while the body recorded
+> the collection rebuilt and verified at 917/917 readable. "Undiagnosed" is
+> still true of the CAUSE — the rebuild cleared it without anyone finding out
+> why — but the ticket itself is closed, and a header saying otherwise sends
+> the next reader hunting for a live fault.
 
 **Observed**: reading embeddings from `sg_cube_timeline` fails for the whole collection, not for particular rows:
 
