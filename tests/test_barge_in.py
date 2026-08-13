@@ -191,9 +191,17 @@ def test_on_barge_in_calls_stop_speech_and_publishes_interrupt():
     m_stop.assert_called_once()
     m_cmdr.interrupt.assert_called_once()
     m_state.transition_to.assert_called_once()
+    # isinstance against the IMPORTED classes, not type(e).__name__.
+    # A name check passes for a look-alike class defined somewhere else, and
+    # that is not hypothetical here: agents/base.py shadowed
+    # InternalAgentEvent for months, so every _emit() published a class the bus
+    # had no subscriber for and ws_ui had never heard of. The bus dispatches on
+    # identity, so the test has to as well.
     types = [type(e).__name__ for e in bus.published]
-    assert "SpeechInterruptedEvent" in types, f"expected SpeechInterruptedEvent, got {types}"
-    assert "WakeHeard" in types, f"expected WakeHeard also (barge-in IS a wake), got {types}"
+    assert any(isinstance(e, SpeechInterruptedEvent) for e in bus.published), (
+        f"expected SpeechInterruptedEvent, got {types}")
+    assert any(isinstance(e, WakeHeard) for e in bus.published), (
+        f"expected WakeHeard also (barge-in IS a wake), got {types}")
     si = next(e for e in bus.published if isinstance(e, SpeechInterruptedEvent))
     assert si.rms == 1234.5
     print("  [PASS] on_barge_in: stops TTS, transitions state, publishes SpeechInterrupted+WakeHeard")

@@ -32,6 +32,10 @@ def test_center_column_events_are_bridged():
     assert TYPE_MAP[ConfidenceEvent] == "confidence"
     assert TYPE_MAP[ToolStartedEvent] == "tool_started"
     assert TYPE_MAP[ToolFinishedEvent] == "tool_finished"
+    # AIMetricsEvent was imported here and never asserted. It drives the AI Core
+    # panel's live readout, which is one of the always-on surfaces — an unbridged
+    # one reads as a dead backend rather than a missing map entry.
+    assert TYPE_MAP[AIMetricsEvent] == "ai_metrics"
 
 
 def test_events_survive_the_websocket_serializer():
