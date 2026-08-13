@@ -71,7 +71,9 @@ const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | 
   },
 };
 
-function isValidPayload(type: string, payload: unknown): boolean {
+/** Exported for tests only — this is the gate that silently DROPS events, so
+ *  it is the one piece of logic here that most needs asserting. */
+export function isValidPayload(type: string, payload: unknown): boolean {
   const required = REQUIRED_FIELDS[type as UiEventType];
   // Unknown types pass through untouched — the UI never reads them, and
   // dropping them would silently break any future consumer.

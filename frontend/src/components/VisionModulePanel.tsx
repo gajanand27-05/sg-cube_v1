@@ -249,7 +249,7 @@ const HAPTIC_FLASH_MS = 1500;
 /** The backend sends -1 for anything it could not measure, precisely so this
  *  never renders as a real 0. Anything negative or non-finite is "unmeasured"
  *  and comes back as null, which the callers print as an em-dash. */
-function measured(value: number | undefined): number | null {
+export function measured(value: number | undefined): number | null {
   if (value === undefined || !Number.isFinite(value) || value < 0) return null;
   return value;
 }
