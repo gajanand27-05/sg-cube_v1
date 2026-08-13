@@ -52,8 +52,25 @@ EMBED_BREAKER_COOLDOWN_S = 5.0
 _embed_down_until: float = 0.0
 
 
-def _embed_timeout(timeout: float) -> httpx.Timeout:
+def _is_local(url: str) -> bool:
+    return "127.0.0.1" in url or "localhost" in url or "://[::1]" in url
+
+
+def _timeout_for(url: str, timeout: float) -> httpx.Timeout:
+    """Read timeout as asked; connect timeout short only for LOCAL Ollama.
+
+    A loopback connect either lands in single-digit ms or there is nothing
+    listening — but the cloud is over the internet, where half a second is a
+    perfectly ordinary handshake. Applying the local figure to both would turn
+    a slow network into an outage.
+    """
+    if not _is_local(url):
+        return httpx.Timeout(timeout)
     return httpx.Timeout(timeout, connect=EMBED_CONNECT_TIMEOUT_S)
+
+
+def _embed_timeout(timeout: float) -> httpx.Timeout:
+    return _timeout_for(BASE_URL, timeout)
 
 
 def _embed_breaker_open() -> bool:
@@ -122,9 +139,10 @@ async def generate(
     if json_mode:
         payload["format"] = "json"
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    endpoint = _endpoint(base_url)
+    async with httpx.AsyncClient(timeout=_timeout_for(endpoint, timeout)) as client:
         r = await client.post(
-            f"{_endpoint(base_url)}/api/chat", json=payload, headers=_headers(api_key)
+            f"{endpoint}/api/chat", json=payload, headers=_headers(api_key)
         )
         r.raise_for_status()
         return r.json()["message"]["content"]
@@ -165,9 +183,10 @@ def generate_sync(
     if json_mode:
         payload["format"] = "json"
 
-    with httpx.Client(timeout=timeout) as client:
+    endpoint = _endpoint(base_url)
+    with httpx.Client(timeout=_timeout_for(endpoint, timeout)) as client:
         r = client.post(
-            f"{_endpoint(base_url)}/api/chat", json=payload, headers=_headers(api_key)
+            f"{endpoint}/api/chat", json=payload, headers=_headers(api_key)
         )
         r.raise_for_status()
         return r.json()["message"]["content"]
@@ -195,9 +214,10 @@ async def chat_stream(
     if json_mode:
         payload["format"] = "json"
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    endpoint = _endpoint(base_url)
+    async with httpx.AsyncClient(timeout=_timeout_for(endpoint, timeout)) as client:
         async with client.stream(
-            "POST", f"{_endpoint(base_url)}/api/chat", json=payload,
+            "POST", f"{endpoint}/api/chat", json=payload,
             headers=_headers(api_key),
         ) as resp:
             resp.raise_for_status()
