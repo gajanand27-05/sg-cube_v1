@@ -53,18 +53,38 @@ def test_ocr_frame_empty_bytes():
     assert result == []
 
 
-@pytest.mark.skip(reason="needs Tesseract binary installed")
 def test_ocr_frame_real_image():
-    """Smoke test against a known image. Skip on CI."""
+    """A real photograph with no signage in it.
+
+    Was an unconditional @pytest.mark.skip — permanently off regardless of
+    whether Tesseract existed, so installing the engine did not bring it back.
+    It also asserted only isinstance(), which an empty list satisfies, while
+    its comment claimed "we expect zero lines". Now it is gated on the actual
+    resolver and asserts the contract it can honestly make.
+
+    Observed 2026-08-13 with Tesseract 5.4.0: this photo yields one spurious
+    line, 'al j' at confidence 0.56 — just over the 50 cutoff. Recorded rather
+    than tuned away: raising the threshold on a single sample risks dropping
+    genuine low-contrast signage, which is the failure that actually matters.
+    """
     from pathlib import Path
+
+    from backend.core.vision.ocr_reader import tesseract_path
+
+    if tesseract_path() is None:
+        pytest.skip("Tesseract binary not installed")
 
     pt = Path(__file__).parents[1] / ".venv/Lib/site-packages/ultralytics/assets/zidane.jpg"
     if not pt.exists():
-        return  # assets not installed
+        pytest.skip("ultralytics assets not installed")
+
     lines = ocr_frame(pt.read_bytes())
-    # The asset image has no text, so we expect zero lines.
-    assert all(isinstance(l, OCRLine) for l in lines)
-    assert all(isinstance(l.text, str) for l in lines)
+    assert all(isinstance(line, OCRLine) for line in lines)
+    assert all(isinstance(line.text, str) and line.text.strip() for line in lines)
+    assert all(0.0 < line.confidence <= 1.0 for line in lines), \
+        [(line.text, line.confidence) for line in lines]
+    # A photo of two footballers must not read as a page of text.
+    assert len(lines) <= 3, f"unexpected volume of text from a text-free photo: {lines}"
 
 
 def test_ocr_direction_center_boundary():

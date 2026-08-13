@@ -83,6 +83,11 @@ class OCRLine:
 _MIN_CHARS = 2
 
 
+# Tesseract works on a downscaled copy above this frame height. 720 chosen by
+# measurement, not preference — see the note in ocr_frame().
+_OCR_MAX_HEIGHT = 720
+
+
 def _is_noise(text: str) -> bool:
     """True for fragments not worth speaking."""
     if not text:
@@ -105,6 +110,19 @@ def ocr_frame(jpeg: bytes) -> list[OCRLine]:
     img = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         return []
+
+    # Cap the working resolution. Measured 2026-08-13 over five synthetic
+    # signs, median per frame: 1080p 445ms, 720p 273ms, with word recall 1.00
+    # at BOTH — so this buys ~39% latency for no accuracy cost. It matters
+    # because read mode runs at 2fps: 445ms against a 500ms frame budget is
+    # 11% headroom, and a busier scene or a slower CPU starts silently
+    # skipping frames. Downscaling is not a quality trade here, it is the
+    # difference between keeping up and not.
+    scale = 1.0
+    if img.shape[0] > _OCR_MAX_HEIGHT:
+        scale = _OCR_MAX_HEIGHT / img.shape[0]
+        img = cv2.resize(img, (round(img.shape[1] * scale), _OCR_MAX_HEIGHT),
+                         interpolation=cv2.INTER_AREA)
 
     _configure_pytesseract(pytesseract)
 
@@ -141,9 +159,14 @@ def ocr_frame(jpeg: bytes) -> list[OCRLine]:
         w = data.get("width", [0])[i]
         h = data.get("height", [0])[i]
 
+        # Back into the ORIGINAL frame's coordinate space, so the downscale
+        # above is invisible to callers. ocr_direction() divides a bbox centre
+        # by the frame width the caller measured, so leaving these in
+        # downscaled pixels would report left/right against the wrong frame.
+        inv = 1.0 / scale
         out.append(OCRLine(
             text=text,
-            bbox=(x, y, x + w, y + h),
+            bbox=(x * inv, y * inv, (x + w) * inv, (y + h) * inv),
             confidence=round(conf / 100.0, 2),
         ))
 

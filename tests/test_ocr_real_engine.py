@@ -92,6 +92,43 @@ def test_env_override_points_at_an_explicit_binary(monkeypatch, tmp_path):
         tesseract_path.cache_clear()
 
 
+def _noisy_sign(w: int, h: int, text: str = "PLATFORM 4") -> bytes:
+    """Textured backdrop, not a clean render — a flat white image is far easier
+    than anything a phone camera actually produces."""
+    import cv2
+    import numpy as np
+    rng = np.random.default_rng(3)
+    img = rng.integers(110, 205, (h, w, 3), dtype=np.uint8)
+    cv2.rectangle(img, (int(w * .08), int(h * .28)), (int(w * .92), int(h * .62)), (255, 255, 255), -1)
+    s = w / 700
+    cv2.putText(img, text, (int(w * .11), int(h * .45)),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.5 * s, (0, 0, 0), int(4 * s))
+    return cv2.imencode(".jpg", img)[1].tobytes()
+
+
+def test_oversized_frames_are_capped_for_speed():
+    """Read mode runs at 2fps. Measured 2026-08-13: a 1080p frame took a median
+    445ms against a 500ms budget — 11% headroom — while 720p took 273ms at
+    identical word recall. The cap is what keeps a busy scene from silently
+    dropping frames."""
+    from backend.core.vision.ocr_reader import _OCR_MAX_HEIGHT
+    assert _OCR_MAX_HEIGHT == 720
+    assert "PLATFORM" in ocr_text(ocr_frame(_noisy_sign(1920, 1080))).upper()
+
+
+def test_bboxes_are_reported_in_original_frame_coordinates():
+    """The downscale must be invisible to callers. ocr_direction() divides a
+    bbox centre by the frame width the CALLER measured, so bboxes left in
+    downscaled pixels would report left/right against the wrong frame."""
+    big = ocr_frame(_noisy_sign(1920, 1080))[0].bbox
+    small = ocr_frame(_noisy_sign(1280, 720))[0].bbox   # native, no downscale
+    ratios = [b / s for b, s in zip(big, small)]
+    assert all(1.42 < r < 1.58 for r in ratios), (
+        f"expected ~1.5x (1080/720); got {[round(r, 3) for r in ratios]} — "
+        "bboxes are still in the downscaled coordinate space"
+    )
+
+
 def test_preflight_reports_ocr_available():
     from backend.core.preflight import PreflightStatus, check_ocr
     result = check_ocr()

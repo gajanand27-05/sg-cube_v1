@@ -1,50 +1,108 @@
 """Spatial audio: pan obstacle alerts left/right.
 
-Tests the speaker panning logic and its integration with obstacle detection.
-Does NOT test actual audio output (hardware-dependent), only the signal path.
+Tests the panning logic and its integration with obstacle detection.
+
+The two speak_panned tests here used to be broken in opposite directions, and
+both are worth remembering:
+
+  * one imported speak_panned, then reimplemented the gain arithmetic inline
+    and asserted its own copy — it would have passed with speak_panned
+    deleted. It also divided per-sample by `np.abs(mono).clip(1)`, so runs
+    where synthesis produced more near-silent samples failed at random; that
+    was the intermittent red in the suite, not a real regression.
+  * the other really did play audio, three times per run, straight to the
+    sound card — while this docstring claimed the file did not touch hardware.
+
+Both now drive the REAL speak_panned with the output stream captured, so the
+assertions are about the buffer the function actually produces.
 """
 import pytest
 
-from backend.core.vision.ocr_reader import OCRLine, ocr_frame, ocr_text, ocr_direction
+
+class _CapturedStream:
+    """Stands in for sd.OutputStream and keeps what would have been played."""
+
+    written: list = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def write(self, buffer):
+        _CapturedStream.written.append((self.kwargs, buffer))
 
 
-# Minimal JPEG SOI + minimal EOI. Tesseract won't parse this, but it
-# satisfies cv2.imdecode and lets us test the data flow.
-_MINIMAL_JPEG = b"\xff\xd8\xff\xe0" + b"x" * 100
+@pytest.fixture()
+def captured_audio(monkeypatch):
+    """No sound card, no 3x real playback per run — just the samples."""
+    import backend.ai_modules.speech.tts_piper as tts
+    _CapturedStream.written = []
+    monkeypatch.setattr(tts.sd, "OutputStream", _CapturedStream)
+    return _CapturedStream.written
 
 
-def test_tts_panned_generates_stereo():
-    """speak_panned produces stereo output with correct channel gains."""
+@pytest.mark.parametrize("direction, expect_left, expect_right", [
+    ("left", 1.0, 0.25),
+    ("right", 0.25, 1.0),
+    ("straight", 0.707, 0.707),
+])
+def test_speak_panned_applies_the_right_channel_gains(captured_audio, direction,
+                                                      expect_left, expect_right):
+    """Drives the real speak_panned and measures the buffer it emitted.
+
+    Peak amplitude per channel, not a per-sample ratio: silence divided by
+    silence is arbitrary, which is what made the old version flaky."""
     import numpy as np
-    from backend.ai_modules.speech.tts_piper import speak_panned, _get_voice
+    from backend.ai_modules.speech.tts_piper import speak_panned
 
-    voice = _get_voice()
-    chunks = list(voice.synthesize("test"))
-    mono = np.concatenate([c.audio_int16_array for c in chunks]).astype(np.float32)
-    rate = chunks[0].sample_rate
+    result = speak_panned("test", direction)
+    assert result["status"] == "finished", result
+    assert captured_audio, "speak_panned never wrote any audio"
 
-    for direction, expected_left, expected_right in [
-        ("left", 1.0, 0.25), ("right", 0.25, 1.0), ("straight", 0.707, 0.707),
-    ]:
-        stereo = np.empty((len(mono), 2), dtype=np.int16)
-        stereo[:, 0] = np.clip(mono * expected_left, -32768, 32767)
-        stereo[:, 1] = np.clip(mono * expected_right, -32768, 32767)
+    kwargs, buffer = captured_audio[-1]
+    assert kwargs["channels"] == 2, f"not stereo: {kwargs}"
+    assert buffer.ndim == 2 and buffer.shape[1] == 2, f"shape {buffer.shape}"
 
-        # Verify gains are applied correctly
-        l_ratio = np.mean(np.abs(stereo[:, 0].astype(float)) / np.abs(mono).clip(1))
-        r_ratio = np.mean(np.abs(stereo[:, 1].astype(float)) / np.abs(mono).clip(1))
-        assert abs(l_ratio - expected_left) < 0.01, f"Left gain {l_ratio} vs {expected_left} for {direction}"
-        assert abs(r_ratio - expected_right) < 0.01, f"Right gain {r_ratio} vs {expected_right} for {direction}"
+    peak_l = float(np.abs(buffer[:, 0]).max())
+    peak_r = float(np.abs(buffer[:, 1]).max())
+    assert peak_l > 0 and peak_r > 0, "one channel is entirely silent"
+
+    # Compare the CHANNEL BALANCE, which is what panning actually means and is
+    # independent of how loud this particular utterance came out.
+    assert peak_r / peak_l == pytest.approx(expect_right / expect_left, rel=0.05), (
+        f"{direction}: peak L={peak_l:.0f} R={peak_r:.0f} "
+        f"(ratio {peak_r / peak_l:.3f}, expected {expect_right / expect_left:.3f})"
+    )
 
 
-def test_tts_panned_is_stereo():
-    """speak_panned returns channel info matching direction."""
+def test_speak_panned_reports_the_direction_it_used(captured_audio):
     from backend.ai_modules.speech.tts_piper import speak_panned
 
     for direction in ("left", "right", "straight"):
         result = speak_panned("test", direction)
         assert result["status"] == "finished", f"Failed for {direction}: {result}"
         assert result["pan"] == direction
+
+
+def test_a_left_alert_is_louder_on_the_left(captured_audio):
+    """The whole point, stated once in plain terms: the ear nearer the hazard
+    hears more. A sign flip here would pan every warning the wrong way and be
+    invisible to a gains-only assertion."""
+    import numpy as np
+    from backend.ai_modules.speech.tts_piper import speak_panned
+
+    speak_panned("person on your left", "left")
+    _, left_buffer = captured_audio[-1]
+    speak_panned("person on your right", "right")
+    _, right_buffer = captured_audio[-1]
+
+    assert np.abs(left_buffer[:, 0]).max() > np.abs(left_buffer[:, 1]).max()
+    assert np.abs(right_buffer[:, 1]).max() > np.abs(right_buffer[:, 0]).max()
 
 
 def test_obstacle_direction_reaches_pan():
