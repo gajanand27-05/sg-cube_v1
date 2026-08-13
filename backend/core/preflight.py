@@ -78,12 +78,18 @@ def check_ws_bridge() -> PreflightCheck:
     canvas/agent/tts event) cannot happen — the setup path is reachable
     and idempotent."""
     try:
+        from backend.core.events import get_bus
         from backend.server.ws_ui import get_manager
         mgr = get_manager()
         mgr._setup_event_bridge()  # idempotent
-        if not mgr._bridge_setup:
+        # Stronger than the old "a bool got set": assert the bridge is on the
+        # bus publishers actually use. A bridge subscribed to a DISCARDED bus
+        # satisfies any flag check while dropping every event, which is the
+        # same dead-bridge outcome this check exists to catch.
+        if mgr._bridged_bus is not get_bus():
             return PreflightCheck("ws_bridge", PreflightStatus.DOWN,
-                                  "_setup_event_bridge ran but flag not set — bus subscription lost")
+                                  "_setup_event_bridge ran but the bridge is not on the "
+                                  "live bus — subscription lost")
         n = len(mgr._connections)
         return PreflightCheck("ws_bridge", PreflightStatus.OK,
                               "event bus → WS subscription active",

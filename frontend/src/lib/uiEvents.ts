@@ -100,6 +100,13 @@ export type STTPartialPayload = {
   is_final: boolean;
 };
 
+export type OcrReadPayload = {
+  /** One line of text recognized in Read mode. */
+  text: string;
+  confidence: number;
+  source: string;
+};
+
 export type TokenStreamPayload = {
   agent_name: string;
   token: string;
@@ -207,6 +214,7 @@ export type UiEventPayloadMap = {
   system_stats: SystemStatsPayload;
   vision_update: VisionUpdatePayload;
   stt_partial: STTPartialPayload;
+  ocr_read: OcrReadPayload;
   token_stream: TokenStreamPayload;
   confidence: ConfidencePayload;
   tool_started: ToolStartedPayload;

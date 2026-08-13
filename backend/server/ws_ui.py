@@ -105,19 +105,24 @@ class UIEventManager:
     def __init__(self):
         self._connections: list[WebSocket] = []
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._bridge_setup = False
+        # The bus instance the bridge is subscribed to, not a bool. A bool
+        # latch means that if the global bus is ever REPLACED — init_event_bus()
+        # constructs a fresh one every call — the bridge stays subscribed to the
+        # discarded instance and every HUD event vanishes, permanently, with
+        # nothing logged. Comparing instances re-subscribes instead.
+        self._bridged_bus = None
 
     def _setup_event_bridge(self):
-        if self._bridge_setup:
-            return
         bus = get_bus()
+        if self._bridged_bus is bus:
+            return
         for event_type in EVENT_TYPES:
             bus.subscribe(event_type, self._broadcast_event)
-        self._bridge_setup = True
+        self._bridged_bus = bus
 
     def _broadcast_event(self, event: Any):
         # Lazy setup on first event
-        if not self._bridge_setup:
+        if self._bridged_bus is not get_bus():
             self._setup_event_bridge()
         wire_type = TYPE_MAP.get(type(event), type(event).__name__)
         data = {
@@ -144,12 +149,18 @@ class UIEventManager:
             self._connections.remove(ws)
 
     async def connect(self, ws: WebSocket):
-        if not self._loop:
+        # Rebind when the stored loop is gone. _broadcast_event gates on
+        # `self._loop.is_running()` and simply returns when it is False, so a
+        # stale loop here silently stops every HUD event forever with nothing
+        # logged on either side. Binding once assumed the process has exactly
+        # one loop for its whole life — true of a plain uvicorn run, false
+        # after a reload and false for any second loop.
+        if self._loop is None or not self._loop.is_running():
             self._loop = asyncio.get_running_loop()
         # Ensure bus→WS bridge exists. _broadcast_event was the only
         # caller and it can't fire until the subscription exists — so this
         # was the reachable path that actually sets it up.
-        if not self._bridge_setup:
+        if self._bridged_bus is not get_bus():
             self._setup_event_bridge()
         await ws.accept()
         self._connections.append(ws)

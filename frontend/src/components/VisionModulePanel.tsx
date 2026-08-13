@@ -332,6 +332,47 @@ function VisionModeHealthRow() {
         {fpsIn} / {fpsOut} fps · det {latency} · drop {dropped} · q {queue} · age{" "}
         {age} · stale {stale}
       </span>
+      <ReadModeTranscript />
+    </div>
+  );
+}
+
+/** What Read mode actually recognized.
+ *
+ *  ocr_read was published by the backend and consumed by nobody — the mode's
+ *  entire output was spoken and otherwise invisible, while navigate has its
+ *  obstacle chips and scan has these health counters. Since the operator
+ *  watching this HUD is usually NOT the person wearing the phone, "what did it
+ *  read" is the one thing they cannot otherwise observe.
+ *
+ *  A listener, not useUiEvent: these are a running transcript, and replaying a
+ *  cached line on remount would show stale text as if it were just read. Lines
+ *  arrive one event each, so the panel keeps the last few. */
+const OCR_LINES_SHOWN = 3;
+
+function ReadModeTranscript() {
+  const [lines, setLines] = useState<{ text: string; confidence: number; at: number }[]>([]);
+
+  useUiEventListener("ocr_read", (p) => {
+    setLines((prev) => [
+      ...prev.slice(-(OCR_LINES_SHOWN - 1)),
+      { text: p.text, confidence: p.confidence, at: Date.now() },
+    ]);
+  });
+
+  if (lines.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-0.5 mt-0.5 min-w-0">
+      <span className="hud-label text-[9px]">Read</span>
+      {lines.map((line) => (
+        <span
+          key={line.at}
+          className="font-mono text-[10px] text-hud-cyan-glow truncate"
+          title={`${line.text} (${Math.round(line.confidence * 100)}% confidence)`}
+        >
+          {line.text}
+        </span>
+      ))}
     </div>
   );
 }

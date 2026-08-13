@@ -57,6 +57,9 @@ const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | 
   // here — VisionModulePanel treats all three as optional.
   vision_update: { description: "string" },
   stt_partial: { text: "string" },
+  // confidence is rendered next to the text, so a missing one would print
+  // "NaN%" rather than degrade — it belongs in the guard, not as optional.
+  ocr_read: { text: "string", confidence: "number" },
   token_stream: { full_content: "string" },
   confidence: { metric_tool_success_rate: "number", metric_memory_recall_pct: "number" },
   tool_started: { tool_name: "string" },

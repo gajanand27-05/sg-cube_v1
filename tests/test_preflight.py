@@ -55,18 +55,47 @@ def test_run_preflight_survives_a_broken_check():
 # ── Individual checks ─────────────────────────────────────────────────
 
 def test_check_ws_bridge_reports_ok_when_setup_ran():
-    """The load-bearing Phase 3 catch. After connect() has ever run
-    (or this check itself), _bridge_setup must be True."""
+    """The load-bearing Phase 3 catch. After connect() has ever run (or this
+    check itself), the bridge must be subscribed to the LIVE bus — not merely
+    have had a flag set, which a bridge attached to a discarded bus also
+    satisfies while dropping every event."""
+    from backend.core.events import get_bus
     from backend.core.preflight import check_ws_bridge, PreflightStatus
     from backend.server.ws_ui import get_manager
-    # Reset the singleton flag to simulate a fresh boot
+    # Unbind to simulate a fresh boot.
     mgr = get_manager()
-    mgr._bridge_setup = False
+    mgr._bridged_bus = None
     result = check_ws_bridge()
     assert result.name == "ws_bridge"
     assert result.status == PreflightStatus.OK, f"expected OK, got {result.status}: {result.message}"
-    assert mgr._bridge_setup, "check should have primed the bridge"
+    assert mgr._bridged_bus is get_bus(), "check should have bridged onto the live bus"
     print("  [PASS] ws_bridge: primes _setup_event_bridge() and reports OK")
+
+
+def test_check_ws_bridge_reports_down_when_bridged_to_a_discarded_bus():
+    """The failure the flag could not express: init_event_bus() builds a new
+    bus every call, so a bridge that latched onto the previous one stays
+    'set up' while every published event goes to an object nobody reads."""
+    from backend.core import events
+    from backend.core.preflight import check_ws_bridge, PreflightStatus
+    from backend.server.ws_ui import get_manager
+
+    mgr = get_manager()
+    original = events.bus
+    try:
+        # Bridge onto the current bus, then swap the global out from under it.
+        mgr._bridged_bus = None
+        assert check_ws_bridge().status == PreflightStatus.OK
+        events.bus = events.AsyncEventBus()
+        # _setup_event_bridge re-binds on the way through, which is the fix —
+        # so the check reports OK *and* the bridge now points at the new bus.
+        result = check_ws_bridge()
+        assert result.status == PreflightStatus.OK, result.message
+        assert mgr._bridged_bus is events.bus, "bridge did not follow the bus swap"
+    finally:
+        events.bus = original
+        mgr._bridged_bus = None
+        check_ws_bridge()
 
 
 def test_check_ws_bridge_reports_down_if_setup_raises():
