@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     # Fast local models
     fast_model: str = "phi3"                    # classification, verification, intent
     embedding_model: str = "nomic-embed-text"   # vector embeddings
+    # How long local Ollama keeps a model resident after a call. Ollama's
+    # default is 5 minutes, after which the next call pays a cold load —
+    # measured on this machine: phi3 5260ms cold vs 107ms warm. phi3 gates
+    # every deep-checked tool, so an idle gap mid-session makes the next
+    # command feel broken. Sized to fit: phi3 3.8GB + nomic 323MB against a
+    # 6GB card leaves ~1.8GB headroom. Local only; the cloud has no concept
+    # of residency.
+    ollama_keep_alive: str = "30m"
     
     # Reasoning / coding models (served by Ollama Cloud — see below)
     reasoning_model: str = "gpt-oss:120b"  # planner, complex logic

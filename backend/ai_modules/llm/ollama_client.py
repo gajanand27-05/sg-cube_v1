@@ -56,6 +56,19 @@ def _is_local(url: str) -> bool:
     return "127.0.0.1" in url or "localhost" in url or "://[::1]" in url
 
 
+def _with_keep_alive(payload: dict, url: str) -> dict:
+    """Keep local models resident between calls.
+
+    Ollama unloads after ~5 minutes idle, and the next call pays a cold load.
+    Measured here: phi3 5260ms cold, 107ms warm — and phi3 gates every
+    deep-checked tool, so a quiet spell makes the following command look
+    broken. No-op for the cloud, which does not have residency.
+    """
+    if _is_local(url):
+        payload = {**payload, "keep_alive": settings.ollama_keep_alive}
+    return payload
+
+
 def _timeout_for(url: str, timeout: float) -> httpx.Timeout:
     """Read timeout as asked; connect timeout short only for LOCAL Ollama.
 
@@ -142,7 +155,8 @@ async def generate(
     endpoint = _endpoint(base_url)
     async with httpx.AsyncClient(timeout=_timeout_for(endpoint, timeout)) as client:
         r = await client.post(
-            f"{endpoint}/api/chat", json=payload, headers=_headers(api_key)
+            f"{endpoint}/api/chat", json=_with_keep_alive(payload, endpoint),
+            headers=_headers(api_key),
         )
         r.raise_for_status()
         return r.json()["message"]["content"]
@@ -186,7 +200,8 @@ def generate_sync(
     endpoint = _endpoint(base_url)
     with httpx.Client(timeout=_timeout_for(endpoint, timeout)) as client:
         r = client.post(
-            f"{endpoint}/api/chat", json=payload, headers=_headers(api_key)
+            f"{endpoint}/api/chat", json=_with_keep_alive(payload, endpoint),
+            headers=_headers(api_key),
         )
         r.raise_for_status()
         return r.json()["message"]["content"]
@@ -217,7 +232,7 @@ async def chat_stream(
     endpoint = _endpoint(base_url)
     async with httpx.AsyncClient(timeout=_timeout_for(endpoint, timeout)) as client:
         async with client.stream(
-            "POST", f"{endpoint}/api/chat", json=payload,
+            "POST", f"{endpoint}/api/chat", json=_with_keep_alive(payload, endpoint),
             headers=_headers(api_key),
         ) as resp:
             resp.raise_for_status()
@@ -247,7 +262,8 @@ def embed(text: str, model: str | None = None, timeout: float = 10.0, **kwargs: 
     model = model or settings.embedding_model
     try:
         with httpx.Client(timeout=_embed_timeout(timeout)) as client:
-            r = client.post(f"{BASE_URL}/api/embeddings", json={"model": model, "prompt": text})
+            r = client.post(f"{BASE_URL}/api/embeddings",
+                            json=_with_keep_alive({"model": model, "prompt": text}, BASE_URL))
             r.raise_for_status()
             vec = r.json()["embedding"]
     except (httpx.ConnectError, httpx.ConnectTimeout):
@@ -267,7 +283,8 @@ async def aembed(text: str, model: str | None = None, timeout: float = 10.0, **k
     model = model or settings.embedding_model
     try:
         async with httpx.AsyncClient(timeout=_embed_timeout(timeout)) as client:
-            r = await client.post(f"{BASE_URL}/api/embeddings", json={"model": model, "prompt": text})
+            r = await client.post(f"{BASE_URL}/api/embeddings",
+                                   json=_with_keep_alive({"model": model, "prompt": text}, BASE_URL))
             r.raise_for_status()
             vec = r.json()["embedding"]
     except (httpx.ConnectError, httpx.ConnectTimeout):
