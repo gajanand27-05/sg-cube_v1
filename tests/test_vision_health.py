@@ -230,6 +230,40 @@ def test_event_fields_never_fake_a_zero(health):
     assert fields["detector_latency_ms"] == -1.0
 
 
+def test_an_unreadable_ingestor_is_unknown_drops_not_zero_drops():
+    """_ingestor_dropped() returned 0 when the ingestor could not be read,
+    which is the single most reassuring number this field can carry: an
+    unreachable ingestor rendered as "drop 0", i.e. a perfectly healthy stream,
+    on the panel someone checks precisely because the video looks wrong. Its
+    neighbour _tts_queue_depth gets this right and says so in a comment.
+    """
+    import backend.core.vision.vision_health as vh
+
+    assert vh._ingestor_dropped() is not None      # normal path still reports
+
+    class _Boom:
+        @property
+        def stats(self):
+            raise RuntimeError("ingestor gone")
+
+    import backend.core.vision.frame_ingest as fi
+    original = fi.frame_ingestor
+    fi.frame_ingestor = _Boom()
+    try:
+        assert vh._ingestor_dropped() is None, "unreadable ingestor must be unknown, not 0"
+    finally:
+        fi.frame_ingestor = original
+
+
+def test_unknown_drop_count_crosses_the_wire_as_the_sentinel(health):
+    """None has to survive event_fields() as -1 like every other unmeasured
+    value — the HUD's measured() gate turns that into an em-dash, while a 0
+    would render as a real count."""
+    from dataclasses import replace
+    snap = replace(health.snapshot(), dropped_frames=None)
+    assert snap.event_fields()["dropped_frames"] == -1
+
+
 def test_a_negative_frame_age_is_a_reading_not_an_absence(health):
     """phone_session.frame_age_ms deliberately refuses to clamp a negative age:
     a persistently negative one means the clock-offset estimate has the wrong

@@ -44,23 +44,35 @@ class ContextBuilder:
         # 4. Screen memory (visual RAG)
         screen_task = asyncio.to_thread(self._get_screen_context, request.user_intent)
         
-        # 5. Active window + running apps (sync, fast)
+        # 5. Running apps + visual objects.
+        #
+        # These ran synchronously here under the comment "(sync, fast)", which
+        # is why nobody re-checked them. Measured 2026-08-13 on this machine:
+        # _get_running_apps 13ms cold / 1.7ms warm (psutil walks every
+        # process), _get_screen_objects 115ms cold / 15ms warm (a Chroma
+        # query). Inline, that whole cost was serialized onto
+        # wake->first_token — the hop that decides how fast the assistant
+        # feels — while the four memory tasks above were already in flight.
+        # Same to_thread treatment as those; no behaviour change, just
+        # overlapped.
+        apps_task = asyncio.to_thread(self._get_running_apps)
+        objects_task = asyncio.to_thread(self._get_screen_objects)
+
+        # 6. Active window — genuinely fast (~0.2ms), not worth a thread hop.
         active_window = self._get_active_window()
-        running_apps = self._get_running_apps()
-        
-        # 6. Visual objects from latest vision
-        screen_objects = self._get_screen_objects()
-        
+
         # 7. Tools & capabilities
         tools = list(REGISTRY.values())
         capabilities = capability_registry.all()
-        
+
         # Await all
-        stm_context, ltm_context, timeline_context, screen_context = await asyncio.gather(
+        (stm_context, ltm_context, timeline_context, screen_context,
+         running_apps, screen_objects) = await asyncio.gather(
             stm_task, ltm_task, timeline_task, screen_task,
+            apps_task, objects_task,
             return_exceptions=True
         )
-        
+
         # Handle exceptions gracefully
         if isinstance(stm_context, Exception):
             log.warning(f"STM collection failed: {stm_context}")
@@ -74,6 +86,14 @@ class ContextBuilder:
         if isinstance(screen_context, Exception):
             log.warning(f"Screen context failed: {screen_context}")
             screen_context = []
+        # Both helpers swallow their own exceptions and return empty, so a
+        # gather failure here means something they did not anticipate.
+        if isinstance(running_apps, Exception):
+            log.warning(f"Running-apps collection failed: {running_apps}")
+            running_apps = []
+        if isinstance(screen_objects, Exception):
+            log.warning(f"Screen-objects collection failed: {screen_objects}")
+            screen_objects = []
         
         return AgentContext(
             user_intent=request.user_intent,

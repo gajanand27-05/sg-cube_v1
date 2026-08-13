@@ -55,8 +55,10 @@ class VisionHealthSnapshot:
     detector_latency_ms: float | None
     # Pending TTS sentences. None when no turn has ever built a queue.
     tts_queue_depth: int | None
-    # Frames the ingestor threw away to hold max_fps (cumulative).
-    dropped_frames: int
+    # Frames the ingestor threw away to hold max_fps (cumulative). None when
+    # the ingestor could not be read at all — which is NOT the same as zero
+    # drops, and this module exists to keep those two apart.
+    dropped_frames: int | None
     # End-to-end frame age: server receive time - phone capture time. None
     # until the phone sends a capture timestamp.
     frame_age_ms: float | None
@@ -88,7 +90,7 @@ class VisionHealthSnapshot:
                 self.detector_latency_ms if self.detector_latency_ms is not None else -1.0
             ),
             "tts_queue_depth": self.tts_queue_depth if self.tts_queue_depth is not None else -1,
-            "dropped_frames": self.dropped_frames,
+            "dropped_frames": self.dropped_frames if self.dropped_frames is not None else -1,
             "mode": self.mode or "idle",
             # A negative frame age is a genuine reading (wrong-sign clock
             # offset), so the -1 sentinel cannot carry "unmeasured" here on its
@@ -242,12 +244,21 @@ def tts_queue_depth() -> int | None:
         return None
 
 
-def _ingestor_dropped() -> int:
+def _ingestor_dropped() -> int | None:
+    """Frames the ingestor threw away, or None if it could not be read.
+
+    Returned 0 on failure until 2026-08-13, which broke this module's one rule
+    the same way `_tts_queue_depth` above is careful not to: 0 is the most
+    reassuring number this field can carry. An unreachable ingestor rendered as
+    "drop 0" reads as a perfectly healthy stream, so the failure was not merely
+    hidden — it was disguised as good news, on the panel someone would check
+    precisely because the video looked wrong.
+    """
     try:
         from backend.core.vision.frame_ingest import frame_ingestor
         return int(frame_ingestor.stats["frames_dropped"])
     except Exception:
-        return 0
+        return None
 
 
 # One pipeline per process, same shape as frame_ingestor / detection_runner.
