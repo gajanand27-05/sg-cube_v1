@@ -436,7 +436,7 @@ Reads changed too, and this is a quiet improvement: Chroma calls the embedding f
 
 Before closing: `tools/memory_health.py` must report `zero_vectors=0`. Note the repair needs the embedding backend *up and staying up* — a run that half-fails re-poisons the rows it touches. Verified 2026-07-30 that local Ollama answers a real `embed()` (768 dims, norm 22.8), but that is a point-in-time check, not a guarantee.
 
-> **RESOLVED 2026-08-03.** `tools/memory_health.py` reports clean across all three collections: `sg_cube_memories` 6 rows / 0 zero vectors, `sg_cube_visual` 286 / 0, `sg_cube_timeline` 917 / 0 (embeddings readable again — see T-timeline-index-desync). The repair was done with the one-off tools in `tools/` (`purge_scan.py`, `purge_execute.py`, `dedupe_memories.py`, `dedupe_visual.py`), which were left in the tree as the documented procedure.
+> **RESOLVED 2026-08-03.** `tools/memory_health.py` reports clean across all three collections: `sg_cube_memories` 6 rows / 0 zero vectors, `sg_cube_visual` 286 / 0, `sg_cube_timeline` 917 / 0 (embeddings readable again — see T-timeline-index-desync). The repair was done with the one-off tools now in `tools/_scratch/` (`purge_scan.py`, `purge_execute.py`, `dedupe_memories.py`, `dedupe_visual.py`), kept verbatim as the documented procedure. They were moved out of `tools/` on 2026-08-13 (git-ignored, not deleted) so that directory shows only maintained utilities — see `tools/_scratch/README.md`.
 
 ## T-memory-duplicate-rows (opened 2026-07-30 — NOT FIXED, recorded only)
 
@@ -470,7 +470,7 @@ Two caveats on that: the HTTP `/chat` and proactive paths reach Commander *witho
 
 **Baseline was 1054 rows when handed over and is 1058 now.** The growth is this session's own verification turns — every real Brain turn writes one `user_query` row. Worth knowing before the repair: probing the voice path inflates the very table being repaired. `sg_cube_memories` (37) and `sg_cube_visual` (209) are unchanged.
 
-> **RESOLVED 2026-08-03** — purge-and-merge executed. `sg_cube_memories`: 37 → 6 rows (0 duplicates), `sg_cube_visual`: 306 → 286 (0 duplicates), `sg_cube_timeline`: 1058 → 917. The 5 recorded hallucination patterns are all gone (0 remaining each); the surviving `"what time is it"` rows are a legitimate repeated command in an event log, not junk. One-off purge tools remain in `tools/` (`purge_scan.py` dry-run, `purge_execute.py`, `dedupe_memories.py`, `dedupe_visual.py`).
+> **RESOLVED 2026-08-03** — purge-and-merge executed. `sg_cube_memories`: 37 → 6 rows (0 duplicates), `sg_cube_visual`: 306 → 286 (0 duplicates), `sg_cube_timeline`: 1058 → 917. The 5 recorded hallucination patterns are all gone (0 remaining each); the surviving `"what time is it"` rows are a legitimate repeated command in an event log, not junk. One-off purge tools remain available in `tools/_scratch/` (`purge_scan.py` dry-run, `purge_execute.py`, `dedupe_memories.py`, `dedupe_visual.py`) — git-ignored since 2026-08-13, not deleted.
 
 ## T-timeline-index-desync (opened 2026-07-30 — UNDIAGNOSED)
 
