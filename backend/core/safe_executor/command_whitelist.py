@@ -395,11 +395,11 @@ def handle_close_app(intent: Intent) -> dict:
     return {"status": "error", "reason": msg}
 
 
-def handle_get_time(_intent: Intent) -> dict:
+def handle_get_time(intent: Intent) -> dict:  # noqa: ARG001 — name is the contract
     return {"status": "success", "message": datetime.now().strftime("%I:%M %p")}
 
 
-def handle_unknown(_intent: Intent) -> dict:
+def handle_unknown(intent: Intent) -> dict:  # noqa: ARG001 — name is the contract
     return {"status": "blocked", "reason": "intent action is 'unknown'"}
 
 
@@ -511,6 +511,11 @@ def handle_agent_complete(intent: Intent) -> dict:
     return {"status": "success", "message": spoken}
 
 
+# Every handler's single parameter MUST be named `intent`: executor.execute()
+# dispatches through runtime.run_tool(..., {"intent": intent}), which calls
+# func(**args). A `_intent` param (the usual "unused" spelling) raises
+# TypeError and turns the whole action into a status="error" result —
+# get_time and unknown were both dead this way.
 HANDLERS = {
     "open_app": handle_open_app,
     "close_app": handle_close_app,

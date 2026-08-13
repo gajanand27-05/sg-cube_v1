@@ -10,8 +10,11 @@ router = APIRouter(prefix="/execute", tags=["execute"])
 
 
 @router.post("")
-def execute_endpoint(
+async def execute_endpoint(
     intent: Intent,
     _user: Annotated[dict, Depends(get_any_user)],
 ):
-    return do_execute(intent).model_dump()
+    # do_execute is a coroutine function. A sync handler here returned the
+    # un-awaited coroutine, so .model_dump() raised AttributeError and every
+    # POST /execute 500'd. Same shape was live in routes/voice.py.
+    return (await do_execute(intent)).model_dump()

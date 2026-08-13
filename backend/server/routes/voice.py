@@ -148,7 +148,7 @@ async def process_endpoint(
 
         # 3. Execute
         t2 = time.perf_counter()
-        exec_result = do_execute(router_result.intent)
+        exec_result = await do_execute(router_result.intent)
         exec_ms = int((time.perf_counter() - t2) * 1000)
 
         # 4. Speak response
