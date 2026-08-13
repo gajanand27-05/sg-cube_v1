@@ -4,6 +4,8 @@ import logging
 import sys
 from pathlib import Path
 
+import pytest
+
 # Ensure project root is on sys.path
 _project_root = Path(__file__).resolve().parents[1]
 if str(_project_root) not in sys.path:
@@ -70,14 +72,17 @@ def test_phase_c1_transcribe_array_exists():
 
 
 def test_phase_c1_silero_vad_importable():
-    """silero-vad should be importable."""
-    try:
-        import torch
-        import silero_vad
-        assert True
-        print("  [PASS] Phase C1: silero-vad importable")
-    except ImportError:
-        print("  [SKIP] Phase C1: silero-vad not installed (optional dep)")
+    """silero-vad should be importable.
+
+    Was `assert True` inside a try, printing "[SKIP]" on ImportError — so it
+    PASSED whether or not the dependency existed, while its name claimed the
+    opposite. importorskip reports a missing optional dep as an actual skip,
+    and lets a genuinely broken install fail.
+    """
+    pytest.importorskip("torch", reason="optional dep for streaming STT")
+    pytest.importorskip("silero_vad", reason="optional dep for streaming STT")
+    from silero_vad import load_silero_vad
+    assert callable(load_silero_vad)
 
 
 # ── Phase C2: Streaming TTS with Interrupt ───────────────────────────
@@ -285,16 +290,23 @@ def test_phase_e_mcp_server_creation():
 
 
 def test_phase_e_mcp_app_mounted():
-    """MCP app should be mountable in FastAPI."""
+    """MCP app should be mountable in FastAPI.
+
+    Previously computed `has_mcp` and then printed PASS or SKIP without ever
+    asserting, so it passed whether or not MCP was mounted — a green test for
+    a claim it never checked. Now it skips honestly when fastmcp is absent and
+    asserts the mount when it is present.
+    """
+    pytest.importorskip("fastmcp", reason="MCP is an optional integration")
     from backend.server.main import app
-    has_mcp = any(
-        "/mcp" in (getattr(r, "path", "") or getattr(r, "prefix", ""))
-        for r in app.routes
+    mounted = [
+        r for r in app.routes
+        if "/mcp" in (getattr(r, "path", "") or getattr(r, "prefix", ""))
+    ]
+    assert mounted, (
+        "fastmcp is installed but no /mcp route is mounted — the integration "
+        "is present and unreachable"
     )
-    if has_mcp:
-        print("  [PASS] Phase E: MCP mounted in FastAPI")
-    else:
-        print("  [SKIP] Phase E: MCP not mounted (fastmcp may not be installed)")
 
 
 # ── Phase F: Games & Personality ─────────────────────────────────────

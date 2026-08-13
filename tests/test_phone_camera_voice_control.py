@@ -9,6 +9,7 @@ boundary is the part that actually breaks.
 import asyncio
 import json
 import threading
+import time
 
 import pytest
 from fastapi import FastAPI
@@ -234,12 +235,25 @@ def test_ocr_read_groups_lines(client, monkeypatch):
 
 
 def test_switch_to_read_mode(client):
-    """Phone should receive mode change command."""
+    """A mode_change over the phone socket must actually change the session mode.
+
+    This asserted nothing at all until 2026-08-13: it sent the message, read
+    one frame off the socket and returned, so it passed whether or not the
+    mode changed — a green test for the exact behaviour read mode depends on.
+    """
     with client.websocket_connect("/ws/phone_stream") as ws:
         ws.send_bytes(JPEG)
         ws.send_text(json.dumps({"type": "mode_change", "mode": "read"}))
         # time_sync arrives first on connect, skip past it
         json.loads(ws.receive_text())
+
+        session = next(iter(registry._sessions))   # a set, not a dict
+        deadline = time.monotonic() + 5.0
+        while session.mode != "read" and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert session.mode == "read", (
+            f"session still in {session.mode!r} after a mode_change to 'read'"
+        )
 
 
 def test_read_mode_continuous_ocr(client, monkeypatch):
