@@ -183,11 +183,10 @@ class CommanderAgent:
                     # tool_calls
                     calls = content if isinstance(content, list) else content.get("tool_calls", [content])
                     # B. Guardian Stage (Verification)
-                    # Ponytail-fix: GuardianAgent.verify_plan signature is (user_query, calls, request_id)
-                    # — passes exactly 3 args. The previous extra `agent_context` positional raised
-                    # TypeError on every planning iteration, so the planner never reached the operator
-                    # stage for LLM-survivable tool picks.
-                    valid_calls, pending_calls, errors = await self.guardian.verify_plan(text, calls, request_id)
+                    # verify_plan signature is (user_query, calls, request_id, agent_context) — the
+                    # fourth arg carries metadata (trigger_source) that the verifier's tier gate uses
+                    # to require confirmation on non-explicit-wake turns.
+                    valid_calls, pending_calls, errors = await self.guardian.verify_plan(text, calls, request_id, agent_context)
 
                     if errors:
                         log.warning(f"Commander: Guardian rejected parts of the plan: {errors}")

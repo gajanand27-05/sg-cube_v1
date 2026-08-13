@@ -288,6 +288,7 @@ class WakeWordListener:
                             trigger_label = f"wake: {partial!r} (rms={rms:.0f})"
                             self.recognizer.Reset()
                             empty_in_a_row = 0
+                            state_manager._voice_trigger_source = "wake"
                         elif in_followup and _has_followup_content(partial):
                             # T-wake-word-executes-ambient-audio item 2: gate the
                             # follow-up window on CONTENT, not loudness. Near-silence
@@ -298,6 +299,7 @@ class WakeWordListener:
                             trigger = True
                             trigger_label = f"followup: {partial!r} (rms={rms:.0f})"
                             initial_audio = [data]
+                            state_manager._voice_trigger_source = "followup"
                             self.recognizer.Reset()
 
                 except Exception:
@@ -313,6 +315,7 @@ class WakeWordListener:
                     is_barge_in = True
                     trigger_label = f"barge-in (rms={rms:.0f})"
                     initial_audio = [data]
+                    state_manager._voice_trigger_source = "barge_in"
 
                 if not trigger:
                     continue

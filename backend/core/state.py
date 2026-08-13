@@ -30,6 +30,10 @@ class StateMachine:
 
     def __init__(self):
         self._current_state = AssistantState.IDLE
+        # How the most recent voice turn was triggered: "wake", "followup",
+        # "barge_in", or None (text/proactive path). Set by trigger.py callbacks
+        # before handle_wake fires, cleared after the verifier reads it.
+        self._voice_trigger_source: str | None = None
 
     @property
     def current(self) -> AssistantState:

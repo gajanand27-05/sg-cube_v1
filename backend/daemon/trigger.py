@@ -460,6 +460,11 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
             dogfooding_ledger.record_command(outcome, latency_ms)
         except Exception:
             pass
+        # Clear trigger source after it's consumed — prevents leakage into
+        # the next turn. The verifier reads state_manager._voice_trigger_source
+        # during _process_and_execute (above); by the time we reach finally,
+        # it has been read or is no longer needed.
+        state_manager._voice_trigger_source = None
 
 
 from backend.daemon.ui_events import ProactiveEvent

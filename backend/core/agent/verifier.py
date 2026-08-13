@@ -5,6 +5,7 @@ from typing import Any
 
 from backend.ai_modules.llm import get_provider
 from backend.ai_modules.llm.routing import TaskType
+from backend.core.state import manager as state_manager
 from backend.core.tools.registry import REGISTRY, CapabilityTier, SecurityLevel, _resolve_name
 
 log = logging.getLogger(__name__)
@@ -154,16 +155,22 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
     if tier == CapabilityTier.READONLY:
         return VerificationResult(True, reasoning=reasoning)
 
+    # T-wake-word-executes-ambient-audio item 3: trusted SYSTEM_WRITE bypasses
+    # confirmation on explicit-wake turns, but barge-in/follow-up turns must
+    # still confirm — a mis-transcribed ambient word could otherwise execute
+    # any trusted tool without the user knowing. "wake" and None (text path)
+    # are the only cases that honor the trusted flag.
     is_trusted = bool(getattr(tool_obj, "trusted", False))
-    if tier == CapabilityTier.SYSTEM_WRITE and is_trusted:
+    is_explicit_trigger = state_manager._voice_trigger_source in (None, "wake")
+    if tier == CapabilityTier.SYSTEM_WRITE and is_trusted and is_explicit_trigger:
         obs_engine.report_ai_quality(request_id, 100.0, "System-write on trusted allowlist")
         return VerificationResult(True, reasoning=reasoning)
 
     # ── 4. Deep verifier (LLM secondary check) ───────────────────────
-    # Reached only for untrusted SYSTEM_WRITE and DESTRUCTIVE — both
-    # unconditionally trigger the deep check. Confidence, multi-step,
-    # and legacy SecurityLevel conditions used to gate this earlier;
-    # tier now dominates. Trusted tools never get here.
+    # Reached for untrusted SYSTEM_WRITE, DESTRUCTIVE, and trusted SYSTEM_WRITE
+    # on non-explicit-wake turns (barge-in/followup). All of these unconditionally
+    # trigger the deep check. Confidence, multi-step, and legacy SecurityLevel
+    # conditions used to gate this earlier; tier now dominates.
     log.info(f"Triggering deep verification for {resolved!r} (conf={conf_score}, multi={is_multi_step}, tier={tier.value})")
     if not await _secondary_check(user_query, resolved, args, reasoning):
         obs_engine.report_ai_quality(request_id, 20.0, "Secondary check failed")
@@ -182,6 +189,8 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
         obs_engine.report_ai_quality(request_id, 100.0, "Destructive tier — always confirm")
         return VerificationResult(True, reasoning=reasoning, needs_confirmation=True, is_critical=True)
 
-    # Untrusted SYSTEM_WRITE — READONLY and trusted paths already returned above.
+    # System-write that survived the deep check: untrusted, or trusted from
+    # a non-explicit-wake turn (barge-in/followup). READONLY and explicitly-woken
+    # trusted paths already returned above.
     obs_engine.report_ai_quality(request_id, 100.0, "System-write tier — confirm")
     return VerificationResult(True, reasoning=reasoning, needs_confirmation=True)

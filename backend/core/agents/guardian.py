@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 from backend.core.agent.verifier import verify as verify_call
 from backend.core.agents.base import BaseInternalAgent
@@ -10,7 +10,7 @@ class GuardianAgent(BaseInternalAgent):
     def __init__(self):
         super().__init__("Guardian")
 
-    async def verify_plan(self, user_query: str, calls: List[dict], request_id: str) -> Tuple[List[dict], List[dict], List[str]]:
+    async def verify_plan(self, user_query: str, calls: List[dict], request_id: str, agent_context: Any = None) -> Tuple[List[dict], List[dict], List[str]]:
         self._emit("verifying", tool_count=len(calls))
 
         valid_calls = []
