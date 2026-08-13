@@ -58,13 +58,6 @@ class TriggerError:
 
 
 @dataclass
-class VerificationEvent:
-    tool_name: str
-    is_valid: bool
-    error: str | None = None
-
-
-@dataclass
 class ReliabilityMetrics:
     tool_success_rate: float    # 0.0 - 100.0
     avg_response_sec: float     # e.g., 1.2
@@ -223,12 +216,6 @@ class STTPartialEvent:
 @dataclass
 class TTSStartEvent:
     text: str
-
-
-@dataclass
-class TTSChunkEvent:
-    text: str
-    progress: float  # 0.0 - 1.0
 
 
 @dataclass

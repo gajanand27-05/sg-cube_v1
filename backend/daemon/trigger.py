@@ -34,7 +34,7 @@ from backend.daemon.ui_events import (
     TriggerError,
     WakeHeard,
 )
-from backend.daemon.ui_events import STTPartialEvent, TTSChunkEvent
+from backend.daemon.ui_events import STTPartialEvent
 
 log = logging.getLogger(__name__)
 

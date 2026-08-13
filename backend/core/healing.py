@@ -15,15 +15,11 @@ class RecoveryPath(str, Enum):
     ABORT = "abort"        # Stop immediately (security/fatal)
 
 
-class SelfHealingEvent:
-    def __init__(self, request_id: str, tool_name: str, error: str, path: RecoveryPath):
-        self.request_id = request_id
-        self.tool_name = tool_name
-        self.error = error
-        self.path = path
-
-    def __repr__(self):
-        return f"<SelfHealing: {self.tool_name} -> {self.path}>"
+# A second, incompatible `SelfHealingEvent` used to live here — never
+# constructed, and a trap if it ever had been: the bus keys subscribers and
+# ws_ui's TYPE_MAP on the class object, so publishing this one would have gone
+# out as wire type "SelfHealingEvent" while every consumer waited on
+# "self_healing". The one in daemon.ui_events is the real one.
 
 
 class SelfHealer:

@@ -16,7 +16,7 @@ from backend.core.events import get_bus
 from backend.core.healing import healer as self_healer
 from backend.core.memory.episodic import summarizer as episodic_summarizer
 from backend.core.memory.timeline import timeline
-from backend.daemon.ui_events import AgentCompletedEvent
+from backend.daemon.ui_events import AgentCompletedEvent, SelfHealingEvent
 
 log = logging.getLogger(__name__)
 
@@ -196,7 +196,15 @@ class CommanderAgent:
                         failed_tool = calls[0].get("name", "unknown") if calls and isinstance(calls[0], dict) else "unknown"
                         path = self_healer.analyze(failed_tool, last_error)
                         instruction = self_healer.get_instruction(path, failed_tool, last_error)
-                        
+                        get_bus().publish(SelfHealingEvent(
+                            tool_name=failed_tool, error=last_error, path=path.value,
+                        ))
+                        # The healer silently rewrites the turn — it retries, pivots
+                        # or aborts and the user sees only a delay. SelfHealingEvent
+                        # existed for this, with ws_ui and remote.py already carrying
+                        # it, but nothing had ever constructed one, so the whole
+                        # recovery path was invisible to every observer.
+
                         history.append({"role": "assistant", "content": json.dumps({"tool_calls": calls})})
                         history.append({"role": "user", "content": f"Correction needed: {instruction}"})
                         continue
