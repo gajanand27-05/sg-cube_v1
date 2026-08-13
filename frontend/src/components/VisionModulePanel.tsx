@@ -265,7 +265,7 @@ function fmt(value: number | null, digits: number, unit = ""): string {
  *  are standing state, so they use the cache-seeded useUiEvent and survive an
  *  HMR/StrictMode remount. The haptic flash is transient by definition — it
  *  must NOT be replayed from the cache on remount — so it stays a listener. */
-function VisionModeHealthRow() {
+export function VisionModeHealthRow() {
   const modeEvent = useUiEvent("mode_change");
   const health = useUiEvent("vision_health");
   const [haptic, setHaptic] = useState<{ pulses: number; at: number } | null>(
@@ -350,7 +350,7 @@ function VisionModeHealthRow() {
  *  arrive one event each, so the panel keeps the last few. */
 const OCR_LINES_SHOWN = 3;
 
-function ReadModeTranscript() {
+export function ReadModeTranscript() {
   const [lines, setLines] = useState<{ text: string; confidence: number; at: number }[]>([]);
 
   useUiEventListener("ocr_read", (p) => {
