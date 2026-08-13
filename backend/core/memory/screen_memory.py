@@ -9,7 +9,7 @@ from backend.core.memory.embedding import (
     ProviderEmbeddingFunction,
     report_write_failure,
 )
-from backend.core.memory.base import MemoryEntry, MemoryType
+from backend.core.memory.base import MemoryEntry, MemoryType, parse_ts
 from backend.database import CHROMA_PATH, get_chroma_client
 
 log = logging.getLogger(__name__)
@@ -127,7 +127,7 @@ class ScreenMemory:
                 candidates = []
                 for i in range(len(docs)):
                     m = metas[i]
-                    created = datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now()
+                    created = parse_ts(m["created_at"]) if "created_at" in m else datetime.now()
                     
                     # Visual relevance scoring
                     semantic_score = 1.0 - min(distances[i], 1.0)

@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
-from backend.core.memory.base import MemoryEntry, MemoryType
+from backend.core.memory.base import MemoryEntry, MemoryType, naive_local
 from backend.core.memory.long_term import LongTermMemory
 from backend.core.memory.short_term import ShortTermMemory
 from backend.core.memory.working import WorkingMemory
@@ -71,10 +71,16 @@ class MemoryManager:
             
             timeline_lines = []
             # Sort again after merge
-            recent_events.sort(key=lambda x: x.timestamp, reverse=True)
+            # Sorting a mix of aware and naive datetimes raises TypeError just
+            # as subtracting them does — same normalization, same reason.
+            recent_events.sort(key=lambda x: naive_local(x.timestamp), reverse=True)
             
             for e in recent_events[:8]: # Cap at 8 unique items
-                delta = datetime.now() - e.timestamp
+                # naive_local, not e.timestamp raw: an entry built in-process by
+                # a caller using an aware datetime never round-trips through
+                # from_dict, so this is the one subtraction the store-boundary
+                # normalization doesn't already cover.
+                delta = datetime.now() - naive_local(e.timestamp)
                 if delta.total_seconds() < 60:
                     time_str = "Just now"
                 elif delta.total_seconds() < 3600:

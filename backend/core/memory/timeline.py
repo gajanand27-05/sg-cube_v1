@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
-from backend.core.memory.base import MemoryEntry, MemoryType
+from backend.core.memory.base import MemoryEntry, MemoryType, parse_ts
 from backend.core.memory.embedding import (
     EmbeddingUnavailable,
     ProviderEmbeddingFunction,
@@ -80,7 +80,7 @@ class TimelineMemory:
                     entries.append(MemoryEntry(
                         content=docs[i],
                         mtype=MemoryType.EVENT,
-                        timestamp=datetime.fromisoformat(m["created_at"]),
+                        timestamp=parse_ts(m["created_at"]),
                         metadata=m,
                         relevance=1.0
                     ))
@@ -113,7 +113,7 @@ class TimelineMemory:
                 candidates = []
                 for i in range(len(docs)):
                     m = metas[i]
-                    created = datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now()
+                    created = parse_ts(m["created_at"]) if "created_at" in m else datetime.now()
                     
                     # Semantic similarity
                     semantic_score = 1.0 - min(distances[i], 1.0)

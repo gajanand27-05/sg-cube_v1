@@ -11,7 +11,7 @@ from backend.core.memory.embedding import (
     ProviderEmbeddingFunction,
     report_write_failure,
 )
-from backend.core.memory.base import MemoryEntry, MemoryType
+from backend.core.memory.base import MemoryEntry, MemoryType, naive_local, parse_ts
 from backend.database import CHROMA_PATH, get_chroma_client
 
 log = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ class LongTermMemory:
         
         metadata = entry.metadata.copy()
         metadata["type"] = entry.mtype.value
-        metadata["created_at"] = entry.timestamp.isoformat() if isinstance(entry.timestamp, datetime) else entry.timestamp
+        metadata["created_at"] = naive_local(entry.timestamp).isoformat() if isinstance(entry.timestamp, datetime) else entry.timestamp
         metadata["relevance"] = entry.relevance
         
         # Add enhanced fields to metadata for retrieval
@@ -147,14 +147,14 @@ class LongTermMemory:
 
                 for i in range(len(docs)):
                     m = metas[i]
-                    created = datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now()
+                    created = parse_ts(m["created_at"]) if "created_at" in m else datetime.now()
 
                     # Parse enhanced fields from metadata
                     importance = float(m.get("importance", 0.5))
                     confidence = float(m.get("confidence", 0.9))
                     access_count = int(m.get("access_count", 0))
                     last_accessed_str = m.get("last_accessed", "")
-                    last_accessed = datetime.fromisoformat(last_accessed_str) if last_accessed_str else None
+                    last_accessed = parse_ts(last_accessed_str) if last_accessed_str else None
                     source = m.get("source", "user")
                     tags = json.loads(m.get("tags", "[]"))
                     state = m.get("state", "active")
@@ -230,12 +230,12 @@ class LongTermMemory:
                 metas = results["metadatas"]
                 for i in range(len(docs)):
                     m = metas[i]
-                    created = datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now()
+                    created = parse_ts(m["created_at"]) if "created_at" in m else datetime.now()
                     importance = float(m.get("importance", 0.5))
                     confidence = float(m.get("confidence", 0.9))
                     access_count = int(m.get("access_count", 0))
                     last_accessed_str = m.get("last_accessed", "")
-                    last_accessed = datetime.fromisoformat(last_accessed_str) if last_accessed_str else None
+                    last_accessed = parse_ts(last_accessed_str) if last_accessed_str else None
                     source = m.get("source", "user")
                     tags = json.loads(m.get("tags", "[]"))
                     state = m.get("state", "active")
@@ -301,7 +301,7 @@ class LongTermMemory:
             all_results = self.collection.get(include=["metadatas", "documents"])
             decayed = 0
             for i, m in enumerate(all_results["metadatas"]):
-                created = datetime.fromisoformat(m.get("created_at", datetime.now().isoformat()))
+                created = parse_ts(m.get("created_at", datetime.now().isoformat()))
                 age_days = (datetime.now() - created).days
                 access_count = int(m.get("access_count", 0))
                 
@@ -348,13 +348,13 @@ class LongTermMemory:
                 candidates = []
                 for i in range(len(docs)):
                     m = metas[i]
-                    created = datetime.fromisoformat(m["created_at"]) if "created_at" in m else datetime.now()
+                    created = parse_ts(m["created_at"]) if "created_at" in m else datetime.now()
                     
                     importance = float(m.get("importance", 0.5))
                     confidence = float(m.get("confidence", 0.9))
                     access_count = int(m.get("access_count", 0))
                     last_accessed_str = m.get("last_accessed", "")
-                    last_accessed = datetime.fromisoformat(last_accessed_str) if last_accessed_str else None
+                    last_accessed = parse_ts(last_accessed_str) if last_accessed_str else None
                     source = m.get("source", "user")
                     tags = json.loads(m.get("tags", "[]"))
                     state = m.get("state", "active")
