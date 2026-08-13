@@ -96,7 +96,7 @@ async def ocr_read() -> ToolResult:
     documents. Use for "read this sign", "what does it say", "read the text",
     "OCR this". Needs the phone camera to be streaming already."""
     from backend.core.vision.frame_ingest import frame_ingestor
-    from backend.core.vision.ocr_reader import ocr_frame, ocr_text
+    from backend.core.vision.ocr_reader import OCRUnavailable, ocr_frame, ocr_text
 
     frame, meta = frame_ingestor.latest_frame()
     if frame is None:
@@ -104,7 +104,13 @@ async def ocr_read() -> ToolResult:
         return ToolResult.error(f"no camera frame available.{hint}")
 
     loop = asyncio.get_running_loop()
-    lines = await loop.run_in_executor(None, ocr_frame, frame)
+    try:
+        lines = await loop.run_in_executor(None, ocr_frame, frame)
+    except OCRUnavailable as e:
+        # An error, never "no readable text": the user is asking because they
+        # cannot see the sign, and "no text here" would send them away from a
+        # sign that is right in front of them.
+        return ToolResult.error(f"text reading is unavailable. {e}")
     if not lines:
         return ToolResult.success(message="no readable text in view",
                                    data={"lines": [], "frame_id": meta.frame_id})

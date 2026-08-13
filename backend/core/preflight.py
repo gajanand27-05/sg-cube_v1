@@ -131,6 +131,30 @@ def check_tool_modules() -> PreflightCheck:
                               f"tool module check raised: {type(e).__name__}: {e}")
 
 
+def check_ocr() -> PreflightCheck:
+    """Is the Tesseract binary present, so Read mode can actually read?
+
+    DEGRADED, not DOWN — navigate and scan are unaffected. Worth a check at
+    all because the failure is dangerous rather than merely broken: without
+    the engine, read mode used to answer "no readable text in view", which is
+    a statement about the WORLD, given to someone who asked precisely because
+    they cannot see the sign in front of them.
+    """
+    try:
+        from backend.core.vision.ocr_reader import tesseract_path
+        path = tesseract_path()
+        if not path:
+            return PreflightCheck(
+                "ocr", PreflightStatus.DEGRADED,
+                "Tesseract not found — read mode will report itself unavailable. "
+                "Install with `winget install UB-Mannheim.TesseractOCR`, or set TESSERACT_CMD.")
+        return PreflightCheck("ocr", PreflightStatus.OK,
+                              "Tesseract available", detail={"path": path})
+    except Exception as e:
+        return PreflightCheck("ocr", PreflightStatus.DOWN,
+                              f"OCR check raised: {type(e).__name__}: {e}")
+
+
 def check_browser() -> PreflightCheck:
     """Chromium presence when ENABLE_BROWSER. Playwright itself is a
     Python package (so `import playwright` almost always works) — the
@@ -266,6 +290,7 @@ def run_preflight() -> list[PreflightCheck]:
         "check_services":       check_services,
         "check_ws_bridge":      check_ws_bridge,
         "check_tool_modules":   check_tool_modules,
+        "check_ocr":            check_ocr,
         "check_browser":        check_browser,
         "check_ollama":         check_ollama,
         "check_llm_providers":  check_llm_providers,

@@ -206,6 +206,7 @@ class DetectionRunner:
         self._last_spoken: dict[str, float] = {}
         self._last_buzz: float = 0.0
         self._last_read_spoken: set[str] = set()  # dedup lines across read frames
+        self._ocr_unavailable_announced = False
         self.last_latency_ms: float = 0.0
         self.detections_done: int = 0
 
@@ -217,6 +218,7 @@ class DetectionRunner:
         self._last_spoken.clear()
         self._last_buzz = 0.0
         self._last_read_spoken.clear()
+        self._ocr_unavailable_announced = False
         self.detections_done = 0
 
     def _maybe_buzz(self, confirmed: list[Obstacle]) -> None:
@@ -288,7 +290,7 @@ class DetectionRunner:
 
     async def _read_submit(self, jpeg: bytes) -> None:
         """Read mode: OCR each frame, speak only new lines."""
-        from backend.core.vision.ocr_reader import ocr_frame
+        from backend.core.vision.ocr_reader import OCRUnavailable, ocr_frame
 
         if self._busy:
             return
@@ -296,7 +298,18 @@ class DetectionRunner:
         try:
             t0 = time.monotonic()
             loop = asyncio.get_running_loop()
-            lines = await loop.run_in_executor(None, ocr_frame, jpeg)
+            try:
+                lines = await loop.run_in_executor(None, ocr_frame, jpeg)
+            except OCRUnavailable as e:
+                # Say it once per session, then stop: the engine will not
+                # appear mid-walk, and repeating it every frame at 2fps would
+                # bury the obstacle alerts that still work.
+                if not self._ocr_unavailable_announced:
+                    self._ocr_unavailable_announced = True
+                    log.error("Read mode unavailable: %s", e)
+                    if not registry.silent:
+                        self._speak_offloop("Text reading is unavailable.")
+                return
             self.last_latency_ms = round((time.monotonic() - t0) * 1000, 1)
             self.detections_done += 1
             vision_health.note_frame_processed(latency_ms=self.last_latency_ms)
@@ -362,14 +375,21 @@ class DetectionRunner:
         Deduplicates so the same line isn't spoken repeatedly across frames.
         """
         from backend.core.vision.frame_ingest import frame_ingestor
-        from backend.core.vision.ocr_reader import ocr_frame, ocr_text
+        from backend.core.vision.ocr_reader import OCRUnavailable, ocr_frame, ocr_text
 
         frame, _meta = frame_ingestor.latest_frame()
         if frame is None:
             return ""
         loop = asyncio.get_running_loop()
         t0 = time.monotonic()
-        lines = await loop.run_in_executor(None, ocr_frame, frame)
+        try:
+            lines = await loop.run_in_executor(None, ocr_frame, frame)
+        except OCRUnavailable as e:
+            # NOT "No readable text in view" — that is a claim about the
+            # scene, and the caller asked precisely because they cannot see
+            # the scene to know better.
+            log.error("Read mode unavailable: %s", e)
+            return "Text reading is unavailable."
         self.last_latency_ms = round((time.monotonic() - t0) * 1000, 1)
         self.detections_done += 1
         vision_health.note_frame_processed(latency_ms=self.last_latency_ms)
