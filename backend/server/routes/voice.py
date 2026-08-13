@@ -139,7 +139,7 @@ async def process_endpoint(
         # 2. Orchestrate
         t1 = time.perf_counter()
         try:
-            router_result = process_input(transcript, user["profile"]["id"])
+            router_result = await process_input(transcript, user["profile"]["id"])
         except LLMResolveError as e:
             spoken = "Sorry, my reasoning model is unavailable"
             speak(spoken)
