@@ -97,7 +97,16 @@ class ScreenMemory:
             return []
 
     def get_latest_observation(self) -> Optional[str]:
-        """Return the most recent visual summary stored."""
+        """Return the most recent visual summary stored — the document TEXT only.
+
+        Its one in-tree caller (ContextBuilder._get_screen_objects) used to
+        treat this as a row dict and call .get("keywords") on it, which raised
+        AttributeError into a bare except for the life of that function. It now
+        uses get_recent_observations(limit=1), which returns the full row
+        including metadata. Nothing in backend/ calls this any more; kept
+        because runtime-loaded plugins may. If you want a field, not prose,
+        reach for get_recent_observations.
+        """
         try:
             # Get recent and sort by time
             recent = self.get_recent_observations(limit=1)

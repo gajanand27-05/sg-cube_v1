@@ -208,18 +208,31 @@ class ContextBuilder:
             return []
     
     def _get_screen_objects(self) -> list[DetectedObject]:
-        """Get latest detected objects from vision loop."""
+        """Get latest detected objects from vision loop.
+
+        Reads get_recent_observations(limit=1), which returns the full row
+        including its `keywords` metadata. This used to call
+        get_latest_observation(), which is annotated `-> Optional[str]` and
+        returns only the document text — so `.get("keywords", "")` raised
+        AttributeError on a str, every turn, straight into the bare `except`
+        below. screen_objects has therefore always been empty. Nothing broke
+        visibly because no consumer reads it (the planner prompt renders only
+        capabilities and the three memory blocks), so the turn cost was paid
+        and the result discarded.
+        """
         try:
-            latest = screen_memory.get_latest_observation()
-            if latest:
-                keywords = latest.get("keywords", "")
+            recent = screen_memory.get_recent_observations(limit=1)
+            if recent:
+                keywords = recent[0].get("keywords", "")
                 if keywords:
                     return [
                         DetectedObject(label=k.strip(), confidence=0.8)
                         for k in keywords.split(",") if k.strip()
                     ]
-        except Exception:
-            pass
+        except Exception as e:
+            # Was a bare `pass`, which is how the AttributeError above stayed
+            # invisible for the life of the function.
+            log.warning(f"Screen-objects collection failed: {e}")
         return []
 
 
