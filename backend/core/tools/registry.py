@@ -154,6 +154,10 @@ _BROWSER_NAV_MODULES = frozenset({
 })
 _LLM_MODULES = frozenset({
     "summarize", "translate", "llm_helper",
+    # web_search: search_and_answer fetches results and then synthesizes an
+    # answer with the LLM, so it needs the LLM budget rather than the
+    # data-fetch one. Its own HTTP calls are bounded well below it.
+    "web_search",
 })
 
 

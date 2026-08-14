@@ -23,13 +23,19 @@ from backend.server.config import settings
 log = logging.getLogger(__name__)
 
 
-def llm_generate(prompt: str, *, system: str = "", temperature: float = 0.3, timeout: float = 120.0) -> str:
-    """Send `prompt` to whichever backend RoutingPolicy picks for
-    SUMMARIZATION, and return plain text.
+def llm_generate(prompt: str, *, system: str = "", temperature: float = 0.3,
+                 timeout: float = 120.0, task: TaskType = TaskType.SUMMARIZATION) -> str:
+    """Send `prompt` to whichever backend RoutingPolicy picks for `task`, and
+    return plain text.
+
+    `task` defaults to SUMMARIZATION (local): condensing text the caller
+    already fetched is what the small local model is for. Callers whose output
+    is the user's actual answer — not a condensation — should pass a
+    reasoning-class task so the routing policy sends it to the cloud model.
 
     Returns empty string on error (caller decides how to surface that).
     """
-    backend = build_default_policy().select(TaskType.SUMMARIZATION)
+    backend = build_default_policy().select(task)
 
     if backend == "ollama_cloud":
         model = settings.ollama_cloud_model

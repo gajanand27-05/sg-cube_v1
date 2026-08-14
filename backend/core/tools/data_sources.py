@@ -118,9 +118,14 @@ _TTL_STOCK = 15
 _TTL_WEATHER = 600
 _TTL_NEWS = 300
 
-# Well under settings.tool_timeout_data_fetch_s (10s) so a slow feed fails as
-# a clean "feed timed out" rather than as the tool's own cancellation.
-_FEED_TIMEOUT_S = 6.0
+# Under settings.tool_timeout_data_fetch_s (10s) so a slow feed fails as a
+# clean "feed timed out" rather than as the tool's own cancellation.
+#
+# Sized from measurement, not taste: the BBC and ScienceDaily feeds answer in
+# 0.2-1.5s, but hnrss.org (the "tech" topic) runs 2.4-4.4s and was seen to
+# exceed 6s under load, which cost a live answer. 8s leaves it real headroom
+# and still fits the budget.
+_FEED_TIMEOUT_S = 8.0
 
 
 def fetch_feed(url: str, timeout: float = _FEED_TIMEOUT_S):
