@@ -368,6 +368,7 @@ def _coerce_args(tool_name: str, args: dict) -> dict:
     if not valid:
         return args
     out: dict = {}
+    unmatched: list[tuple[str, Any]] = []
     for key, value in args.items():
         if key in valid:
             out[key] = value
@@ -382,6 +383,49 @@ def _coerce_args(tool_name: str, args: dict) -> dict:
         if len(contained) == 1 and contained[0] not in out:
             out[contained[0]] = value
         else:
-            # Ambiguous or no match — keep the original key (will TypeError).
+            unmatched.append((key, value))
+
+    # Last resort: bind a single unplaced argument to the first unfilled
+    # parameter, the way a positional call would. Substring matching cannot
+    # relate get_news_data(query=...) to its `topic` param — the words share
+    # no letters — so the call TypeError'd and the agent burned a whole extra
+    # round trip rediscovering the schema it had already been given.
+    #
+    # Guarded by the declared JSON type so a stray int can't land in a string
+    # slot; an unmatched arg of the wrong type keeps its original key and
+    # still raises, which is the honest outcome.
+    free = [p for p in schema_params if p not in out]
+    if len(unmatched) == 1 and free:
+        key, value = unmatched[0]
+        target = free[0]
+        if _json_type_matches(schema_params[target].get("type"), value):
+            out[target] = value
+        else:
             out[key] = value
+    else:
+        # Ambiguous or no match — keep the original keys (will TypeError).
+        out.update(dict(unmatched))
     return out
+
+
+_JSON_TYPE_PY = {
+    "string": str,
+    "integer": int,
+    "number": (int, float),
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+}
+
+
+def _json_type_matches(json_type: str | None, value: Any) -> bool:
+    """True if `value` could legally fill a param declared as `json_type`.
+    Unknown/absent type means we can't rule it out, so allow it."""
+    py = _JSON_TYPE_PY.get(json_type or "")
+    if py is None:
+        return True
+    # bool is an int subclass; an LLM passing True for an integer slot is a
+    # mistake worth surfacing rather than silently coercing.
+    if isinstance(value, bool) and json_type in ("integer", "number"):
+        return False
+    return isinstance(value, py)

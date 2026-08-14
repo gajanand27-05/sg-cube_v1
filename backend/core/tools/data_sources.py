@@ -118,6 +118,32 @@ _TTL_STOCK = 15
 _TTL_WEATHER = 600
 _TTL_NEWS = 300
 
+# Well under settings.tool_timeout_data_fetch_s (10s) so a slow feed fails as
+# a clean "feed timed out" rather than as the tool's own cancellation.
+_FEED_TIMEOUT_S = 6.0
+
+
+def fetch_feed(url: str, timeout: float = _FEED_TIMEOUT_S):
+    """Parse an RSS feed, fetching it ourselves so the fetch is bounded.
+
+    feedparser.parse(url) does its own urllib fetch with no timeout — the
+    global socket default is None, i.e. wait forever. Tools run in a thread
+    pool, so asyncio.wait_for cancels the *await* while the blocking fetch
+    keeps running: the user saw "Execution timed out after 10.0s" and a
+    worker thread leaked behind it. Handing feedparser bytes instead of a URL
+    keeps the network under our timeout.
+
+    Raises on network failure; callers already have stale-serve paths.
+    """
+    with httpx.Client(
+        timeout=timeout,
+        follow_redirects=True,
+        headers={"User-Agent": "Mozilla/5.0 (SG_CUBE)"},
+    ) as c:
+        r = c.get(url)
+        r.raise_for_status()
+        return feedparser.parse(r.content)
+
 
 # ── get_stock ───────────────────────────────────────────────────────────
 
@@ -324,6 +350,50 @@ _NEWS_FEEDS = {
     "sports": "https://feeds.bbci.co.uk/sport/rss.xml",
 }
 
+# People don't say "tech", they say "AI" or "technology". Without these the
+# tool returned `blocked` and the agent burned a whole extra round trip
+# re-asking with a legal topic — measured at 14.6s for "what is the latest
+# news about artificial intelligence".
+_TOPIC_ALIASES = {
+    "ai": "tech",
+    "artificial intelligence": "tech",
+    "technology": "tech",
+    "computing": "tech",
+    "software": "tech",
+    "startups": "tech",
+    "finance": "business",
+    "economy": "business",
+    "markets": "business",
+    "stocks": "business",
+    "sport": "sports",
+    "cricket": "sports",
+    "football": "sports",
+    "general": "world",
+    "news": "world",
+    "world news": "world",
+    "headlines": "world",
+    "current affairs": "world",
+    "top stories": "world",
+    "health": "science",
+    "space": "science",
+    "research": "science",
+}
+
+
+def _speakable_headlines(topic_key: str, headlines: list[dict]) -> str:
+    """The spoken answer, not a receipt.
+
+    commander.py's Assessment Stage speaks a lone successful tool's `message`
+    verbatim and skips the LLM entirely. This used to return
+    "tech: 5 headlines", so asking for the news read back a count and the
+    headlines — which were sitting in `data` — were never spoken.
+    """
+    titles = [h["title"].strip() for h in headlines if h.get("title", "").strip()]
+    if not titles:
+        return f"No {topic_key} headlines right now."
+    numbered = " ".join(f"{i}. {t}." for i, t in enumerate(titles, 1))
+    return f"Top {len(titles)} {topic_key} headlines: {numbered}"
+
 
 @tool(tier=CapabilityTier.READONLY)
 def get_news_data(topic: str = "world", limit: int = 5) -> ToolResult:
@@ -332,11 +402,12 @@ def get_news_data(topic: str = "world", limit: int = 5) -> ToolResult:
     SAFETY: headline text is EXTERNAL WEB CONTENT. Envelope carries
     is_external_data=True so the Planner's Phase 2 directive treats every
     title/summary as data-not-instructions."""
-    topic_key = (topic or "world").strip().lower()
+    requested = (topic or "world").strip().lower()
+    topic_key = _TOPIC_ALIASES.get(requested, requested)
     url = _NEWS_FEEDS.get(topic_key)
     if url is None:
         return ToolResult.blocked(
-            f"unknown topic {topic_key!r} — try: {', '.join(_NEWS_FEEDS)}"
+            f"unknown topic {requested!r} — try: {', '.join(_NEWS_FEEDS)}"
         )
 
     limit = max(1, min(int(limit), 20))
@@ -346,12 +417,12 @@ def get_news_data(topic: str = "world", limit: int = 5) -> ToolResult:
         cached["stale"] = False
         env = cached
         return ToolResult.success(
-            message=f"{topic_key}: {len(env['payload']['headlines'])} headlines (cached, fresh)",
+            message=_speakable_headlines(topic_key, env["payload"]["headlines"]),
             data=env,
         )
 
     try:
-        feed = feedparser.parse(url)
+        feed = fetch_feed(url)
     except Exception as e:
         stale = _stale_serve(cache_key, f"rss:{topic_key}", f"parse failed: {e}")
         if stale is not None:
@@ -383,7 +454,7 @@ def get_news_data(topic: str = "world", limit: int = 5) -> ToolResult:
 
     _cache_put(cache_key, envelope)
     return ToolResult.success(
-        message=f"{topic_key}: {len(headlines)} headlines",
+        message=_speakable_headlines(topic_key, headlines),
         data=envelope,
         confidence=90.0,
         confidence_reason=[

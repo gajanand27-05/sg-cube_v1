@@ -77,6 +77,15 @@ def _build_spoken_response(intent: Intent, exec_result: ExecutionResult) -> str:
             return f"Closing {target}"
         if action == "get_time":
             return f"The time is {exec_result.message}"
+        # These all opened something the user can now see. Saying "Done" made
+        # a web search sound like it had failed to answer, when answering was
+        # never what the tool did.
+        if action == "search_google":
+            return f"Searching the web for {target}"
+        if action in ("search_youtube", "play_youtube"):
+            return f"Searching YouTube for {target}"
+        if action == "open_url":
+            return f"Opening {target}"
         return "Done"
 
     if status == "blocked":

@@ -200,8 +200,18 @@ def _search_youtube(m: re.Match) -> Intent:
     return Intent(action="search_youtube", target=m.group("query").strip())
 
 
+# "search the web for cats" used to search Google for the literal string
+# "the web for cats" — the catch-all `^search (?:for )?(.+)$` rule captured the
+# carrier phrase as part of the query. Strip the ways people name the web.
+_WEB_CARRIER = re.compile(
+    r"^(?:the\s+)?(?:web|internet|net|online|google)\s+(?:for\s+|about\s+)?",
+    re.IGNORECASE,
+)
+
+
 def _search_google(m: re.Match) -> Intent:
-    return Intent(action="search_google", target=m.group("query").strip())
+    query = _WEB_CARRIER.sub("", m.group("query").strip()).strip()
+    return Intent(action="search_google", target=query or m.group("query").strip())
 
 
 def _open_url(m: re.Match) -> Intent:

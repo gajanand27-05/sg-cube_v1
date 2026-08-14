@@ -4,9 +4,9 @@
 - Trending via Reddit r/popular JSON (no API key, just a user-agent).
 - daily_briefing chains time + weather + top news into one spoken summary.
 """
-import feedparser
 import httpx
 
+from backend.core.tools.data_sources import fetch_feed
 from backend.core.tools.registry import CapabilityTier, tool
 
 NEWS_FEEDS: dict[str, str] = {
@@ -36,7 +36,7 @@ def get_news(category: str = "world", limit: int = 5) -> dict:
         }
 
     try:
-        feed = feedparser.parse(url)
+        feed = fetch_feed(url)
     except Exception as e:
         return {"status": "error", "reason": f"feed parse failed: {e}"}
 

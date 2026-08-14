@@ -168,7 +168,10 @@ def test_get_news_data_flags_content_as_external():
         MagicMock(title="World news headline 1", link="https://x/1", published="Mon 12:00"),
         MagicMock(title="World news headline 2", link="https://x/2", published="Mon 12:30"),
     ]
-    with patch("backend.core.tools.data_sources.feedparser.parse", return_value=fake_feed):
+    # Patch fetch_feed, not feedparser.parse: the fetch moved into fetch_feed
+    # so that it could carry a timeout, and stubbing the parser alone left this
+    # test making a real request to the BBC.
+    with patch("backend.core.tools.data_sources.fetch_feed", return_value=fake_feed):
         res = ds.get_news_data("world", limit=2)
 
     assert res.status.value == "success"
