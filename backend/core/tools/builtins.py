@@ -68,8 +68,15 @@ def play_youtube(query: str) -> ToolResult:
 
 @tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: opens browser tab, reversible
 def search_web(query: str, engine: str = "google") -> ToolResult:
-    """Open a web search for `query` in the default browser.
-    `engine` is "google" (default) or "youtube"."""
+    """Open a browser window showing a web search for `query`. `engine` is
+    "google" (default) or "youtube".
+
+    This does NOT read the results — it only opens a window for the user to
+    look at, and returns nothing the assistant can quote. Use it only when the
+    user explicitly asked to open, show or bring up a search, or wants YouTube
+    videos. To FIND something out, answer a question, or locate a page or
+    document, use `search_and_answer` instead: it reads the results and speaks
+    the answer, with no browser and no Google account involved."""
     if engine.lower() == "youtube":
         res = cw.handle_search_youtube(Intent(action="search_youtube", target=query))
     else:
@@ -84,8 +91,13 @@ def search_web(query: str, engine: str = "google") -> ToolResult:
 
 @tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: opens browser tab, reversible
 def open_url(url: str) -> ToolResult:
-    """Open a URL or domain (e.g. "github.com" or "https://example.com")
-    in the default browser."""
+    """Open a browser window at an exact URL or domain the user already named
+    (e.g. "github.com", "https://example.com").
+
+    Requires a URL you were actually given. Do NOT guess one, and do not use
+    this to look something up: if the user asked you to find a page, a
+    document or an answer without naming the address, use `search_and_answer`,
+    which finds it from keywords and reads it back."""
     res = cw.handle_open_url(Intent(action="open_url", target=url))
     return ToolResult(
         status=res["status"],

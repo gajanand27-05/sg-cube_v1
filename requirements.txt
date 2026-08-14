@@ -74,6 +74,18 @@ playwright==1.48.0
 # ── Phase 11d: information feeds (RSS only — stocks/crypto/weather hit JSON APIs directly) ──
 feedparser==6.0.11
 
+# ── Web search (backend/core/websearch) ──
+# Keyless general web search. Deliberately the library rather than our own
+# POSTs to html.duckduckgo.com: hand-rolled requests answer about two queries
+# and then return an anti-bot CAPTCHA as HTTP 202 with a normal-looking body.
+# ddgs rotates engine backends and survived ten back-to-back queries here.
+#
+# Pin httpx below 0.28: installing ddgs unpinned pulls httpx 0.28.x, which
+# breaks supabase 2.10's `httpx[http2]<0.28` constraint. ddgs does its own
+# transport through primp and works fine on 0.27.
+ddgs==9.14.4
+httpx[http2]>=0.26,<0.28
+
 # ── Phase E: MCP protocol (model-context-protocol server) ──
 fastmcp>=0.5.0
 
