@@ -71,6 +71,10 @@ def _build_spoken_response(intent: Intent, exec_result: ExecutionResult) -> str:
     target = intent.target
 
     if status == "success":
+        # Stop answers with silence. Saying "Done" would be the one thing the
+        # user just asked us not to do.
+        if action == "stop":
+            return ""
         if action == "open_app":
             return f"Opening {target}"
         if action == "close_app":
@@ -163,7 +167,11 @@ async def process_endpoint(
         # 4. Speak response
         spoken = _build_spoken_response(router_result.intent, exec_result)
         t3 = time.perf_counter()
-        speak(spoken)
+        # An empty response means "answer with silence" (stop/cancel). Handing
+        # "" to Piper would start a synth-and-play round trip whose only job is
+        # to say nothing — and re-arm the speaker right after a stop.
+        if spoken:
+            speak(spoken)
         tts_ms = int((time.perf_counter() - t3) * 1000)
 
         return {

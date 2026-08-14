@@ -549,6 +549,42 @@ def handle_play_youtube(intent: Intent) -> dict:
     return r
 
 
+def handle_stop(intent: Intent) -> dict:
+    """Shut up and drop whatever is in flight.
+
+    There was no stop command anywhere — not in the rule engine, not as a
+    tool. Saying "onyx stop" silenced the TTS only because the wake phrase
+    itself interrupts speech; the word "stop" then missed cache and rules,
+    reached the LLM agent, which has no stop capability, and the assistant
+    started talking AGAIN several seconds later. From the user's side that is
+    the assistant refusing a direct order.
+
+    Must stay a rule-engine intent rather than a @tool: a tool call would go
+    through the planner, and "stop" that waits on a model is not a stop.
+
+    Returns an empty message deliberately — _build_spoken_response turns a
+    blank into silence, and answering "Done" out loud would be the one thing
+    the user just asked us not to do.
+    """
+    from backend.ai_modules.speech.tts_piper import stop_speech
+    from backend.ai_modules.speech.tts_queue import get_sentence_queue
+    from backend.core.agents.commander import commander
+
+    # Each guarded separately: a failure in one must not leave the others
+    # running, which is the whole point of a stop.
+    for label, action in (
+        ("speech", stop_speech),
+        ("queue", lambda: get_sentence_queue().interrupt()),
+        ("agent", commander.interrupt),
+    ):
+        try:
+            action()
+        except Exception as e:
+            log.warning("stop: %s interrupt failed: %s", label, e)
+
+    return {"status": "success", "message": ""}
+
+
 def handle_agent_complete(intent: Intent) -> dict:
     """Synthetic intent emitted by the Phase 11a agent path. The agent has
     already run all the tools internally; the executor is a no-op and just
@@ -574,4 +610,5 @@ HANDLERS = {
     "play_youtube": handle_play_youtube,
     # Phase 11a
     "agent_complete": handle_agent_complete,
+    "stop": handle_stop,
 }

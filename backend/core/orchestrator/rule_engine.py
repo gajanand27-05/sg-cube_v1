@@ -209,6 +209,10 @@ _WEB_CARRIER = re.compile(
 )
 
 
+def _stop(m: re.Match) -> Intent:
+    return Intent(action="stop", target="")
+
+
 def _search_google(m: re.Match) -> Intent:
     query = _WEB_CARRIER.sub("", m.group("query").strip()).strip()
     return Intent(action="search_google", target=query or m.group("query").strip())
@@ -545,6 +549,30 @@ def _build_trie(rules: list[RuleEntry]) -> dict[str | None, list[RuleEntry]]:
 
 # ── Phase D1: 40+ Patterns ─────────────────────────────────────────────
 RULES: list[RuleEntry] = [
+    # ── Stop, FIRST and unconditional ──
+    # A stop that waits on a model is not a stop. These must sit above every
+    # other rule: "stop playing music" and "cancel that" would otherwise be
+    # eaten by the `^play (.+)$` and `^search (.+)$` catch-alls further down,
+    # and anything unmatched falls through to the LLM agent — which is what
+    # made "onyx stop" appear to be ignored, then answered aloud ten seconds
+    # later.
+    #
+    # ponytail: a fixed phrase list, not intent detection. Ceiling — it only
+    # catches the phrasings written here, so "okay that's enough thanks" still
+    # falls through to the agent. Upgrade path is a stop check against the
+    # local intent classifier before the agent hop, but that costs a model
+    # round trip on every utterance to catch a long tail, and a stop that
+    # waits on a model is the thing this rule exists to avoid.
+    (re.compile(
+        r"^(?:"
+        r"stop|stop\s+(?:it|that|talking|speaking|listening|playing.*)"
+        r"|cancel|cancel\s+(?:it|that)"
+        r"|never\s*mind|nevermind|forget\s+(?:it|that)"
+        r"|be\s+quiet|quiet|silence|shut\s+up|shush|hush"
+        r"|abort|halt|enough|wait"
+        r")$"
+    ), _stop),
+
     # ── YouTube (most-specific phrasings first) ──
     (re.compile(r"^play\s+(?P<query>.+?)\s+on\s+youtube$"), _play_youtube),
     (re.compile(r"^search\s+(?:for\s+)?(?P<query>.+?)\s+on\s+youtube$"), _search_youtube),
