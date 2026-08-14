@@ -78,10 +78,16 @@ def start_services(settings) -> dict:
     from backend.daemon.clipboard_watcher import watcher as cb_watcher
     from backend.daemon.vision_loop import vision_loop
     from backend.daemon.telemetry import telemetry_loop
+    from backend.daemon import preload
     from backend.core.agents.watcher import watcher as watcher_agent
 
     SERVICE_STATUS.clear()
     handle: dict = {"listener": None, "listener_thread": None}
+
+    # Warm phi3 + nomic on a background thread. First spoken command after a
+    # boot used to pay phi3's 6408ms cold load (vs 861ms warm), and the first
+    # command is usually the one being demonstrated.
+    _start_one("preload", settings.enable_model_preload, preload.start)
 
     _start_one("clipboard", settings.enable_clipboard, cb_watcher.start)
     _start_one("vision",    settings.enable_vision,    vision_loop.start)

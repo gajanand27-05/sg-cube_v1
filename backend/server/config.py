@@ -46,8 +46,24 @@ class Settings(BaseSettings):
     vision_model: str = "qwen2.5vl:3b"          # local VLM
 
     # STT/TTS
-    whisper_model: str = "small"                # faster-whisper
+    whisper_model: str = "small"                # faster-whisper (legacy; see stt_manager)
     piper_voice: str = "en_US-ryan-high"        # Piper TTS voice
+
+    # ── STT profile selection (backend/ai_modules/speech/stt_manager.py) ──
+    # "auto"     — GPU + accurate model on AC, CPU + fast model on battery
+    # "accurate" — always whisper_model_gpu on the GPU (pin this for a demo)
+    # "fast"     — always whisper_model_cpu on the CPU
+    stt_profile: str = "auto"
+    whisper_model_gpu: str = "large-v3"         # AC power, cuda/float16
+    whisper_model_cpu: str = "small"            # battery or no GPU, cpu/int8
+    # Release the model after this many seconds idle. 0 disables. Kept well
+    # above a conversational pause: unloading after every utterance would pay
+    # the 2-3s load cost on the very next command.
+    stt_idle_unload_s: float = 180.0
+
+    # Warm phi3 + nomic at daemon start so the first spoken command does not
+    # pay phi3's cold load (6408ms measured, vs 861ms warm).
+    enable_model_preload: bool = True
 
     # ── Ollama Cloud (primary cloud LLM — gpt-oss:120b default) ──
     # Same /api/chat wire format as local Ollama, just a different host plus

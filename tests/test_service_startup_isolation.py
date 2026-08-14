@@ -43,6 +43,10 @@ class _FakeSettings:
     enable_watcher = True
     enable_telemetry = True
     enable_wake_word = False
+    # Off deliberately: unlike the services above, preload is not swapped for
+    # a mock, so leaving it on would have these tests warming real models over
+    # the network. Its own isolation is covered in test_model_preload.py.
+    enable_model_preload = False
     enable_browser = True  # Phase 2 — lazy, no actual Chromium during tests
     wake_phrase = "onyx"
     wake_capture_seconds = 2.5

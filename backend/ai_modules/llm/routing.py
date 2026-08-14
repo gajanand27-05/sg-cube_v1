@@ -45,8 +45,24 @@ class RoutingPolicy:
     def _default_mapping(self) -> dict[TaskType, str]:
         """Default routing — prefers local for fast tasks, cloud for reasoning."""
         return {
+            # These two run on EVERY turn. Moving them to the cloud was tried
+            # and reverted on measurement — keeping the numbers here so it is
+            # not tried again on intuition:
+            #
+            #   local phi3 : 6408ms cold, 861ms warm, 898ms worst of 5
+            #   cloud      : 3542ms cold, 3451ms warm, and one run of
+            #                1,296,648ms (21.6 minutes) that returned False
+            #
+            # Cloud is 4x slower warm, and _secondary_check is fail-closed, so
+            # that tail does not just hang the turn — it REJECTS the command,
+            # which is indistinguishable from the assistant mishearing you.
+            # The cold-start cost is better fixed by keeping phi3 resident
+            # (ollama_keep_alive) and not running the vision loop that evicts
+            # it, which costs nothing per turn.
             TaskType.INTENT_CLASSIFICATION: "ollama",
             TaskType.VERIFICATION: "ollama",
+            # Stays local: Ollama Cloud serves no embedding models, and nomic
+            # is 0.3GB / ~50ms warm — it is not what drains the battery.
             TaskType.EMBEDDING: "embedding",
             TaskType.PLANNING: _cloud_or("ollama"),
             TaskType.CODING: _cloud_or("ollama"),

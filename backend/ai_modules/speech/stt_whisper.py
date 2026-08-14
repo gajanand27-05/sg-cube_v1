@@ -1,27 +1,18 @@
 import threading
-from functools import lru_cache
 from pathlib import Path
 from typing import Generator
 
 import numpy as np
-from faster_whisper import WhisperModel
 
+from backend.ai_modules.speech.stt_manager import get_model  # noqa: F401
 from backend.server.config import settings
 
-
-@lru_cache(maxsize=1)
-def get_model() -> WhisperModel:
-    """Load Whisper once, cache for the process lifetime.
-
-    Defaults: CPU + int8 — works on any machine without CUDA.
-    Switch to device='cuda' + compute_type='float16' if you have a GPU.
-    First call downloads the model weights (~140MB for 'base').
-    """
-    return WhisperModel(
-        settings.whisper_model,
-        device="cpu",
-        compute_type="int8",
-    )
+# get_model used to live here as an @lru_cache(maxsize=1) pinned to
+# device="cpu", compute_type="int8" — so the GPU was never used, accuracy was
+# capped by int8 quantisation, and the model was held for the life of the
+# process with no way to switch when the power source changed. It now comes
+# from stt_manager, which picks the profile and owns the lifetime. Re-exported
+# here because callers already import it from this module.
 
 
 # Initial-prompt biasing for Whisper. Single-word commands ("lock",

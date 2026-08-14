@@ -48,11 +48,16 @@ def _is_malicious(args: dict) -> str | None:
 
 
 async def _secondary_check(user_query: str, tool_name: str, tool_args: dict, reasoning: str) -> bool:
-    """Ask a smaller, faster model (phi3) if this tool call makes sense.
+    """Ask a second model whether this tool call makes sense.
 
-    Routes via TaskType.VERIFICATION → Ollama (phi3) per routing policy.
-    Returns True when the model verifies the call, False on rejection or
-    on any exception (fail-closed).
+    Routes via TaskType.VERIFICATION to local Ollama (phi3): 861ms warm,
+    6408ms cold. Running it in the cloud instead was measured at 3451ms warm
+    with a 21-minute outlier, so local stays — see routing.py for the numbers.
+
+    Fail-closed: returns False on rejection AND on any exception. Worth
+    knowing what that means operationally — when the routed backend is
+    unreachable, every deep-checked tool is rejected, which from the outside
+    looks exactly like the assistant mishearing the command.
     """
     llm = get_provider()
     prompt = f"""You are a safety and logic verifier for an AI Operating System.
