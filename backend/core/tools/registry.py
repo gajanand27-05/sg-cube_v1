@@ -158,7 +158,41 @@ _LLM_MODULES = frozenset({
     # answer with the LLM, so it needs the LLM budget rather than the
     # data-fetch one. Its own HTTP calls are bounded well below it.
     "web_search",
+    # vision: describe_screen runs a local vision language model. Measured at
+    # 34-39s per image on this hardware against the 30s default, so it could
+    # never return anything but a timeout — the tool was unreachable rather
+    # than slow. It belongs in the LLM tier because it invokes a model.
+    "vision",
 })
+
+
+_MAX_DESCRIPTION_CHARS = 600
+
+
+def _describe(doc: str | None) -> str:
+    """The description the planner actually sees, from a tool's docstring.
+
+    This used to be `doc.strip().split("\\n")[0]` — the first LINE, not the
+    first paragraph. Every tool whose docstring explained when NOT to use it,
+    what its arguments mean, or what it costs was handing the planner a
+    sentence fragment cut at the first newline. describe_screen and ocr_screen
+    both spelled out which of the two to prefer; the planner never saw a word
+    of it and picked between them inconsistently, once choosing the 35-second
+    vision model to read text that OCR returns in three.
+
+    Paragraphs are joined into one line because the schema is serialized into
+    a JSON prompt where the line structure carries no meaning. Capped so a long
+    docstring cannot crowd out the other 100 tools.
+    """
+    if not doc:
+        return ""
+    text = " ".join(inspect.cleandoc(doc).split())
+    if len(text) <= _MAX_DESCRIPTION_CHARS:
+        return text
+    # Cut on a sentence boundary when there is one nearby, so the description
+    # never ends mid-clause the way the old first-line slice did.
+    cut = text.rfind(". ", 0, _MAX_DESCRIPTION_CHARS)
+    return text[:cut + 1] if cut > _MAX_DESCRIPTION_CHARS // 2 else text[:_MAX_DESCRIPTION_CHARS]
 
 
 def _timeout_for_tool(tool: "Tool") -> float:
@@ -224,7 +258,7 @@ def tool(security: Any = SecurityLevel.SAFE, tier: Any = None, trusted: bool = F
 
     def decorator(f: Callable[..., dict]) -> Callable[..., dict]:
         name = f.__name__
-        description = (f.__doc__ or "").strip().split("\n")[0]
+        description = _describe(f.__doc__)
 
         # Phase 0.6: destructive tools cannot be trusted. If someone
         # declares one, ignore the flag and warn — the invariant is

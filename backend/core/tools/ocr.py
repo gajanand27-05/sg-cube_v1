@@ -19,9 +19,14 @@ MAX_CHARS = 6000
 
 @tool(tier=CapabilityTier.READONLY)  # tier: captures screen + OCR, no state change
 def ocr_screen() -> ToolResult:
-    """Read text visible anywhere on the screen using OCR. Takes a screenshot
-    of the full desktop and runs Tesseract on it. Useful for "read the error
-    on screen", "what does this say", "OCR this image"."""
+    """Read the exact text visible anywhere on screen, using OCR. FAST: about
+    3 seconds.
+
+    This is the right tool for every request to read, quote, extract or OCR
+    what is on screen — "read my screen", "read the error", "what does this
+    say", "what is the text on screen". Prefer it over `describe_screen`,
+    which is a ~35 second vision model and returns a description rather than
+    the words themselves."""
     try:
         import pytesseract
     except ImportError:

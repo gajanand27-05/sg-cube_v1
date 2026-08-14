@@ -15,10 +15,15 @@ from backend.core.vision.vlm import analyze_screenshot
 
 @tool(tier=CapabilityTier.READONLY)  # tier: captures screen + VLM description, no state change
 async def describe_screen() -> ToolResult:
-    """Look at the user's screen right now and describe what's on it. Uses a
-    local vision language model (Qwen2.5-VL). Prefer this for "what's on my
-    screen", "what am I doing", "describe what you see" — anything requiring
-    scene understanding rather than exact text extraction."""
+    """Describe the LAYOUT and ACTIVITY on the user's screen — what app is
+    open, what they appear to be doing. SLOW: runs a local vision model and
+    takes about 35 seconds.
+
+    Do NOT use this to read text. Any request to read, quote, extract or OCR
+    what is on screen — "read my screen", "read the error", "what does this
+    say", "what is the text" — must use `ocr_screen`, which returns exact text
+    in about 3 seconds. Only use this tool when the question is genuinely about
+    the scene rather than its words."""
     img_b64, window_title = capture_screen()
     if not img_b64:
         return ToolResult.error("Screen capture failed")
