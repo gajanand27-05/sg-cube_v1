@@ -79,12 +79,11 @@ DANGEROUS_TARGETS = (
     "../",
 )
 
-# Apps that require Windows elevation. Phase 10b routes these through UAC's
-# `runas` verb — Windows shows its own password / consent dialog. We never see
-# or store the password.
+# Windows-shell apps that need a real launch token rather than a Start Menu
+# lookup. Map of user-spoken name -> actual launchable command. (e.g. "task
+# manager" isn't a real launch token; "taskmgr.exe" is.)
 #
-# Map of user-spoken name -> actual launchable command. (e.g. "task manager"
-# isn't a real launch token; "taskmgr.exe" is.)
+# Membership here does NOT mean "elevate" — see NEEDS_ELEVATION below.
 SYSTEM_APP_COMMANDS: dict[str, str] = {
     "regedit": "regedit.exe",
     "regedit.exe": "regedit.exe",
@@ -119,6 +118,32 @@ SYSTEM_APP_COMMANDS: dict[str, str] = {
 }
 SYSTEM_APPS = set(SYSTEM_APP_COMMANDS.keys())
 
+# Of those, the ones that genuinely require admin rights. Everything else in
+# SYSTEM_APP_COMMANDS launches fine as the current user.
+#
+# This split exists because routing the whole table through UAC made "open
+# command prompt" fail: Start-Process -Verb RunAs raises a consent dialog,
+# which blocks until a human answers it, and runtime.run_tool cancels the tool
+# at 30s. So the command never opened, the assistant reported a bare
+# "Execution timed out after 30.0s", and a modal dialog was left on screen.
+# cmd/powershell/taskmgr/control need no elevation at all, so the prompt was
+# pure cost. Keep this set minimal: elevate only where the app is useless
+# without it.
+NEEDS_ELEVATION: frozenset[str] = frozenset({
+    "regedit.exe",
+    "gpedit.msc",
+    "services.msc",
+    "compmgmt.msc",
+    "diskmgmt.msc",
+    "devmgmt.msc",
+    "mmc.exe",
+})
+
+# Must stay under runtime.run_tool's default 30s budget, or the outer timeout
+# fires first and the user sees a generic timeout instead of "you didn't answer
+# the UAC prompt". The old value here was 120s, which was unreachable.
+UAC_WAIT_S = 20.0
+
 
 def is_target_dangerous(target: str) -> bool:
     t = target.lower()
@@ -129,10 +154,23 @@ def is_system_app(target: str) -> bool:
     return target.strip().lower() in SYSTEM_APPS
 
 
+def _launch_system_app(target_label: str, command: str) -> dict:
+    """Launch a Windows shell app as the current user. No UAC, no blocking —
+    Popen returns as soon as the process is spawned."""
+    # `start` rather than a bare Popen: it gives cmd/powershell their own
+    # console window instead of inheriting ours, and it resolves .msc files
+    # through their shell association.
+    try:
+        subprocess.Popen(f'start "" "{command}"', shell=True)
+    except Exception as e:
+        return {"status": "error", "reason": str(e)}
+    return {"status": "success", "message": f"opened {target_label}"}
+
+
 def _launch_elevated(target_label: str, command: str) -> dict:
     """Trigger Windows UAC for `command`. Windows shows the password / consent
     dialog itself — we never see or handle the password. Blocks until UAC
-    resolves (typically 1–30 seconds depending on user response time).
+    resolves, up to UAC_WAIT_S.
     """
     try:
         result = subprocess.run(
@@ -144,11 +182,15 @@ def _launch_elevated(target_label: str, command: str) -> dict:
             ],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=UAC_WAIT_S,
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return {"status": "blocked", "reason": f"UAC prompt timed out for {target_label!r}"}
+        return {
+            "status": "blocked",
+            "reason": f"UAC prompt for {target_label!r} was not answered within "
+                      f"{UAC_WAIT_S:.0f}s — it may still be on screen",
+        }
     except Exception as e:
         return {"status": "error", "reason": str(e)}
 
@@ -310,9 +352,13 @@ def handle_open_app(intent: Intent) -> dict:
     if not target:
         return {"status": "blocked", "reason": "empty target"}
 
-    # 1. System app? Route through UAC — Windows handles the password prompt.
+    # 1. Windows shell app? Launch directly, elevating only where the app is
+    #    unusable without admin. See NEEDS_ELEVATION.
     if is_system_app(target):
-        return _launch_elevated(target_raw, SYSTEM_APP_COMMANDS[target])
+        command = SYSTEM_APP_COMMANDS[target]
+        if command in NEEDS_ELEVATION:
+            return _launch_elevated(target_raw, command)
+        return _launch_system_app(target_raw, command)
 
     # 2. Substring dangerous filter (blocks abuse like "open random-regedit-tool").
     if is_target_dangerous(target):
