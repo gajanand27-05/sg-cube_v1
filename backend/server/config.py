@@ -104,6 +104,13 @@ class Settings(BaseSettings):
 
     # ── Background services (toggle each independently) ──
     enable_vision: bool = True      # passive screen glance every 5m
+    # Perceptual-hash bits (of 256) that must differ before a glance is worth
+    # a VLM run. Measured on real captures: one changed pixel scores 0, a
+    # clock's worth of digits scores 1, half the screen replaced scores 57.
+    # 6 sits in the empty gap between "the clock ticked" and "the user moved
+    # on". Raise it to skip more aggressively on a battery-sensitive machine;
+    # 0 analyses anything that is not pixel-perfect identical.
+    vision_change_threshold: int = 6
     # Default OFF. The mic listener executes misheard ambient audio
     # (T-wake-word-executes-ambient-audio) and any turn it fires mutates the
     # same STM/planner state a text turn reads, which silently contaminated the

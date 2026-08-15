@@ -5,10 +5,12 @@ from typing import Optional
 
 from backend.core.events import get_bus, Priority
 from backend.core.vision.capture import capture_screen
+from backend.core.vision.change_detect import dhash, distance
 from backend.core.vision.vlm import analyze_screenshot_sync
 from backend.core.memory.screen_memory import screen_memory
 from backend.core.memory.timeline import timeline
 from backend.daemon.ui_events import VisionUpdateEvent
+from backend.server.config import settings
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +22,13 @@ class VisionLoop:
         self.enabled = True
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._last_img_hash: Optional[str] = None
+        # Perceptual hash and title of the last frame we actually ANALYSED,
+        # not the last one captured. Comparing against the last analysed
+        # frame lets slow drift accumulate until it crosses the threshold,
+        # instead of a screen creeping arbitrarily far from what we last
+        # understood one sub-threshold step at a time.
+        self._last_hash = None
+        self._last_title: Optional[str] = None
 
     def start(self):
         if self._thread is not None:
@@ -62,12 +70,21 @@ class VisionLoop:
             log.warning("Vision loop: capture returned no image, skipping step")
             return
 
-        # 2. Simple Change Detection (Efficiency Improvement)
-        # Using the length and a slice of the b64 string as a naive hash
-        current_hash = f"{len(img_b64)}-{img_b64[:100]}-{img_b64[-100:]}"
-        if current_hash == self._last_img_hash:
-            log.debug("Vision loop: screen unchanged, skipping VLM.")
-            return
+        # 2. Change detection. This is the only thing standing between an
+        # idle machine and a 35s VLM run at ~96% GPU every 300s, so it is
+        # perceptual: the byte-hash it replaced skipped 0 of 9 consecutive
+        # live captures and could not skip a single changed pixel. See
+        # change_detect.py for the measurements.
+        current_hash = dhash(img_b64)
+        title_changed = title != self._last_title
+        if not title_changed and self._last_hash is not None:
+            dist = distance(current_hash, self._last_hash)
+            if dist <= settings.vision_change_threshold:
+                log.debug(
+                    f"Vision loop: screen unchanged (dist={dist} <= "
+                    f"{settings.vision_change_threshold}), skipping VLM."
+                )
+                return
 
         # 3. Analyze (Local VLM)
         observation = analyze_screenshot_sync(img_b64, title)
@@ -80,7 +97,8 @@ class VisionLoop:
             observation = {"app": title, "summary": f"Active window: {title}", "keywords": [title], "objects": [], "ocr": []}
             
         # 4. Store (Semantic Memory + Timeline)
-        self._last_img_hash = current_hash
+        self._last_hash = current_hash
+        self._last_title = title
         screen_memory.store_observation(observation)
         
         # Record activity in timeline
