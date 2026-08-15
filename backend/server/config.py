@@ -139,6 +139,14 @@ class Settings(BaseSettings):
     enable_barge_in: bool = True
     barge_in_rms_threshold: float = 800.0  # int16 amplitude scale; ambient ~50-200, speech ~1500-3000
     barge_in_debounce_frames: int = 2  # consecutive high-RMS chunks required (~250ms at 125ms/chunk)
+    # Loudness is not evidence of speech. Room transients measured at 2854 RMS
+    # against the 800 threshold above, and were interrupting playback on their
+    # own. Vosk does not decode non-speech (a click train at 3085 RMS and a
+    # tone at 5656 RMS both yield an empty partial), so the debounce run must
+    # also contain at least one newly decoded token. Set False to go back to
+    # loudness-only — e.g. if a mic ever proves too quiet for Vosk to decode
+    # the barge-in utterance at all.
+    barge_in_require_speech: bool = True
     # E1 (leftovers): open-air echo test harness flag. OFF by default so
     # production barge-in keeps interrupting TTS instantly. When ON,
     # stop_speech() is deferred from wake-onset to after capture completes,

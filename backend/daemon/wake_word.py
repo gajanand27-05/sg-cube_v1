@@ -30,12 +30,43 @@ _FOLLOWUP_MAX_EMPTY = 2
 
 
 def _has_followup_content(partial: str) -> bool:
-    """T-wake-word-executes-ambient-audio item 2: follow-up must be gated on
-    content, not loudness. Returns True when Vosk actually saw speech-like
-    words (2+ alphabetic chars) in the partial — near-silence produces an
-    empty or single-char partial, so loudness alone can no longer trigger a
-    capture that Whisper then hallucinates a command out of."""
+    """Legacy word-shape gate. DO NOT use against this listener's partials.
+
+    Kept because it is still the right check for a free-vocabulary
+    recognizer, but ours is grammar-restricted to [wake_phrase, "[unk]"]:
+    every out-of-vocabulary word — i.e. everything the user actually says
+    after the wake phrase — comes back as the literal token "[unk]", which
+    has no alphabetic characters. Measured against the real model, this
+    returned False for every frame of two recorded speech clips and True
+    only on the frames containing "onyx". Gating anything on it means
+    gating on "did they say the wake word again". Use `_partial_grew`.
+    """
     return any(len(w) >= 2 and w.isalpha() for w in partial.split())
+
+
+def _partial_token_count(partial: str) -> int:
+    """Tokens Vosk has decoded so far in the current utterance."""
+    return len(partial.split())
+
+
+def _partial_grew(partial: str, previous_tokens: int) -> bool:
+    """True when Vosk decoded NEW audio-as-speech on this frame.
+
+    Two measured properties of the real recognizer drive this:
+
+      1. Loud non-speech does not decode at all. A click train at 3085 RMS
+         and a 220Hz tone at 5656 RMS — both far above the 800 barge-in
+         threshold and above the 2854 RMS room transients that were
+         self-interrupting playback — produce an empty partial and an empty
+         FinalResult. The acoustic model rejects them. This is the signal
+         that separates a door slam from a person.
+      2. PartialResult is CUMULATIVE. It keeps returning the whole
+         accumulated string on subsequent silent frames, so "is the partial
+         non-empty" latches True after the first utterance and never
+         un-latches until Reset(). Only an INCREASE in the token count is
+         per-frame evidence; the count is the gate, not the text.
+    """
+    return _partial_token_count(partial) > previous_tokens
 
 
 
@@ -90,17 +121,36 @@ class WakeWordListener:
         # resets to 0 on any low-RMS chunk. When it reaches
         # settings.barge_in_debounce_frames, we fire barge-in.
         self._barge_in_frames = 0
+        # Token count of the last partial we saw, so a frame can be judged
+        # as "Vosk decoded something new" rather than "the mic was loud".
+        self._partial_tokens = 0
+        # Sticky within one debounce run: did ANY frame of this run carry new
+        # decoded speech? Vosk emits a token every few frames, not every
+        # frame, so requiring growth on all N would never pass.
+        self._barge_in_saw_speech = False
 
     def _cb(self, indata, _frames, _time, _status):
         self.queue.put(bytes(indata))
 
-    def _check_barge_in(self, rms: float) -> bool:
-        """Phase 4A: return True iff RMS during SPEAKING passes the debounce.
+    def _check_barge_in(self, rms: float, partial: str = "") -> bool:
+        """Return True iff, during SPEAKING, loud audio that Vosk actually
+        decoded as speech passed the debounce.
+
+        `partial` is the recognizer's cumulative PartialResult for the frame.
+        Loudness alone used to be the whole gate, and room-noise transients
+        measured at 2854 RMS against an 800 threshold self-interrupted
+        playback. Non-speech does not decode (see `_partial_grew`), so we
+        additionally require that at least one frame of the debounce run
+        added a token. `settings.barge_in_require_speech = False` restores
+        the old loudness-only behaviour.
 
         Kept as a separate method so tests can drive the sequence directly
-        without needing a running mic stream. Side effect: mutates
-        `self._barge_in_frames`.
+        without needing a running mic stream. Side effects: mutates
+        `_barge_in_frames`, `_barge_in_saw_speech`, `_partial_tokens`.
         """
+        grew = _partial_grew(partial, self._partial_tokens)
+        self._partial_tokens = _partial_token_count(partial)
+
         if (
             not settings.enable_barge_in
             or state_manager.current != AssistantState.SPEAKING
@@ -108,15 +158,20 @@ class WakeWordListener:
             # Outside SPEAKING or disabled — always reset so partial debounce
             # doesn't leak across a state transition.
             self._barge_in_frames = 0
+            self._barge_in_saw_speech = False
             return False
         if rms > settings.barge_in_rms_threshold:
             self._barge_in_frames += 1
-            if self._barge_in_frames >= settings.barge_in_debounce_frames:
+            self._barge_in_saw_speech = self._barge_in_saw_speech or grew
+            speech_ok = self._barge_in_saw_speech or not settings.barge_in_require_speech
+            if self._barge_in_frames >= settings.barge_in_debounce_frames and speech_ok:
                 self._barge_in_frames = 0
+                self._barge_in_saw_speech = False
                 return True
             return False
         # RMS below threshold — reset debounce.
         self._barge_in_frames = 0
+        self._barge_in_saw_speech = False
         return False
 
     def _drain(self) -> None:
@@ -257,6 +312,11 @@ class WakeWordListener:
         ):
             followup_until: float = 0.0  # monotonic timestamp; <= now == off
             empty_in_a_row: int = 0  # consecutive empty/error captures in followup
+            # Persists ACROSS frames on purpose: PartialResult is cumulative,
+            # so the token-growth gates need the previous frame's string as a
+            # baseline. Re-initialising it per frame would make every loud
+            # frame after a quiet one look like fresh speech.
+            partial: str = ""
 
             while self._running:
                 try:
@@ -287,20 +347,31 @@ class WakeWordListener:
                             trigger = True
                             trigger_label = f"wake: {partial!r} (rms={rms:.0f})"
                             self.recognizer.Reset()
+                            partial = ""
+                            self._partial_tokens = 0
                             empty_in_a_row = 0
                             state_manager._voice_trigger_source = "wake"
-                        elif in_followup and _has_followup_content(partial):
+                        elif in_followup and _partial_grew(partial, self._partial_tokens):
                             # T-wake-word-executes-ambient-audio item 2: gate the
                             # follow-up window on CONTENT, not loudness. Near-silence
                             # after the speaker cut off still clears rms>500 and
                             # Whisper hallucinated whole commands on it ("I am
-                            # working out." ran a full LLM turn). Vosk sees no
-                            # words in that audio, so the partial stays empty.
+                            # working out." ran a full LLM turn). Vosk decodes no
+                            # tokens from that audio, so the count does not move.
+                            #
+                            # This was _has_followup_content, which asked for
+                            # alphabetic words. Under our restricted grammar the
+                            # user's actual words arrive as "[unk]" and that check
+                            # is False for every frame of real speech — measured —
+                            # so the follow-up window only ever reopened on a second
+                            # "onyx", which is just the wake path.
                             trigger = True
                             trigger_label = f"followup: {partial!r} (rms={rms:.0f})"
                             initial_audio = [data]
                             state_manager._voice_trigger_source = "followup"
                             self.recognizer.Reset()
+                            partial = ""
+                            self._partial_tokens = 0
 
                 except Exception:
                     continue
@@ -310,7 +381,7 @@ class WakeWordListener:
                 # RMS + debounce is a coarse mitigation for TTS-bleeding-into-
                 # mic false-fires; a loud speaker close to the mic will still
                 # false-fire (out of scope — future AEC work).
-                if not trigger and self._check_barge_in(rms):
+                if not trigger and self._check_barge_in(rms, partial):
                     trigger = True
                     is_barge_in = True
                     trigger_label = f"barge-in (rms={rms:.0f})"
@@ -348,6 +419,12 @@ class WakeWordListener:
                         self.recognizer.Reset()
                     except Exception:
                         pass
+                    # Reset() empties PartialResult; the growth baseline has to
+                    # follow it down or the next utterance's first tokens look
+                    # like no growth at all.
+                    partial = ""
+                    self._partial_tokens = 0
+                    self._barge_in_saw_speech = False
                     self._drain()
                     self._capturing = False
                     # ponytail: one-line dogfooding hook — survived wake=True/False
