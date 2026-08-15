@@ -110,8 +110,17 @@ export type OcrReadPayload = {
 export type TokenStreamPayload = {
   agent_name: string;
   token: string;
-  /** Cumulative response text — use this, never accumulate `token` yourself. */
+  /** Cumulative RAW stream. For the planner this is a JSON envelope, NOT
+   *  displayable text — rendering it is what put `{"final_response": "..."}`
+   *  on the HUD. Use `prose` for anything a human reads. */
   full_content: string;
+  /** Cumulative speakable text, extracted from the envelope backend-side.
+   *  Empty on a tool_calls turn, which is correct: those speak after
+   *  execution, so there is nothing to show yet. */
+  prose?: string;
+  /** Which turn this stream belongs to. Lets the transcript pair a question
+   *  with its own answer instead of whatever answer arrived most recently. */
+  request_id?: string;
 };
 
 /** Wire shape: _serialize flattens the nested ReliabilityMetrics dataclass

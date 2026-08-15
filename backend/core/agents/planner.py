@@ -59,12 +59,25 @@ class PlannerAgent(BaseInternalAgent):
             # `token` chunks stay for the UI ticker and the planner_first_token
             # latency mark.
             prose = FinalResponseExtractor()
+            prose_so_far = ""
+            request_id = getattr(context, "request_id", "") or ""
             async for chunk in llm.chat_stream(messages, task=TaskType.PLANNING, temperature=0.1):
                 token = chunk["token"]
                 full_content += token
-                get_bus().publish(TokenStreamEvent(self.name, token, full_content))
-                yield {"type": "token", "content": token}
                 speakable = prose.feed(token)
+                if speakable:
+                    prose_so_far += speakable
+                # `prose` rides along so the HUD has something displayable.
+                # Publishing only full_content is what put the raw envelope on
+                # screen — the extractor was already here, just not used for
+                # this event.
+                get_bus().publish(
+                    TokenStreamEvent(
+                        self.name, token, full_content,
+                        prose=prose_so_far, request_id=request_id,
+                    )
+                )
+                yield {"type": "token", "content": token}
                 if speakable:
                     yield {"type": "prose", "content": speakable}
 

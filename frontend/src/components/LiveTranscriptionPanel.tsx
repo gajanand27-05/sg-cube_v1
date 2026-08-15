@@ -1,20 +1,50 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { useUiEvent } from "@/hooks/useUiEvents";
+import { initialTranscript, reduceTranscript } from "@/lib/transcriptTurn";
 
-/** Two-lane live transcript: You (STT partials) on top, Onyx (token stream)
- *  below. Both use the latest-payload hook so values survive a remount.
+/** Two-lane live transcript: You (STT) on top, Onyx (the reply) below.
  *
- *  Onyx lane renders `full_content` — the backend's own accumulated text.
- *  Accumulating `token` here reintroduces the JSON-envelope bug the handoff
- *  warned about; the payload is already the full response.
+ *  The two lanes are fed through a turn reducer rather than rendered straight
+ *  from their latest payloads. Independently-latest values put a question and
+ *  an unrelated answer side by side — a text-path turn publishes only
+ *  `token_stream`, so it replaced the Onyx lane while a stale voice
+ *  transcript stayed above it, and a failed turn left the PREVIOUS answer on
+ *  screen looking like a reply to the question that had just failed. See
+ *  lib/transcriptTurn.ts for the pairing rules.
+ *
+ *  Onyx renders `prose`, never `full_content`: the latter is the raw
+ *  accumulated stream, which for the planner is a JSON envelope. Rendering it
+ *  is what printed `{"final_response": "..."}` on the HUD.
  */
 export function LiveTranscriptionPanel() {
   const stt = useUiEvent("stt_partial");
   const stream = useUiEvent("token_stream");
+  const completed = useUiEvent("agent_completed");
+  const [turn, dispatch] = useReducer(reduceTranscript, initialTranscript);
 
-  const youText = stt?.text ?? "";
-  const youProvisional = stt === null || !stt.is_final;
-  const onyxText = stream?.full_content ?? "";
+  useEffect(() => {
+    if (stt) dispatch({ kind: "stt", text: stt.text, isFinal: !!stt.is_final });
+  }, [stt]);
+
+  useEffect(() => {
+    if (!stream) return;
+    // Fall back to full_content only if the backend predates `prose`; a
+    // visible envelope is still better than a silently empty lane, and it
+    // makes a version mismatch obvious rather than invisible.
+    dispatch({
+      kind: "stream",
+      prose: stream.prose ?? stream.full_content ?? "",
+      requestId: stream.request_id ?? "",
+    });
+  }, [stream]);
+
+  useEffect(() => {
+    if (completed) dispatch({ kind: "done" });
+  }, [completed]);
+
+  const youText = turn.you;
+  const youProvisional = turn.youProvisional;
+  const onyxText = turn.onyx;
 
   return (
     <div className="flex flex-col gap-3 min-h-0 h-full">

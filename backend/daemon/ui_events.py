@@ -92,6 +92,16 @@ class TokenStreamEvent:
     agent_name: str
     token: str
     full_content: str
+    # The speakable text extracted from the envelope so far. `full_content` is
+    # the accumulated RAW stream, which for the planner is a JSON envelope —
+    # the HUD's Onyx lane rendered `{"final_response": "..."}` verbatim because
+    # of it. Same defect as T-tts-speaks-planner-json, one consumer over.
+    # Empty on a tool_calls turn: there is no prose to show yet, which is
+    # correct — those turns speak after execution.
+    prose: str = ""
+    # Correlates this stream with the turn that caused it, so the UI can tell
+    # "the answer to what you just said" from "the answer to something else".
+    request_id: str = ""
 
 
 @dataclass
