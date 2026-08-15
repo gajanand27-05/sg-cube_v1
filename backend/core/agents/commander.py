@@ -9,6 +9,11 @@ from typing import List, Optional, Tuple, AsyncGenerator, Any
 from backend.core.agent.context import ConversationContext
 from backend.core.agents.guardian import GuardianAgent
 from backend.core.agents.operator import OperatorAgent
+from backend.core.agents.pending_confirmation import (
+    Pending,
+    classify_reply,
+    store as pending_store,
+)
 from backend.core.agents.planner import PlannerAgent
 from backend.core.context.builder import context_builder
 from backend.core.context.types import RequestContext
@@ -59,6 +64,30 @@ def _plan_confidence(calls: list[dict]) -> float:
     if not confs:
         return 100.0
     return max(0.0, min(100.0, min(confs) * 100))
+
+
+def _confirmed_summary(batch_results: list[dict], tool_name: str) -> str:
+    """What to say after an authorised action ran.
+
+    Prefers the tool's own message — "Playing Lo-fi beats" beats "Done" — and
+    reports failure honestly rather than claiming success, which is the whole
+    reason the user was asked in the first place.
+    """
+    messages, failed = [], []
+    for wrapper in batch_results:
+        res = wrapper.get("result")
+        status = getattr(res, "status", res.get("status") if isinstance(res, dict) else "error")
+        msg = getattr(res, "message", res.get("message") if isinstance(res, dict) else None)
+        if status == "success":
+            if msg:
+                messages.append(str(msg))
+        else:
+            failed.append(str(msg) if msg else wrapper.get("tool", "that"))
+    if failed:
+        return f"I tried to {tool_name}, but it failed: {failed[0]}"
+    if messages:
+        return messages[0]
+    return f"Done — {tool_name}."
 
 
 def _publish_completed(
@@ -157,8 +186,57 @@ class CommanderAgent:
         
         # Record user query in timeline
         timeline.record_event(content=f"User asked: \"{text}\"", source="user_query")
-        
+
         tool_records: list[dict] = []
+
+        # ── Answer to a pending "should I proceed?" ──────────────────────
+        # take() POPS unconditionally: whatever this turn says, the previous
+        # prompt is now closed. An unanswered prompt must not survive to be
+        # accidentally authorised by a later "sure" meant for something else.
+        pending = pending_store.take(context.session_id)
+        if pending is not None:
+            reply = classify_reply(text)
+            if reply == "no":
+                spoken = f"Okay, I won't {pending.tool_name}."
+                context.add_assistant(spoken)
+                yield CommanderChunk("final_response", spoken)
+                _publish_completed("completed", 100.0, t0, spoken)
+                return
+            if reply == "yes":
+                log.info(
+                    "Confirmation granted for %r (critical=%s)",
+                    pending.tool_name, pending.is_critical,
+                )
+                # Execute what was already verified. These calls passed every
+                # check including the LLM secondary check — confirmation was
+                # the only thing outstanding, so re-verifying would just ask
+                # the same question again.
+                batch_results = await self.operator.execute_batch(
+                    pending.calls, request_id
+                )
+                tool_records.extend(batch_results)
+                for res_wrapper in batch_results:
+                    res = res_wrapper.get("result")
+                    status = getattr(res, "status", res.get("status") if isinstance(res, dict) else "error")
+                    if status == "success":
+                        name = res_wrapper.get("tool", "unknown tool").replace("_", " ")
+                        msg = getattr(res, "message", res.get("message") if isinstance(res, dict) else "success")
+                        timeline.record_event(
+                            content=f"Executed {name}: {msg}", source="execution"
+                        )
+                for res in batch_results:
+                    yield CommanderChunk("tool_end", res)
+                spoken = _confirmed_summary(batch_results, pending.tool_name)
+                context.add_assistant(spoken)
+                yield CommanderChunk("final_response", spoken)
+                _publish_completed("completed", 100.0, t0, spoken)
+                return
+            # Anything else is a new request. The pending is already discarded
+            # above; fall through and plan this turn normally.
+            log.info(
+                "Pending confirmation for %r dropped — user said something else",
+                pending.tool_name,
+            )
 
         for _iter in range(MAX_ITER):
             # A. Planner Stage (receives full AgentContext) - streaming
@@ -219,6 +297,19 @@ class CommanderAgent:
                         else:
                             spoken = f"I need your permission to {tool_name}. Should I proceed?"
                         
+                        # Remember what we are asking about. Without this the
+                        # question was unanswerable: the prompt was spoken and
+                        # `first_pending` died with the frame, so "yes" arrived
+                        # as an unrelated new turn and the action never ran.
+                        pending_store.remember(
+                            context.session_id,
+                            Pending(
+                                calls=pending_calls,
+                                user_query=text,
+                                tool_name=tool_name,
+                                is_critical=is_critical,
+                            ),
+                        )
                         context.add_assistant(spoken)
                         yield CommanderChunk("final_response", spoken)
                         # Completed its turn — asking for permission is a

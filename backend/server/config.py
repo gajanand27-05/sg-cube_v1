@@ -103,6 +103,13 @@ class Settings(BaseSettings):
     livekit_api_secret: str = ""
 
     # ── Background services (toggle each independently) ──
+    # How long an action that asked "should I proceed?" stays answerable.
+    # Short on purpose: the pending call is also popped by the very next turn
+    # whatever it says, so this only bounds the case where the user walks away
+    # mid-prompt. A long window would let a "sure" aimed at something else
+    # authorise an action the user has forgotten about.
+    confirmation_ttl_s: float = 90.0
+
     enable_vision: bool = True      # passive screen glance every 5m
     # Perceptual-hash bits (of 256) that must differ before a glance is worth
     # a VLM run. Measured on real captures: one changed pixel scores 0, a

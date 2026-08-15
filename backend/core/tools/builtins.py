@@ -52,7 +52,7 @@ def close_app(name: str) -> ToolResult:
     )
 
 
-@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: opens browser + starts media, reversible
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # tier: opens browser + starts media, reversible; trusted: same shape as open_app (opens something reversible) and the archetypal voice-assistant request — prompting for it made music unusable
 def play_youtube(query: str) -> ToolResult:
     """Play the FIRST YouTube search result for `query` in the default
     browser. Use this whenever the user says "play <something>" — it's the

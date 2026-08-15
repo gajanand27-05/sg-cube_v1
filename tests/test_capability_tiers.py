@@ -29,6 +29,17 @@ if str(_project_root) not in sys.path:
 TRUSTED_ALLOWLIST = {
     "set_volume", "set_brightness", "open_app", "focus_window",
     "remember", "take_note", "set_reminder",
+    # Added 2026-08-15 after "play some music" was found unusable in real use.
+    # play_youtube is the same shape as open_app, which is already trusted: it
+    # opens a browser tab, reads nothing, writes nothing, and is undone by
+    # closing the tab or saying "stop". Prompting for it was not a considered
+    # security decision — every comparable everyday action (volume, brightness,
+    # launching an app) was already trusted, and its own docstring calls it
+    # "the closest thing to JARVIS playing music for you".
+    # Residual risk is the same as open_app's and bounded the same way: a
+    # misheard transcript can reach it, so it can open an unintended video.
+    # Audible, visible, and reversible — which is the bar for this list.
+    "play_youtube",
     # Camera control is trusted deliberately: the whole point is hands-free
     # ("connect phone camera"), and a confirmation prompt would defeat it for
     # the blind-assistance user this feature exists for. It is reversible, and
