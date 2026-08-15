@@ -10,7 +10,7 @@ from backend.core.events import get_bus
 from backend.daemon.ui_events import HandoverEvent
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: writes to system clipboard, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: writes the clipboard, reversible by copying again
 def clipboard_copy(text: str) -> ToolResult:
     """Set the system clipboard to `text`. Use for "copy this", "save to clipboard"."""
     pyperclip.copy(text)

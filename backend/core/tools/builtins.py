@@ -10,6 +10,7 @@ backend.core.agent.agent imports it eagerly at boot.
 from backend.core.orchestrator.llm_layer import Intent
 from backend.core.safe_executor import command_whitelist as cw
 from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
+from backend.core.tools.unsaved_state import confirm_close_app
 
 
 @tool(security=SecurityLevel.SAFE, tier=CapabilityTier.READONLY)  # tier: produces final spoken output only, no state change
@@ -40,7 +41,12 @@ def open_app(name: str, profile: str = "") -> ToolResult:
     )
 
 
-@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: terminates process, reversible by reopening (may lose unsaved state)
+@tool(
+    security=SecurityLevel.SAFE,
+    tier=CapabilityTier.SYSTEM_WRITE,
+    trusted=True,
+    confirm_if=confirm_close_app,
+)  # trusted for stateless apps, but the guard still confirms anything that looks like it holds unsaved work — "close Chrome" is routine, "close VS Code" is not
 def close_app(name: str) -> ToolResult:
     """Close a running desktop application by name."""
     res = cw.handle_close_app(Intent(action="close_app", target=name))
@@ -66,7 +72,7 @@ def play_youtube(query: str) -> ToolResult:
     )
 
 
-@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: opens browser tab, reversible
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: opens a browser tab, same as open_app/open_url
 def search_web(query: str, engine: str = "google") -> ToolResult:
     """Open a browser window showing a web search for `query`. `engine` is
     "google" (default) or "youtube".
@@ -89,7 +95,7 @@ def search_web(query: str, engine: str = "google") -> ToolResult:
     )
 
 
-@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE)  # tier: opens browser tab, reversible
+@tool(security=SecurityLevel.SAFE, tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: opens a browser tab; reads nothing, writes nothing
 def open_url(url: str) -> ToolResult:
     """Open a browser window at an exact URL or domain the user already named
     (e.g. "github.com", "https://example.com").

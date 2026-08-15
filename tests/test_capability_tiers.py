@@ -53,7 +53,52 @@ TRUSTED_ALLOWLIST = {
     # Same rationale: mode and silence are hands-free controls on an already
     # running camera, and both are trivially reversible by saying the opposite.
     "set_vision_mode", "set_silent_vision",
+
+    # ── 2026-08-15 policy change: trust reversibility, not "writes something"
+    #
+    # 36 tools prompted, and the split was incoherent rather than considered:
+    # `set_volume` was trusted while `volume_up` was not — same capability,
+    # same reversibility. `set_brightness` trusted, `brightness_up` not.
+    # `render_canvas` asked permission to draw on Onyx's own HUD.
+    # `cancel_shutdown` asked permission to CANCEL a destructive event. The
+    # list had accreted rather than been designed.
+    #
+    # The policy is now: routine and reversible runs; meaningful side effects
+    # confirm; destructive/outward-facing always confirms. What still prompts
+    # after this: write_file, edit_file, insert_lines, type_text,
+    # browser_click, browser_type — everything that can overwrite data, inject
+    # keystrokes into a focused window, or act on a logged-in page.
+    #
+    # Worth being honest about the residual risk: this gate is a poor defence
+    # against a misheard command anyway (a user prompted constantly approves
+    # reflexively), and the real defences are the transcript gate, echo
+    # suppression, and the trigger-source rule. Trading a prompt nobody reads
+    # for an assistant that works is the intended trade.
+    "volume_up", "volume_down", "mute",
+    "brightness_up", "brightness_down",
+    "open_url", "search_web", "open_folder", "open_notes_today",
+    "set_timer", "cancel_reminder", "clipboard_copy",
+    "minimize_all", "move_window", "resize_window", "move_resize_window",
+    "arrange_windows", "lock_screen", "cancel_shutdown",
+    "render_canvas",
+    "monitor_battery", "monitor_folder", "set_preference", "update_task_state",
+    # Navigation only. browser_click and browser_type stay untrusted: acting
+    # on a logged-in page is not reversible, and "confirm purchase" is a click.
+    "browser_open", "browser_new_tab", "browser_switch_tab", "browser_close_tab",
+    # "Pause YouTube" previously had no tool at all, so the planner's only
+    # route to it was browser_click. A media intent is not a browser intent.
+    "media_control",
+    # Trusted, but with a confirm_if guard: closing Chrome is routine, closing
+    # an editor with unsaved work is not. See tools/unsaved_state.py — the
+    # guard confirms on a dirty-title marker or an unrecognised app, so the
+    # trust only applies to apps known to hold no document state.
+    "close_app", "close_active_window",
 }
+
+# Trusted tools that still confirm for SOME calls, via registry `confirm_if`.
+# Listed separately so the invariant test can assert the guard exists: a
+# trusted close_app with no guard silently discards unsaved work.
+GUARDED_TRUSTED = {"close_app", "close_active_window"}
 
 
 def _run(coro):
@@ -250,6 +295,16 @@ def test_trusted_allowlist_matches_expected_set():
     non_listed = {name for name in REGISTRY if name not in TRUSTED_ALLOWLIST}
     for name in non_listed:
         assert REGISTRY[name].trusted is False, f"{name} unexpectedly trusted"
+
+    # A trusted tool that closes things MUST carry a confirm_if guard. Trust
+    # without the guard is what would silently discard unsaved work — the
+    # allowlist entry and the guard are one decision, so they are asserted
+    # together rather than left to reviewer memory.
+    for name in GUARDED_TRUSTED:
+        assert callable(getattr(REGISTRY[name], "confirm_if", None)), (
+            f"{name} is trusted but has no confirm_if guard — it would close "
+            f"an app with unsaved work without asking"
+        )
 
     print(f"  [PASS] exactly {len(TRUSTED_ALLOWLIST)} tools trusted, all SYSTEM_WRITE, rest untrusted")
 

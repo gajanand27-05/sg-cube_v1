@@ -166,6 +166,22 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
     # any trusted tool without the user knowing. "wake" and None (text path)
     # are the only cases that honor the trusted flag.
     is_trusted = bool(getattr(tool_obj, "trusted", False))
+    # A trusted tool can still object to a specific call. Trust is not always
+    # a property of the tool — "close Chrome" is routine, "close VS Code" can
+    # throw away unsaved work. The guard sees the arguments; the tier does not.
+    guard = getattr(tool_obj, "confirm_if", None)
+    guard_reason = None
+    if is_trusted and callable(guard):
+        try:
+            guard_reason = guard(args)
+        except Exception as e:
+            # Fail closed. A guard that crashes must not hand out the silent
+            # execution it was added to withhold.
+            log.warning("confirm_if guard for %r raised (%s) — confirming", resolved, e)
+            guard_reason = "its safety check could not be evaluated"
+        if guard_reason:
+            log.info("Trusted tool %r requires confirmation: %s", resolved, guard_reason)
+            is_trusted = False
     is_explicit_trigger = state_manager._voice_trigger_source in (None, "wake")
     if tier == CapabilityTier.SYSTEM_WRITE and is_trusted and is_explicit_trigger:
         obs_engine.report_ai_quality(request_id, 100.0, "System-write on trusted allowlist")

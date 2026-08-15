@@ -62,7 +62,7 @@ SEARCH_ROOTS = [
 ]
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: opens file explorer window, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: opens an explorer window, reads nothing, writes nothing
 def open_folder(name: str) -> dict:
     """Open a folder in File Explorer. `name` can be a special name
     (downloads, documents, desktop, pictures, videos, music) or a full path."""

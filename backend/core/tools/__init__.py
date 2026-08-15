@@ -11,7 +11,9 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_TOOL_MODULES_BLACKLIST = {"__init__", "registry", "sandbox", "llm_helper"}
+# unsaved_state is a helper for close_app's confirm_if guard, not a tool
+# module — it declares no @tool and has nothing to discover.
+_TOOL_MODULES_BLACKLIST = {"__init__", "registry", "sandbox", "llm_helper", "unsaved_state"}
 
 # modname -> import error, for every tool module that did not load.
 #

@@ -30,6 +30,7 @@ import pyautogui
 import pygetwindow as gw
 
 from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
+from backend.core.tools.unsaved_state import confirm_close_focused
 
 log = logging.getLogger(__name__)
 
@@ -531,7 +532,7 @@ def _apply_position(target: str, x: int | None, y: int | None,
     )
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=False)  # tier: window mutation, reversible; untrusted: disruptive enough to confirm
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: window position, reversible by moving it back
 def move_window(target: str, x: int, y: int) -> ToolResult:
     """Move the window matching `target` to screen coordinate (x, y),
     preserving its current size. `target` resolves as hwnd (int) → exact
@@ -540,20 +541,20 @@ def move_window(target: str, x: int, y: int) -> ToolResult:
     return _apply_position(target, x, y, None, None)
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=False)  # tier: window mutation, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: window size, reversible
 def resize_window(target: str, w: int, h: int) -> ToolResult:
     """Resize the window matching `target` to (w, h), preserving its current
     position. Same target resolution as move_window."""
     return _apply_position(target, None, None, w, h)
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=False)  # tier: window mutation, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: window geometry, reversible
 def move_resize_window(target: str, x: int, y: int, w: int, h: int) -> ToolResult:
     """Atomically move and resize the window matching `target` to a rect."""
     return _apply_position(target, x, y, w, h)
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=False)  # tier: bulk arrangement, reversible; untrusted while unproven
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: rearranges windows, reversible; loses no data
 def arrange_windows(layout: str, assignments: str = "", monitor: int = -1) -> ToolResult:
     """Tile foreground windows into a named grid on a monitor's work area.
 
@@ -647,7 +648,7 @@ def arrange_windows(layout: str, assignments: str = "", monitor: int = -1) -> To
 
 # ── Existing tools kept unchanged ────────────────────────────────────────
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: minimizes all windows, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: reversible by restoring
 def minimize_all() -> ToolResult:
     """Minimize every window and show the desktop (Win+D)."""
     pyautogui.hotkey("win", "d")
@@ -677,14 +678,19 @@ def focus_window(app: str) -> ToolResult:
     return ToolResult.success(f"focused {target.title!r}")
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: closes focused window, reversible by reopening (may lose state)
+@tool(
+    tier=CapabilityTier.SYSTEM_WRITE,
+    trusted=True,
+    confirm_if=lambda args: confirm_close_focused(),
+)  # trusted like close_app, and guarded the same way — the difference is that
+# the target is whatever happens to be focused, so the guard has to look it up
 def close_active_window() -> ToolResult:
     """Close the currently focused window (Alt+F4)."""
     pyautogui.hotkey("alt", "f4")
     return ToolResult.success("closed active window")
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: locks workstation, reversible by unlock
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: locking is the SAFE direction, and reversible by unlocking
 def lock_screen() -> ToolResult:
     """Lock the workstation (Win+L)."""
     subprocess.Popen(["rundll32.exe", "user32.dll,LockWorkStation"])
@@ -727,7 +733,7 @@ def restart_pc(seconds: int = 10) -> ToolResult:
     return ToolResult.success(f"restarting in {seconds}s — say cancel shutdown to abort")
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: aborts a pending power event, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: aborts a pending shutdown — prompting to CANCEL a destructive event is backwards
 def cancel_shutdown() -> ToolResult:
     """Cancel a pending shutdown or restart."""
     r = subprocess.run(["shutdown", "/a"], capture_output=True, text=True)

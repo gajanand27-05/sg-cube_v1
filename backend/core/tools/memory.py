@@ -11,7 +11,7 @@ def remember(fact: str) -> dict:
     return {"status": "success", "message": f"I'll remember that: {fact}"}
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: writes user preference, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: writes Onyx's own preference store, reversible by setting it back
 def set_preference(preference: str) -> dict:
     """Store a user preference for future behavior.
     Example: 'always open chrome in incognito mode'
@@ -20,7 +20,7 @@ def set_preference(preference: str) -> dict:
     return {"status": "success", "message": "Preference saved."}
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: writes working memory kv, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: updates Onyx's own task list, reversible
 def update_task_state(key: str, value: str) -> dict:
     """Store temporary state for the current complex task.
     Use this to 'save' progress during multi-step plans.

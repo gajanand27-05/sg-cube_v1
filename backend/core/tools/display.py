@@ -30,7 +30,7 @@ def get_brightness() -> dict:
     return {"status": "success", "message": f"brightness is {pct}%", "args": {"level": pct}}
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: changes brightness state, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: same capability as set_brightness, which was already trusted
 def brightness_up(amount: int = 10) -> dict:
     """Raise brightness by `amount` percentage points (default 10)."""
     current = _current()
@@ -39,7 +39,7 @@ def brightness_up(amount: int = 10) -> dict:
     return {"status": "success", "message": f"brightness raised from {current}% to {new}%"}
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: changes brightness state, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: same capability as set_brightness, which was already trusted
 def brightness_down(amount: int = 10) -> dict:
     """Lower brightness by `amount` percentage points (default 10)."""
     current = _current()

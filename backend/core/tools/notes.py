@@ -50,7 +50,7 @@ def read_notes(date: str = "") -> dict:
     }
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: opens editor + may create file, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: opens the user's own notes; same shape as take_note
 def open_notes_today() -> dict:
     """Open today's notes file in the default markdown editor."""
     NOTES_DIR.mkdir(parents=True, exist_ok=True)

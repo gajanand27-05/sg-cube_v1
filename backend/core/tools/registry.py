@@ -128,6 +128,19 @@ class Tool:
     # decorator forces this to False and logs a warning: destructive
     # tools always prompt, no override permitted.
     trusted: bool = False
+    # Per-call escape hatch from `trusted`. Called with the tool's arguments;
+    # return a short human reason to demand confirmation for THIS call, or
+    # None to let trust stand.
+    #
+    # Exists because trust is not always a property of the tool — sometimes
+    # it is a property of the target. "Close Chrome" is a routine, reversible
+    # request; "close VS Code" can throw away unsaved work. Declaring
+    # close_app untrusted made the common case prompt every time; declaring it
+    # trusted would silently discard work. The guard splits them.
+    #
+    # It must never raise: a broken guard demands confirmation (fail closed)
+    # rather than granting silent execution. See verifier.py.
+    confirm_if: Optional[Callable[[dict], Optional[str]]] = None
 
     async def __call__(self, request_id: Optional[str] = None, **kwargs) -> ToolResult:
         from backend.core.runtime import runtime
@@ -226,13 +239,19 @@ def _type_to_json(py_type: Any) -> str:
     return _PRIMITIVE_TYPES.get(py_type, "string")
 
 
-def tool(security: Any = SecurityLevel.SAFE, tier: Any = None, trusted: bool = False) -> Any:
+def tool(
+    security: Any = SecurityLevel.SAFE,
+    tier: Any = None,
+    trusted: bool = False,
+    confirm_if: Optional[Callable[[dict], Optional[str]]] = None,
+) -> Any:
     """Register a function as a tool. Supports:
       @tool                                                     # bare (tier → DESTRUCTIVE, trusted=False — fail closed)
       @tool(tier=CapabilityTier.READONLY)                       # explicit tier
       @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)     # trusted allowlist entry
       @tool(security=SecurityLevel.CAUTION)                     # legacy security only
       @tool(security=SecurityLevel.CAUTION, tier=..., trusted=True)  # all three
+      @tool(tier=..., trusted=True, confirm_if=_guard)           # trusted, except when _guard objects
 
     `trusted=True` on a DESTRUCTIVE tool is a bug — destructive tools
     always prompt, no override. The decorator forces it back to False
@@ -310,6 +329,7 @@ def tool(security: Any = SecurityLevel.SAFE, tier: Any = None, trusted: bool = F
             security=security,
             tier=resolved_tier,
             trusted=effective_trusted,
+            confirm_if=confirm_if,
         )
         return f
 

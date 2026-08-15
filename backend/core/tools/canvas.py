@@ -154,7 +154,7 @@ def _validate_map_embed(url: str) -> str | None:
 
 # ── The tool ────────────────────────────────────────────────────────────
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=False)
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: draws on Onyx's own HUD — prompting to render its own display was absurd
 def render_canvas(widgets: list) -> ToolResult:
     """Populate the assistant canvas with a layout of widgets.
 

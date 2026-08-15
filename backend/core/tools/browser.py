@@ -92,7 +92,7 @@ if settings.enable_browser:
     _MAX_READ_CHARS = 50_000  # cap page dumps so we don't blow prompt limits
 
     # ── browser_open ────────────────────────────────────────────────────
-    @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=False)
+    @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: navigation only — same act as open_url, which is trusted
     async def browser_open(url: str) -> ToolResult:
         """Ensure the browser is up, then navigate the active tab (or a new
         tab if none) to `url`. Returns the final URL after redirects, the
@@ -121,7 +121,7 @@ if settings.enable_browser:
         )
 
     # ── browser_new_tab ─────────────────────────────────────────────────
-    @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=False)
+    @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: opens a tab, reversible by closing it
     async def browser_new_tab(url: str = "") -> ToolResult:
         """Open a new tab, optionally navigating to `url`. If `url` is
         empty, the tab opens to about:blank."""
@@ -157,7 +157,7 @@ if settings.enable_browser:
         )
 
     # ── browser_switch_tab ──────────────────────────────────────────────
-    @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=False)
+    @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: changes focus only, no page interaction
     async def browser_switch_tab(tab_id: str) -> ToolResult:
         """Focus a tab by its tab_id (from browser_list_tabs)."""
         try:
@@ -171,7 +171,7 @@ if settings.enable_browser:
         return ToolResult.success(message=f"switched to {meta.get('title') or tab_id}", data=meta)
 
     # ── browser_close_tab ───────────────────────────────────────────────
-    @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=False)
+    @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: reversible in every browser (Ctrl+Shift+T restores the tab and its form state)
     async def browser_close_tab(tab_id: str) -> ToolResult:
         """Close a tab by tab_id. Structured error if tab_id is invalid."""
         try:

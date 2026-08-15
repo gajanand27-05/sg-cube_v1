@@ -33,7 +33,7 @@ def get_volume() -> dict:
     return {"status": "success", "message": f"volume is {percent}%", "args": {"level": percent}}
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: changes audio state, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: same capability as set_volume, which was already trusted; reversible
 def volume_up(amount: int = 10) -> dict:
     """Raise system volume by `amount` percentage points (default 10)."""
     ep = _endpoint()
@@ -43,7 +43,7 @@ def volume_up(amount: int = 10) -> dict:
     return {"status": "success", "message": f"volume raised from {current}% to {new}%"}
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: changes audio state, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: same capability as set_volume, which was already trusted; reversible
 def volume_down(amount: int = 10) -> dict:
     """Lower system volume by `amount` percentage points (default 10)."""
     ep = _endpoint()
@@ -53,7 +53,7 @@ def volume_down(amount: int = 10) -> dict:
     return {"status": "success", "message": f"volume lowered from {current}% to {new}%"}
 
 
-@tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: toggles mute state, reversible
+@tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: toggles mute, reversible by saying it again
 def mute() -> dict:
     """Toggle system mute on/off."""
     ep = _endpoint()
