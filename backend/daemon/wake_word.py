@@ -29,6 +29,11 @@ _VAD_INITIAL_WAIT_S = 3.0  # how long to wait for the user to start speaking
 _FOLLOWUP_WINDOW_S = 3.0        # seconds the follow-up window stays open
 _FOLLOWUP_MAX_EMPTY = 2
 
+# How long a new turn waits for the previous one to unwind before starting
+# anyway. Generous: the previous turn has already been interrupted, so this is
+# a safety valve against a wedged turn, not a normal wait.
+_TURN_HANDOVER_TIMEOUT_S = 15.0
+
 
 def _has_followup_content(partial: str) -> bool:
     """Legacy word-shape gate. DO NOT use against this listener's partials.
@@ -195,14 +200,44 @@ class WakeWordListener:
         unconditionally, which prints whether or not anything was playing —
         that is what made interruption look like it worked.
 
-        A previous turn is not awaited. A new trigger has already run
-        on_barge_in / on_wake_detected, which stop speech and interrupt the
-        commander, so the old turn is on its way down; blocking here to
-        confirm that would reintroduce the stall this exists to remove.
-        Overlapping turns are survivable by design — playback state is
-        per-call, see T-tts-loop-globals.
+        Turn BODIES are serialized; the listen loop is not. That distinction
+        is the whole design: the loop must keep reading the mic (or barge-in
+        and "stop" are unreachable), but two turns must never execute at once.
+
+        An earlier version of this let them overlap, on the reasoning that
+        "playback state is per-call, see T-tts-loop-globals". That was true of
+        tts_piper._PlaybackSession and FALSE of SentenceQueue, which is still
+        a module-level singleton: start() binds a fresh queue AND a consumer
+        task to the calling loop, and handle_wake runs asyncio.run() per
+        capture — so a second turn on a second thread overwrote `_task` while
+        the first was still awaiting it. Live result:
+
+            got Future <Task ... SentenceQueue._consumer()> attached to a
+            different loop
+            -> "Sorry, I encountered an error"
+
+        plus "await wasn't used with future" and GeneratorExit noise on
+        shutdown. Roughly one turn in four died that way.
+
+        The join happens INSIDE the new worker, never on the listen loop — a
+        join there would restore exactly the deafness this method exists to
+        remove. The wait is short in practice because a new trigger has
+        already run on_barge_in / on_wake_detected, which stop speech and
+        interrupt the commander, so the previous turn is already unwinding.
         """
+        previous = self._turn_thread
+
         def _run() -> None:
+            # Let the previous turn finish before touching any of the
+            # singletons it owns. Bounded so a wedged turn cannot deafen us
+            # forever; if it does time out we proceed and accept the risk,
+            # because silently dropping the user's command is worse.
+            if previous is not None and previous.is_alive():
+                previous.join(timeout=_TURN_HANDOVER_TIMEOUT_S)
+                if previous.is_alive():
+                    print(f"[wake] previous turn still running after "
+                          f"{_TURN_HANDOVER_TIMEOUT_S:.0f}s; starting anyway")
+
             command_handled = False
             try:
                 result = self.on_wake(audio)
