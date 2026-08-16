@@ -1,5 +1,6 @@
 import json
 import queue
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional, Generator
@@ -128,6 +129,12 @@ class WakeWordListener:
         # decoded speech? Vosk emits a token every few frames, not every
         # frame, so requiring growth on all N would never pass.
         self._barge_in_saw_speech = False
+        # Follow-up bookkeeping. Instance state rather than locals in listen()
+        # because the turn now finishes on a worker thread, which is what
+        # decides whether the window opens.
+        self._followup_until: float = 0.0   # monotonic; <= now == closed
+        self._empty_in_a_row: int = 0
+        self._turn_thread: Optional[threading.Thread] = None
 
     def _cb(self, indata, _frames, _time, _status):
         self.queue.put(bytes(indata))
@@ -173,6 +180,56 @@ class WakeWordListener:
         self._barge_in_frames = 0
         self._barge_in_saw_speech = False
         return False
+
+    def _start_turn(self, audio: bytes) -> None:
+        """Run the turn off the listen loop.
+
+        `on_wake` is handle_wake, which runs the whole turn synchronously —
+        and `_run_brain_streaming` ends in `await sq.finish()`, which drains
+        the sentence queue, so it does not return until the last word has been
+        SPOKEN. Calling it inline meant `_capturing` stayed set for the entire
+        reply and every mic frame hit the `continue` at the top of the loop.
+        The listener was deaf for exactly the window in which barge-in, the
+        wake word and "stop" all need to work. `[TTS] Speech interrupted`
+        still appeared in the log because on_wake_detected calls stop_speech()
+        unconditionally, which prints whether or not anything was playing —
+        that is what made interruption look like it worked.
+
+        A previous turn is not awaited. A new trigger has already run
+        on_barge_in / on_wake_detected, which stop speech and interrupt the
+        commander, so the old turn is on its way down; blocking here to
+        confirm that would reintroduce the stall this exists to remove.
+        Overlapping turns are survivable by design — playback state is
+        per-call, see T-tts-loop-globals.
+        """
+        def _run() -> None:
+            command_handled = False
+            try:
+                result = self.on_wake(audio)
+                command_handled = result is None or bool(result)
+            except Exception as e:
+                print(f"[wake] on_wake handler raised: {e}")
+            finally:
+                # ponytail: one-line dogfooding hook — survived wake=True/False
+                try:
+                    dogfooding_ledger.record_wake(command_handled)
+                except Exception:
+                    pass
+                if command_handled:
+                    self._empty_in_a_row = 0
+                    self._followup_until = time.monotonic() + _FOLLOWUP_WINDOW_S
+                    print(f"[wake] follow-up window open for {_FOLLOWUP_WINDOW_S:.0f}s")
+                else:
+                    self._empty_in_a_row += 1
+                    if self._empty_in_a_row >= _FOLLOWUP_MAX_EMPTY:
+                        self._followup_until = 0.0
+                        self._empty_in_a_row = 0
+                        print(f"[wake] follow-up closed after {_FOLLOWUP_MAX_EMPTY} empty captures; say {self.wake_phrase!r} again")
+                    else:
+                        print(f"[wake] empty capture ({self._empty_in_a_row}/{_FOLLOWUP_MAX_EMPTY}); follow-up still open")
+
+        self._turn_thread = threading.Thread(target=_run, name="wake-turn", daemon=True)
+        self._turn_thread.start()
 
     def _drain(self) -> None:
         while not self.queue.empty():
@@ -310,8 +367,6 @@ class WakeWordListener:
             device=self.device,
             callback=self._cb,
         ):
-            followup_until: float = 0.0  # monotonic timestamp; <= now == off
-            empty_in_a_row: int = 0  # consecutive empty/error captures in followup
             # Persists ACROSS frames on purpose: PartialResult is cumulative,
             # so the token-growth gates need the previous frame's string as a
             # baseline. Re-initialising it per frame would make every loud
@@ -327,7 +382,7 @@ class WakeWordListener:
                     continue
 
                 now = time.monotonic()
-                in_followup = now < followup_until
+                in_followup = now < self._followup_until
 
                 trigger = False
                 is_barge_in = False
@@ -349,7 +404,7 @@ class WakeWordListener:
                             self.recognizer.Reset()
                             partial = ""
                             self._partial_tokens = 0
-                            empty_in_a_row = 0
+                            self._empty_in_a_row = 0
                             state_manager._voice_trigger_source = "wake"
                         elif in_followup and _partial_grew(partial, self._partial_tokens):
                             # T-wake-word-executes-ambient-audio item 2: gate the
@@ -407,13 +462,13 @@ class WakeWordListener:
                     except Exception as e:
                         print(f"[wake] on_wake_detected raised: {e}")
 
-                command_handled = False
+                # Capture stays inline: it reads the same mic queue this loop
+                # does, so they cannot both run.
                 try:
                     audio = self._capture(initial=initial_audio)
-                    result = self.on_wake(audio)
-                    command_handled = result is None or bool(result)
                 except Exception as e:
-                    print(f"[wake] on_wake handler raised: {e}")
+                    print(f"[wake] capture raised: {e}")
+                    audio = b""
                 finally:
                     try:
                         self.recognizer.Reset()
@@ -426,24 +481,15 @@ class WakeWordListener:
                     self._partial_tokens = 0
                     self._barge_in_saw_speech = False
                     self._drain()
+                    # Cleared HERE, not after the turn. Holding it until
+                    # on_wake returned made the listener deaf for the entire
+                    # reply — see _run_turn.
                     self._capturing = False
-                    # ponytail: one-line dogfooding hook — survived wake=True/False
-                    try:
-                        dogfooding_ledger.record_wake(command_handled)
-                    except Exception:
-                        pass
-                    if command_handled:
-                        empty_in_a_row = 0
-                        followup_until = time.monotonic() + _FOLLOWUP_WINDOW_S
-                        print(f"[wake] follow-up window open for {_FOLLOWUP_WINDOW_S:.0f}s")
-                    else:
-                        empty_in_a_row += 1
-                        if empty_in_a_row >= _FOLLOWUP_MAX_EMPTY:
-                            followup_until = 0.0
-                            empty_in_a_row = 0
-                            print(f"[wake] follow-up closed after {_FOLLOWUP_MAX_EMPTY} empty captures; say {self.wake_phrase!r} again")
-                        else:
-                            print(f"[wake] empty capture ({empty_in_a_row}/{_FOLLOWUP_MAX_EMPTY}); follow-up still open")
+
+                # The turn — planning, tools, and every spoken sentence — runs
+                # on a worker so this loop keeps reading the mic. That is what
+                # makes barge-in and "stop" possible at all while speaking.
+                self._start_turn(audio)
 
     def stop(self) -> None:
         self._running = False
