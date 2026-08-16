@@ -109,6 +109,13 @@ class Settings(BaseSettings):
     # mid-prompt. A long window would let a "sure" aimed at something else
     # authorise an action the user has forgotten about.
     confirmation_ttl_s: float = 90.0
+    # How long the mic keeps listening after the assistant ASKS something.
+    # The ordinary follow-up window is 3s and starts when speech ends, which
+    # is not enough to hear "should I proceed?", think, and answer — the
+    # window shut before the user replied, so the answer was never even
+    # transcribed. Comfortably inside confirmation_ttl_s, so the window can
+    # never outlive the pending action it is waiting for.
+    confirmation_followup_window_s: float = 20.0
 
     # The "learning layer": after every tool-using turn it fires a second LLM
     # call to extract facts and workflow patterns into long-term memory.

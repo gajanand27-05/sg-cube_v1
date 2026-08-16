@@ -125,6 +125,17 @@ class PendingStore:
             return None
         return pending
 
+    def awaiting_answer(self) -> bool:
+        """Is any session waiting on a "should I proceed?".
+
+        Non-popping on purpose, and the only read that is. `take()` pops
+        because a stale pending must not be answerable three turns later —
+        but the wake listener needs to know a question is on the table WITHOUT
+        consuming it, so it can keep listening for the answer.
+        """
+        with self._lock:
+            return any(not p.expired() for p in self._slots.values())
+
     def clear(self, session_id: str) -> None:
         with self._lock:
             self._slots.pop(session_id, None)

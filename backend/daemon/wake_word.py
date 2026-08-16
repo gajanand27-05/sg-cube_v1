@@ -9,6 +9,7 @@ import numpy as np
 import sounddevice as sd
 import vosk
 
+from backend.core.agents.pending_confirmation import store as _pending_store
 from backend.core.dogfooding import ledger as dogfooding_ledger
 from backend.core.state import AssistantState, manager as state_manager
 from backend.server.config import settings
@@ -252,8 +253,22 @@ class WakeWordListener:
                     pass
                 if command_handled:
                     self._empty_in_a_row = 0
-                    self._followup_until = time.monotonic() + _FOLLOWUP_WINDOW_S
-                    print(f"[wake] follow-up window open for {_FOLLOWUP_WINDOW_S:.0f}s")
+                    window = _FOLLOWUP_WINDOW_S
+                    # If the turn ended by ASKING something, keep listening.
+                    # 3s begins when the assistant stops speaking, so after
+                    # "I need your permission to close app. Should I proceed?"
+                    # the user hears it, thinks, answers — and by then the
+                    # window has shut. Reported live as "not even reading my
+                    # proceed command": there was no transcript at all,
+                    # because nothing was listening. Asking a question and
+                    # then not waiting for the answer is its own bug.
+                    try:
+                        if _pending_store.awaiting_answer():
+                            window = settings.confirmation_followup_window_s
+                    except Exception:
+                        pass
+                    self._followup_until = time.monotonic() + window
+                    print(f"[wake] follow-up window open for {window:.0f}s")
                 else:
                     self._empty_in_a_row += 1
                     if self._empty_in_a_row >= _FOLLOWUP_MAX_EMPTY:
