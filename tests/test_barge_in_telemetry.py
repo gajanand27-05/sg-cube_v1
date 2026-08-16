@@ -117,5 +117,44 @@ def test_the_echo_drop_records_a_self_interrupt_only_on_a_barge_in_turn():
     )
 
 
+def test_the_suite_is_not_writing_to_the_production_ledger():
+    """Guard on conftest's session fixture.
+
+    This was not hypothetical: a freshly started backend reported
+    barge_in_self_pct 0.0 after a barge-in that never happened, because
+    tests/test_barge_in.py calls the real on_barge_in and the count went into
+    backend/database/dogfooding.json. Anything driving listen() writes a wake
+    attempt the same way.
+
+    The damage is worse than a wrong count: inflating wake_attempts against a
+    real wake_successes drags the measured wake success rate DOWN, so the
+    number the data-gated tickets are read from is wrong in a direction that
+    looks like a genuine regression.
+    """
+    from backend.core.dogfooding import ledger
+
+    production = (Path(__file__).resolve().parents[1]
+                  / "backend" / "database" / "dogfooding.json")
+    assert Path(ledger._path).resolve() != production.resolve(), (
+        "the ledger singleton still points at the production file; a test that "
+        "exercises a recording site will corrupt real dogfooding data"
+    )
+
+
+def test_recording_through_the_singleton_stays_in_the_sandbox():
+    """The in-place redirect has to cover the holders that imported the object
+    rather than the module — trigger.py and wake_word.py both do."""
+    from backend.core.dogfooding import ledger
+    from backend.daemon import trigger
+
+    assert trigger.dogfooding_ledger is ledger, (
+        "trigger.py holds a different ledger object than the one conftest "
+        "redirected, so its writes go somewhere unmonitored"
+    )
+    before = ledger.snapshot()["barge_ins"]
+    trigger.dogfooding_ledger.record_barge_in()
+    assert ledger.snapshot()["barge_ins"] == before + 1
+
+
 if __name__ == "__main__":
     print("run via pytest (uses tmp_path)")
