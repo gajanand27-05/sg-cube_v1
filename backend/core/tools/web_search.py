@@ -119,29 +119,29 @@ def _read_page(url: str) -> str:
 
 
 @tool(tier=CapabilityTier.READONLY)  # tier: HTTP GET + LLM synthesis, no side effects
-def search_and_answer(question: str) -> ToolResult:
-    """Search the web and answer `question` out loud in a sentence or two.
+def search_and_answer(query: str) -> ToolResult:
+    """Search the web and answer `query` out loud in a sentence or two.
 
-    Use for any factual question the assistant cannot answer confidently from
+    Use for any factual query the assistant cannot answer confidently from
     memory — "who won...", "what is...", "when did...", who someone is, what a
     product does, where to find something. You do not need a URL: pass the
-    question or the keywords and the search provider finds the pages.
+    query or the keywords and the search provider finds the pages.
 
     For today's headlines prefer `get_news_data`, for weather
     `get_weather_data`, for share prices `get_stock` — those are live feeds
     with structured output."""
-    question = (question or "").strip()
-    if not question:
-        return ToolResult.blocked("empty question")
+    query = (query or "").strip()
+    if not query:
+        return ToolResult.blocked("empty query")
 
     t0 = time.perf_counter()
     try:
-        response = websearch.search(question, limit=_RESULTS)
+        response = websearch.search(query, limit=_RESULTS)
     except Exception as e:
         return ToolResult.error(f"search_and_answer: every provider failed — {e}")
 
     if not response:
-        return ToolResult.blocked(f"I couldn't find anything on the web about {question!r}")
+        return ToolResult.blocked(f"I couldn't find anything on the web about {query!r}")
 
     material = "\n\n".join(f"{r.title}. {r.body}" for r in response.results)
     pages_read: list[str] = []
@@ -154,10 +154,10 @@ def search_and_answer(question: str) -> ToolResult:
 
     # CHAT, not the SUMMARIZATION default: this text is the user's answer, not
     # a condensation of something they already have. The small local model
-    # confabulated on a question whose answer was not in the material; the
+    # confabulated on a query whose answer was not in the material; the
     # cloud model reports the gap instead.
     answer = llm_generate(
-        f"Question: {question}\n\nWeb search results:\n{material}",
+        f"Question: {query}\n\nWeb search results:\n{material}",
         system=_ANSWER_SYSTEM,
         temperature=0.1,
         task=TaskType.CHAT,

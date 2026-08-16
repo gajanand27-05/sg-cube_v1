@@ -18,6 +18,31 @@ from backend.core.tools import web_search as m
 from backend.core.websearch.base import SearchResponse, SearchResult
 
 ANSWER = getattr(m.search_and_answer, "func", m.search_and_answer)
+
+
+def test_the_two_search_tools_name_their_parameter_the_same():
+    """`web_search(query)` and `search_and_answer(question)` were siblings with
+    different names for the same thing, and the planner paid for it live:
+
+        TypeError: search_and_answer() got an unexpected keyword argument 'query'
+
+    followed by "No tool results were provided, so there is nothing to
+    summarize." — a user-facing non-answer to "how many moons does it have".
+
+    That is not the model hallucinating an argument name; it is a trap in our
+    own schema. Asking it to remember that one sibling takes `query` and the
+    other takes `question`, when both mean "what to search for", is a coin
+    flip we set up.
+    """
+    from backend.core.tools.registry import REGISTRY
+
+    a = set(REGISTRY["web_search"].schema["parameters"]["properties"])
+    b = set(REGISTRY["search_and_answer"].schema["parameters"]["properties"])
+    assert a == b, (
+        f"web_search takes {sorted(a)} but search_and_answer takes {sorted(b)}; "
+        "sibling tools must name the same concept the same way or the planner "
+        "will guess, and guessing right is not something to rely on"
+    )
 LIST = getattr(m.web_search, "func", m.web_search)
 
 
