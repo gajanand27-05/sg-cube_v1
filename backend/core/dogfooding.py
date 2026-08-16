@@ -39,6 +39,17 @@ _WINDOWED = (
     "command_total", "command_success",
     "tools_total", "tools_success",
     "crashes", "total_command_latency_ms",
+    # T-barge-in-tuning. Barge-in only became reachable at all in b8e379a —
+    # before that the listener discarded every mic frame while speaking, so
+    # nobody has ever seen how often it fires or what fires it. The ticket
+    # says do not pre-tune it against synthetic audio, which leaves exactly
+    # one way to answer the question: count it in real use.
+    #
+    # `barge_in_self` is the load-bearing number. It counts barge-ins whose
+    # transcript was then dropped as TTS echo — i.e. the assistant interrupted
+    # ITSELF. A high ratio means the threshold or AEC needs work; a low one
+    # means barge-in is behaving and the tuning ticket can close.
+    "barge_ins", "barge_in_self",
 )
 
 
@@ -61,6 +72,13 @@ def _rates(d: dict[str, Any]) -> dict[str, Any]:
         "crash_rate_pct":      _pct_or_none(d.get("crashes", 0), cmd_t),
         "avg_command_latency_ms": (
             round(d.get("total_command_latency_ms", 0) / cmd_t) if cmd_t else None
+        ),
+        # What fraction of interruptions were the assistant interrupting
+        # itself. None until a barge-in has actually happened — 0% here means
+        # "every barge-in was a real person", which is the good outcome, and
+        # must not be confused with "no data".
+        "barge_in_self_pct": _pct_or_none(
+            d.get("barge_in_self", 0), d.get("barge_ins", 0)
         ),
     }
 
@@ -154,6 +172,23 @@ class Ledger:
     def record_crash(self) -> None:
         with self._lock:
             self._bump("crashes")
+            self._save()
+
+    def record_barge_in(self) -> None:
+        """A barge-in fired, whatever caused it. Counted at the interruption,
+        which is the only point every barge-in passes through — some never
+        reach transcription at all (an empty or too-quiet capture)."""
+        with self._lock:
+            self._bump("barge_ins")
+            self._save()
+
+    def record_barge_in_self(self) -> None:
+        """That barge-in turned out to be our own TTS. Deliberately a separate
+        call from record_barge_in: whether it was self-inflicted is only known
+        after transcription, and folding the two together would double-count
+        the total."""
+        with self._lock:
+            self._bump("barge_in_self")
             self._save()
 
     def reset_window(self, label: str | None = None) -> dict[str, Any]:

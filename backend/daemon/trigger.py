@@ -120,6 +120,15 @@ def on_barge_in(rms: float, emit: EmitFn | None = None) -> None:
     frontend can reflect the "I cut you off" transition, not just a
     neutral wake.
     """
+    # Counted here rather than after transcription: this is the only point
+    # EVERY barge-in passes through. Some never reach Whisper at all (empty or
+    # too-quiet capture), and those still interrupted the user's audio, so
+    # they belong in the denominator.
+    try:
+        dogfooding_ledger.record_barge_in()
+    except Exception:
+        pass
+
     if not settings.defer_stop_speech_after_capture:
         stop_speech()
     # Phase 4B: drain queued sentences too.
@@ -434,6 +443,16 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
             if was_recently_spoken(command):
                 print(f"[trigger] dropping TTS echo {command!r}")
                 log.info("dropped TTS echo: %r", command)
+                # T-barge-in-tuning: an echo dropped on a barge-in turn means
+                # the assistant interrupted ITSELF. That ratio is the number
+                # the ticket needs and it cannot be got any other way — the
+                # ticket forbids pre-tuning against synthetic audio, and
+                # before b8e379a barge-in could not fire at all.
+                if state_manager._voice_trigger_source == "barge_in":
+                    try:
+                        dogfooding_ledger.record_barge_in_self()
+                    except Exception:
+                        pass
                 state_manager.transition_to(AssistantState.IDLE)
                 latency_ledger().record(turn)
                 return False
