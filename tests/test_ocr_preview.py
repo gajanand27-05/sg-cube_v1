@@ -142,6 +142,56 @@ def test_line_order_is_preserved():
     assert _preview(rows) == "hello there second line"
 
 
+def test_toolbar_row_with_enough_tokens_is_dropped_by_mean_length():
+    """The residue after the first two filters, from the real log:
+    "Oa so fir The ax str acl Ask Gemini". Seven-plus tokens and plenty of
+    letters, so token count and letter count both pass — but a mean word
+    length of 2.9. Real prose runs 4-6."""
+    junk = [("Oa", 90, 1), ("so", 90, 1), ("fir", 90, 1), ("The", 90, 1),
+            ("ax", 90, 1), ("str", 90, 1), ("acl", 90, 1)]
+    prose = [("INTERNSHIP", 95, 2), ("OFFER", 95, 2), ("LETTER", 95, 2)]
+    assert _preview(junk + prose) == "INTERNSHIP OFFER LETTER"
+
+
+def test_speakable_cut_does_not_end_mid_word():
+    """The "why did you stop?" bug: a bare slice ended on "as Artificial" and
+    then went silent, which is indistinguishable from a crash to a listener."""
+    from backend.core.tools.ocr import _speakable_cut
+    text = "we are delighted to make you an offer as Artificial Intelligence intern"
+    out, cut = _speakable_cut(text, 45)
+    assert cut is True
+    assert out == out.strip() and not out.endswith(" ")
+    assert text.startswith(out)
+    # the cut point is a word boundary in the original
+    assert text[len(out)] == " "
+
+
+def test_speakable_cut_prefers_a_sentence_boundary():
+    from backend.core.tools.ocr import _speakable_cut
+    text = ("Congratulations, we are delighted to make you this offer. "
+            "The role begins in August and runs for three months.")
+    out, cut = _speakable_cut(text, 80)
+    assert cut is True
+    assert out == "Congratulations, we are delighted to make you this offer."
+
+
+def test_a_sentence_boundary_too_early_is_ignored_in_favour_of_content():
+    """Deliberate trade-off. If the only sentence end sits in the first half of
+    the budget, cutting there throws away most of what we were allowed to say,
+    so it falls back to a word boundary instead. Reading slightly past a full
+    stop is a smaller cost than reading half as much."""
+    from backend.core.tools.ocr import _speakable_cut
+    text = "Short. Then a much longer clause that carries the actual content here."
+    out, _ = _speakable_cut(text, 40)
+    assert out != "Short."
+    assert text.startswith(out) and not out.endswith(" ")
+
+
+def test_speakable_cut_leaves_short_text_alone():
+    from backend.core.tools.ocr import _speakable_cut
+    assert _speakable_cut("short enough", 700) == ("short enough", False)
+
+
 def test_full_text_is_not_filtered():
     """Wiring guard. The tool must return the unfiltered pass in data["text"];
     if the filter ever leaks onto the full text, the agent silently loses every

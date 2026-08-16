@@ -49,6 +49,15 @@ _WORD_PUNCT = set("'-.,:;!?()’")
 # have been asking about.
 _PREVIEW_MIN_LINE_TOKENS = 2
 _PREVIEW_MIN_LINE_LETTERS = 8
+_PREVIEW_MIN_MEAN_TOKEN = 3.2
+
+# How much gets SPOKEN. 200 was a preview length for a glance, but the request
+# it actually serves is "read this document to me" — and 200 characters ends
+# mid-word a couple of lines in. That is what produced "we are delighted to
+# make you an offer as Artificial" followed by silence, and then the user
+# asking "why did you stop?". Roughly a paragraph, and the caller says
+# explicitly when there is more rather than trailing off.
+SPOKEN_CHARS = 700
 
 
 def _word_shaped(token: str) -> bool:
@@ -105,11 +114,39 @@ def _readable_preview(pytesseract, image, limit: int = 200) -> str:
     for key in order:
         tokens = lines[key]
         letters = sum(sum(c.isalpha() for c in t) for t in tokens)
-        # Two signals, both required: enough words to be a phrase, and enough
-        # letters to not be a row of two-character icon labels.
-        if len(tokens) >= _PREVIEW_MIN_LINE_TOKENS and letters >= _PREVIEW_MIN_LINE_LETTERS:
+        # Three signals, all required: enough words to be a phrase, enough
+        # letters to not be a row of two-character icon labels, and a mean
+        # word length that reads like prose. The third catches the residue the
+        # first two miss — a toolbar row like "Oa so fir The ax str acl" has
+        # enough tokens and enough letters, but a mean length of 2.9. Real
+        # text runs 4-6.
+        mean_len = (sum(len(t) for t in tokens) / len(tokens)) if tokens else 0.0
+        if (
+            len(tokens) >= _PREVIEW_MIN_LINE_TOKENS
+            and letters >= _PREVIEW_MIN_LINE_LETTERS
+            and mean_len >= _PREVIEW_MIN_MEAN_TOKEN
+        ):
             kept.extend(tokens)
-    return " ".join(kept)[:limit].strip()
+    out = " ".join(kept).strip()
+    return out if limit is None else out[:limit].strip()
+
+
+def _speakable_cut(text: str, limit: int) -> tuple[str, bool]:
+    """Trim to `limit` on a sentence or word boundary. Returns (text, cut).
+
+    The old cut was a bare slice, so a read ended mid-word — "we are delighted
+    to make you an offer as Artificial" — and the user asked "why did you
+    stop?", which is exactly what that sounds like.
+    """
+    if len(text) <= limit:
+        return text, False
+    window = text[:limit]
+    for end in (". ", "! ", "? "):
+        idx = window.rfind(end)
+        if idx > limit * 0.5:
+            return window[: idx + 1].strip(), True
+    idx = window.rfind(" ")
+    return (window[:idx] if idx > 0 else window).strip(), True
 
 @tool(tier=CapabilityTier.READONLY)  # tier: captures screen + OCR, no state change
 def ocr_screen() -> ToolResult:
@@ -158,13 +195,21 @@ def ocr_screen() -> ToolResult:
     truncated = text[:MAX_CHARS]
     # Prefer the word-filtered preview; fall back to the raw head only if
     # image_to_data was unavailable, so a degraded read still says something.
-    preview = spoken_preview or truncated[:200].replace("\n", " ")
+    readable = spoken_preview or truncated.replace("\n", " ")
+    preview, was_cut = _speakable_cut(readable, SPOKEN_CHARS)
     
     # Calculate confidence based on text quality (simple heuristic)
     confidence = 90.0 if len(text) > 50 else 75.0
     
     return ToolResult.success(
-        message=f"Screen text: {preview}{'...' if len(truncated) > len(preview) else ''}",
+        # Say when there is more, rather than trailing off into silence. A cut
+        # that just stops is indistinguishable from a crash to someone
+        # listening — that is precisely how it was read.
+        message=(
+            f"Screen text: {preview}"
+            + (f" — that is the first part; there is more text on screen."
+               if was_cut else "")
+        ),
         data={"text": truncated, "chars": len(truncated)},
         confidence=confidence,
         confidence_reason=[
