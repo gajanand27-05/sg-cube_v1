@@ -129,7 +129,14 @@ def search_and_answer(query: str) -> ToolResult:
 
     For today's headlines prefer `get_news_data`, for weather
     `get_weather_data`, for share prices `get_stock` — those are live feeds
-    with structured output."""
+    with structured output.
+
+    NEVER use this for anything the machine already knows. The time and date
+    come from `get_time`, battery from `get_battery`, what is on screen from
+    `ocr_screen`. Searching the web for those is slower by four orders of
+    magnitude and opens a browser tab the user did not ask for — measured:
+    "what time is it" answered by search took ~10.8s and left a Google tab
+    open, against ~0.1ms for the local tool."""
     query = (query or "").strip()
     if not query:
         return ToolResult.blocked("empty query")

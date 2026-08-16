@@ -115,7 +115,16 @@ def open_url(url: str) -> ToolResult:
 
 @tool(security=SecurityLevel.SAFE, tier=CapabilityTier.READONLY)  # tier: reads system clock, no side effects
 def get_time() -> ToolResult:
-    """Return the current local time, formatted for speaking aloud."""
+    """The current time and date, read from the system clock.
+
+    Use this for EVERY question about what time or date it is — "what time is
+    it", "what's the time", "what is the date", "what day is it", and the same
+    questions asked about UTC or as a timestamp. The machine's clock already
+    knows, and it is instant.
+
+    Do NOT use `search_and_answer` or a browser for the time. Measured on this
+    machine: answering the time through a web search took ~10.8 seconds and
+    opened a Google tab, against ~0.1ms here."""
     res = cw.handle_get_time(Intent(action="get_time", target=""))
     return ToolResult(
         status=res["status"],

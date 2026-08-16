@@ -374,15 +374,29 @@ def _resolve_name(name: str, args: dict) -> str | None:
     # Multiple matches — score by how well args fit each candidate's params.
     arg_keys = set(args.keys())
 
-    def score(tool_name: str) -> tuple[int, int, int]:
-        params = REGISTRY[tool_name].schema["parameters"]
+    def score(tool_name: str) -> tuple[int, int, int, int]:
+        tool = REGISTRY[tool_name]
+        params = tool.schema["parameters"]
         required = set(params.get("required", []))
         properties = set(params.get("properties", {}).keys())
         missing_required = len(required - arg_keys)
         matched_known = len(arg_keys & properties)
+        # When the args fit equally well, prefer the candidate that does the
+        # LEAST to the world. The model being vague is not a reason to pick
+        # the side-effecting option.
+        #
+        # This is not hypothetical. A bare "search" matches search_web,
+        # web_search and search_and_answer; all three take `query`, so the
+        # only tiebreaker was name length, and it landed on `search_web` —
+        # whose docstring begins "Open a browser window". That is how a
+        # latency probe of "what time is it" left seven Google tabs open on
+        # the user's desktop. The read-only siblings answer the same question
+        # without touching the browser.
+        harmless = 1 if tool.tier == CapabilityTier.READONLY else 0
         # Lower missing_required is better; higher matched_known is better;
-        # shorter name is better as a tiebreaker (closer to what the LLM said).
-        return (-missing_required, matched_known, -len(tool_name))
+        # read-only wins ties; shorter name is the last tiebreaker (closer to
+        # what the LLM said).
+        return (-missing_required, matched_known, harmless, -len(tool_name))
 
     best = max(candidates, key=score)
     # Reject if the best candidate is still missing required args — we'd
