@@ -154,9 +154,13 @@ def test_capturing_flag_covers_only_the_capture_not_the_whole_turn():
 
     original_capture = listener._capture
 
-    def watched_capture(initial=None):
+    def watched_capture(initial=None, **kw):
+        # **kw so this wrapper survives _capture growing a parameter — it did
+        # (initial_is_speech, for the wake pre-roll), and a stub pinned to the
+        # old signature fails as a TypeError inside a thread, which reads like
+        # a production regression and is not one.
         seen.append(("capture", listener._capturing))
-        return original_capture(initial)
+        return original_capture(initial, **kw)
 
     listener._capture = watched_capture
 

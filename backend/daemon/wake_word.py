@@ -2,6 +2,7 @@ import json
 import queue
 import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Optional, Generator
 
@@ -34,6 +35,27 @@ _FOLLOWUP_MAX_EMPTY = 2
 # anyway. Generous: the previous turn has already been interrupted, so this is
 # a safety valve against a wedged turn, not a normal wait.
 _TURN_HANDOVER_TIMEOUT_S = 15.0
+
+# Frames of mic audio kept behind the live position, so the head of a command
+# survives wake recognition.
+#
+# The listen loop feeds every frame to Vosk and then drops it; _capture() picks
+# up at the queue's CURRENT position, so whatever was spoken while the
+# recognizer was still accumulating evidence for "onyx" is simply gone.
+# Measured against the real model on a real recording of this user, varying the
+# wake word's alignment against the 125ms block grid:
+#
+#     lag: min 125ms, median 500ms, max 1625ms   (n=8)
+#
+# Half a second of the command, routinely. That is the whole first word, and it
+# matches the reported mis-transcriptions exactly:
+#     "can you hear me" -> 'Hear me on X.'      ("can you" lost)
+#     "close notepad"   -> 'This is notepad.'   ("close" lost)
+#
+# Sized to the measured maximum: 13 frames x 125ms = 1625ms, about 52KB.
+# Erring long is cheap (the extra audio is the wake word and the quiet before
+# it, which Whisper handles); erring short loses the first word.
+_PREROLL_FRAMES = 13
 
 
 def _has_followup_content(partial: str) -> bool:
@@ -141,6 +163,8 @@ class WakeWordListener:
         self._followup_until: float = 0.0   # monotonic; <= now == closed
         self._empty_in_a_row: int = 0
         self._turn_thread: Optional[threading.Thread] = None
+        # Rolling window of recent frames — see _PREROLL_FRAMES.
+        self._preroll: deque[bytes] = deque(maxlen=_PREROLL_FRAMES)
 
     def _cb(self, indata, _frames, _time, _status):
         self.queue.put(bytes(indata))
@@ -288,7 +312,8 @@ class WakeWordListener:
             except queue.Empty:
                 break
 
-    def _capture(self, initial: Optional[list[bytes]] = None) -> bytes:
+    def _capture(self, initial: Optional[list[bytes]] = None,
+                 initial_is_speech: bool = True) -> bytes:
         """Read mic chunks until VAD says the user stopped speaking.
 
         Two phases:
@@ -313,7 +338,14 @@ class WakeWordListener:
         bytes_before_speech = 0
 
         # Account for any speech in the initial chunks already.
-        for c in chunks:
+        #
+        # initial_is_speech=False for the wake pre-roll. That audio is the WAKE
+        # WORD, not the command -- counting it as speech arms the
+        # trailing-silence rule before the user has started the command, so
+        # "onyx" ... <a beat> ... "open notepad" ends the capture during the
+        # beat and the command is never recorded. Follow-up and barge-in pass
+        # True, because there the triggering frame really IS the command.
+        for c in (chunks if initial_is_speech else []):
             arr = np.frombuffer(c, dtype=np.int16)
             if arr.size and float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) > _VAD_RMS_THRESHOLD:
                 speech_seen = True
@@ -436,8 +468,15 @@ class WakeWordListener:
 
                 trigger = False
                 is_barge_in = False
+                is_wake_preroll = False
                 initial_audio: list[bytes] = []
                 trigger_label = ""
+
+                # Keep every frame briefly. The recognizer needs several
+                # frames before it will say "onyx", and by then the user is
+                # already partway through the command -- those frames ARE the
+                # command, not preamble.
+                self._preroll.append(data)
 
                 arr = np.frombuffer(data, dtype=np.int16)
                 rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) if arr.size else 0
@@ -450,6 +489,9 @@ class WakeWordListener:
 
                         if self.wake_phrase in partial.split():
                             trigger = True
+                            # Everything the recognizer consumed getting here.
+                            initial_audio = list(self._preroll)
+                            is_wake_preroll = True
                             trigger_label = f"wake: {partial!r} (rms={rms:.0f})"
                             self.recognizer.Reset()
                             partial = ""
@@ -515,7 +557,10 @@ class WakeWordListener:
                 # Capture stays inline: it reads the same mic queue this loop
                 # does, so they cannot both run.
                 try:
-                    audio = self._capture(initial=initial_audio)
+                    # Wake pre-roll is the wake WORD, not the command --
+                    # see _capture's initial_is_speech.
+                    audio = self._capture(initial=initial_audio,
+                                          initial_is_speech=not is_wake_preroll)
                 except Exception as e:
                     print(f"[wake] capture raised: {e}")
                     audio = b""
