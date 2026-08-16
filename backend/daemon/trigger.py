@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import tempfile
 import threading
 import uuid
@@ -353,7 +354,56 @@ _STT_HALLUCINATIONS = frozenset({
     "bye", "bye.", ".", "..", "...", "[blank_audio]", "[silence]",
     "subtitles by the amara.org community", "please subscribe",
     "music", "[music]", "applause", "[applause]",
+    # Whisper is trained on video audio, so on silence it falls into video
+    # outros. Every entry below was pulled from this install's own dispatched
+    # history — 770 recorded turns, of which these five ran a full turn each:
+    #   'This is all for today. This is all for today. Bye.'
+    #   'Bye bye. Bye.'
+    #   'Every time, do it. Bye. Bye.'
+    #   'Thanks for watching. Hear me on X.'
+    #   'This is the end of this video. Thank you for watching.'
+    # Not speculative additions: the near neighbours of those, from the same
+    # well-documented class.
+    "bye bye", "goodbye", "see you", "see you later", "see you next time",
+    "see you in the next video", "this is all for today",
+    "that's all for today", "thats all for today",
+    "this is the end of this video", "the end",
+    "don't forget to subscribe", "dont forget to subscribe",
+    "like and subscribe", "subscribe to my channel",
+    "thanks for listening", "thank you for listening",
 })
+
+# Sentence splitter for the compound case. Kept simple deliberately: STT
+# output has no abbreviations or decimals to trip over, and a smarter splitter
+# would be a new source of bugs in a gate whose whole job is to be boring.
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+
+def _normalize_fragment(text: str) -> str:
+    return text.strip().lower().rstrip(".!?").strip()
+
+
+def strip_hallucinated_sentences(command: str) -> str:
+    """Drop the sentences of `command` that are known hallucinations.
+
+    The blocklist used to be matched against the WHOLE transcript, so
+    "Thanks for watching. Hear me on X." sailed through and ran a turn — the
+    hallucination was only part of it. Measured over 770 recorded turns: 1 was
+    caught by whole-transcript matching and 5 more carried a hallucination as
+    one sentence among several.
+
+    Stripping rather than rejecting outright, because the surviving half can
+    be a real command — "thanks for watching, open notepad" should open
+    notepad. Verified on the same 770: this alters 0 of the 764 clean
+    queries, so it cannot quietly eat real speech.
+    """
+    if not command:
+        return ""
+    parts = [p for p in _SENTENCE_SPLIT.split(command.strip()) if p.strip()]
+    if len(parts) <= 1:
+        return command.strip()
+    kept = [p for p in parts if _normalize_fragment(p) not in _STT_HALLUCINATIONS]
+    return " ".join(kept).strip()
 
 
 def _is_dispatchable(command: str) -> bool:
@@ -367,10 +417,17 @@ def _is_dispatchable(command: str) -> bool:
     """
     if not command:
         return False
-    normalized = command.strip().lower().rstrip(".!?")
+    normalized = _normalize_fragment(command)
     if not normalized:
         return False
     if normalized in _STT_HALLUCINATIONS:
+        return False
+    # Compound case: every sentence is a hallucination, but the concatenation
+    # is not in the set. "Bye bye. Bye." and
+    # "This is the end of this video. Thank you for watching." both ran full
+    # turns because of this.
+    remainder = strip_hallucinated_sentences(command)
+    if not _normalize_fragment(remainder):
         return False
     # Single stray character is noise, never an utterance worth executing.
     if len(normalized) < 2:
@@ -430,6 +487,16 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
                 state_manager.transition_to(AssistantState.IDLE)
                 latency_ledger().record(turn)
                 return False
+
+            # Dispatch what survives, not the raw transcript. A real command
+            # can arrive with an outro glued to the front of it, and handing
+            # "Thanks for watching. Open notepad." to the planner puts the
+            # hallucination into the prompt and into long-term memory.
+            cleaned = strip_hallucinated_sentences(command)
+            if cleaned and cleaned != command:
+                print(f"[trigger] stripped hallucinated text: {command!r} -> {cleaned!r}")
+                log.info("stripped hallucinated text: %r -> %r", command, cleaned)
+                command = cleaned
 
             # Echo gate. Separate from _is_dispatchable on purpose: that
             # function is pure (same input, same answer, no clock, no shared
