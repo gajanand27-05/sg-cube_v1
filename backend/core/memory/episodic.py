@@ -53,7 +53,17 @@ Reply with a single JSON object:
                 log.info(f"Learned new pattern: {pattern}")
 
         except Exception as e:
-            log.warning(f"Episodic summarization failed: {e}")
+            # Log the TYPE, not just str(e). This fired repeatedly in live use
+            # as the bare line "Episodic summarization failed:" with nothing
+            # after the colon — several exceptions here stringify to empty
+            # (a bare raise, a cancelled task) and the message alone said
+            # nothing at all about what went wrong. exc_info gives the
+            # traceback without changing the level: this is a
+            # learning-layer nicety, and it must never look like a turn failed.
+            log.warning(
+                "Episodic summarization failed: %s: %s",
+                type(e).__name__, e or "(no message)", exc_info=True,
+            )
 
 
 # Global instance

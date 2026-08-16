@@ -160,11 +160,23 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
     if tier == CapabilityTier.READONLY:
         return VerificationResult(True, reasoning=reasoning)
 
-    # T-wake-word-executes-ambient-audio item 3: trusted SYSTEM_WRITE bypasses
-    # confirmation on explicit-wake turns, but barge-in/follow-up turns must
-    # still confirm — a mis-transcribed ambient word could otherwise execute
-    # any trusted tool without the user knowing. "wake" and None (text path)
-    # are the only cases that honor the trusted flag.
+    # T-wake-word-executes-ambient-audio item 3: a mis-transcribed ambient word
+    # must not fire a trusted tool, so lower-confidence turns (follow-up,
+    # barge-in) get extra scrutiny.
+    #
+    # That scrutiny used to be a confirmation PROMPT, and in real use it
+    # cancelled the entire trust policy: the follow-up window opens after every
+    # turn, so any command spoken in normal back-and-forth — "open task
+    # manager" — was a follow-up and prompted. Measured directly: identical
+    # call, needs_confirmation False on wake and True on followup.
+    #
+    # A prompt was the wrong instrument anyway. It asks the user to
+    # authorise a command they can already hear being repeated back, and a
+    # user prompted on every follow-up approves reflexively. The deep check is
+    # the instrument that actually addresses a MIS-TRANSCRIPTION: it asks
+    # whether this tool call makes sense for what was said. So lower-confidence
+    # turns now still pay the deep check, and skip the prompt if they pass.
+    # DESTRUCTIVE is untouched and still always confirms.
     is_trusted = bool(getattr(tool_obj, "trusted", False))
     # A trusted tool can still object to a specific call. Trust is not always
     # a property of the tool — "close Chrome" is routine, "close VS Code" can
@@ -210,8 +222,16 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
         obs_engine.report_ai_quality(request_id, 100.0, "Destructive tier — always confirm")
         return VerificationResult(True, reasoning=reasoning, needs_confirmation=True, is_critical=True)
 
-    # System-write that survived the deep check: untrusted, or trusted from
-    # a non-explicit-wake turn (barge-in/followup). READONLY and explicitly-woken
-    # trusted paths already returned above.
+    # A trusted tool on a low-confidence turn has now passed the deep check,
+    # which is the check that catches a mis-transcription. Prompting on top of
+    # it is what made "open task manager" ask permission mid-conversation.
+    if tier == CapabilityTier.SYSTEM_WRITE and is_trusted:
+        obs_engine.report_ai_quality(
+            request_id, 100.0, "Trusted system-write — deep-checked on a low-confidence turn"
+        )
+        return VerificationResult(True, reasoning=reasoning)
+
+    # Genuinely untrusted system-write: confirm. This is the CONFIRM tier —
+    # write_file, edit_file, type_text, browser_click and friends.
     obs_engine.report_ai_quality(request_id, 100.0, "System-write tier — confirm")
     return VerificationResult(True, reasoning=reasoning, needs_confirmation=True)

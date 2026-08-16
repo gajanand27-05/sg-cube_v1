@@ -6,15 +6,22 @@ for a gate that decides whether an action runs WITHOUT asking the user.
 The threat it closes (T-wake-word-executes-ambient-audio): the follow-up window
 and barge-in both trigger on ambient sound, not on the wake word. A
 mis-transcription there could execute any tool on the trusted allowlist while
-the user never addressed the assistant at all. So `trusted` is honoured only
-when the turn began with an explicit wake, or came in by text (no voice trigger
-at all); every other origin falls through to the deep check and a confirmation
-prompt.
+the user never addressed the assistant at all. So an explicit wake (or the text
+path, where there is no ambient audio at all) takes the fast path, and every
+other origin falls through to the deep check.
+
+**Changed 2026-08-16.** Those other origins used to ALSO demand a confirmation
+prompt, and that is what this file's own docstring already warned against:
+"too strict makes every follow-up demand confirmation, which trains the user to
+say yes without reading." It shipped anyway, and in live use it cancelled the
+whole trust policy — the follow-up window opens after every turn, so "open task
+manager" said mid-conversation prompted for permission. The prompt is gone; the
+deep check stays and is now the entire safeguard, so the tests assert that it
+RUNS and that a call it rejects does not.
 
 Both directions matter and both are asserted here. Too permissive is the
-vulnerability. Too strict makes every follow-up demand confirmation, which
-trains the user to say yes without reading — and that is how a confirmation
-prompt stops being a safeguard.
+vulnerability. Too strict is how a confirmation prompt stops being a
+safeguard — and that half is not hypothetical, it happened.
 
 The trigger source lives in a module global set by wake_word.py and cleared by
 trigger.py, so leakage between turns is the obvious failure mode; it gets its
@@ -88,25 +95,80 @@ def test_an_explicitly_addressed_turn_runs_without_confirmation(trusted_write_to
     )
 
 
-@pytest.mark.parametrize("source", ["followup", "barge_in"])
-def test_an_ambient_turn_still_has_to_ask(trusted_write_tool, source):
-    """The actual vulnerability. Both of these fire on sound, not on the wake
-    word, so the user may never have addressed the assistant."""
+@pytest.mark.parametrize("source", ["followup", "barge_in", "some_future_trigger"])
+def test_an_ambient_turn_is_deep_checked(trusted_write_tool, source, monkeypatch):
+    """2026-08-16: the scrutiny on a low-confidence turn is the DEEP CHECK,
+    not a prompt.
+
+    It used to be a prompt, and in live use that cancelled the whole trust
+    policy: the follow-up window opens after every turn, so "open task manager"
+    said mid-conversation was a follow-up and demanded permission. The old
+    version of this test asserted exactly that behaviour and passed while the
+    assistant was unusable — being too strict was already called out in this
+    file's own docstring as the failure mode that trains a user to say yes
+    without reading.
+
+    A prompt was never the right instrument against a MIS-TRANSCRIPTION
+    anyway: it asks the user to authorise a command they can already hear.
+    The deep check asks whether the call makes sense for what was said, which
+    is the actual question. So it must run — that is now the whole safeguard,
+    and this test is what holds it in place.
+
+    Unknown sources are parametrised in here on purpose: a new trigger kind
+    added to wake_word.py gets the scrutiny, never the fast path.
+    """
+    called = []
+
+    async def _spy(*a, **kw):
+        called.append(a)
+        return True
+
+    monkeypatch.setattr(v, "_secondary_check", _spy)
     state_manager._voice_trigger_source = source
     res = _verify(trusted_write_tool)
 
+    assert called, (
+        f"a {source!r} turn skipped the deep check — with the prompt gone "
+        "that is the only thing standing between a mis-transcribed ambient "
+        "word and a trusted tool running"
+    )
     assert res.is_valid is True, res.error
-    assert res.needs_confirmation is True, (
-        f"a trusted system-write ran unconfirmed on a {source!r} turn — a "
-        "mis-transcribed ambient word could trigger it with the user unaware"
+    assert res.needs_confirmation is False, (
+        f"a {source!r} turn that PASSED the deep check should not also prompt; "
+        "that combination is what made normal conversation unusable"
     )
 
 
-def test_an_unknown_trigger_source_fails_closed(trusted_write_tool):
-    """A new trigger kind added to wake_word.py must not silently inherit the
-    bypass. The gate lists what is trusted rather than what is not."""
-    state_manager._voice_trigger_source = "some_future_trigger"
-    assert _verify(trusted_write_tool).needs_confirmation is True
+@pytest.mark.parametrize("source", ["followup", "barge_in"])
+def test_an_ambient_turn_is_rejected_when_the_deep_check_fails(trusted_write_tool, source, monkeypatch):
+    """The other half, and the one that makes the change safe: the deep check
+    is load-bearing, so a call it rejects must not run."""
+    async def _fail(*a, **kw):
+        return False
+
+    monkeypatch.setattr(v, "_secondary_check", _fail)
+    state_manager._voice_trigger_source = source
+    res = _verify(trusted_write_tool)
+
+    assert res.is_valid is False, (
+        f"a {source!r} turn ran a trusted tool the deep check had rejected"
+    )
+
+
+def test_an_explicit_turn_skips_the_deep_check(trusted_write_tool, monkeypatch):
+    """The fast path is still fast. An explicit wake pays no LLM round-trip —
+    that was the point of the trusted allowlist and it must not regress into
+    'everything is deep-checked'."""
+    called = []
+
+    async def _spy(*a, **kw):
+        called.append(a)
+        return True
+
+    monkeypatch.setattr(v, "_secondary_check", _spy)
+    state_manager._voice_trigger_source = "wake"
+    _verify(trusted_write_tool)
+    assert not called, "an explicitly-woken trusted tool paid for a deep check"
 
 
 def test_the_trigger_source_does_not_leak_into_the_next_turn():
