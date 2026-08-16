@@ -148,6 +148,98 @@ def on_barge_in(rms: float, emit: EmitFn | None = None) -> None:
     threading.Thread(target=_play_chime, daemon=True).start()
 
 
+# Rule actions the VOICE path may answer without the planner.
+#
+# The voice path has always gone trigger -> Brain -> Commander, skipping the
+# cache and rule tiers entirely (brain.py builds a RequestContext and calls
+# Commander directly; trigger.py's IntentResolved publish says as much:
+# "voice goes straight to the planner"). So the HUD's CACHE and RULE counters
+# sat at 0 forever and every spoken command paid the planner.
+#
+# Measured over 838 real commands from this machine's own timeline: 143
+# (17.1%) match a rule, at 0.009ms each against a measured planner
+# first-token of ~2300ms.
+#
+# But this list is NOT all 143, and that is the point. Rules act literally,
+# where the planner would decline — and two of those 143 hits are
+# mis-transcriptions that a rule would happily execute:
+#     'No.1.2.2.9.9.9.9.9.9.9.9'  -> open_url
+#     '1-0.'                      -> calculate
+# Fast-pathing everything would trade latency for executing garbage, which is
+# the wrong trade on a mic that mishears.
+#
+# So: read-only or safety-critical actions only. That is 128 of the 143 hits
+# (89% of the win) with nothing that can act on the world. Everything else
+# keeps going through the planner, where the verifier and the confirmation
+# gate apply.
+_VOICE_FAST_PATH_ACTIONS = frozenset({
+    # 126 of 838 real commands. The single most common thing said to this
+    # assistant, and it was costing a cloud round-trip to read the clock.
+    "get_time",
+    # Not about latency — about correctness. "stop" is a rule ON PURPOSE
+    # (see handle_stop: a tool call would wait on the planner, and a stop that
+    # waits on a model is not a stop). Because the voice path never consulted
+    # the rule engine, spoken "stop" reached the planner instead, which has no
+    # stop capability. That is why stop did not work by voice.
+    "stop",
+})
+
+
+async def _try_rule_fast_path(command: str, emit: EmitFn | None, turn) -> Optional[bool]:
+    """Answer from the rule tier when it is safe to. None => not handled."""
+    try:
+        from backend.core.orchestrator import rule_engine
+        from backend.core.orchestrator.normalize import normalize_for_rules
+        from backend.core.safe_executor.command_whitelist import HANDLERS
+
+        hit = rule_engine.match(normalize_for_rules(command))
+        if hit is None or hit.action not in _VOICE_FAST_PATH_ACTIONS:
+            return None
+        handler = HANDLERS.get(hit.action)
+        if handler is None:
+            return None
+        result = handler(hit)
+    except Exception as e:
+        # Never let the fast path break a turn — fall through to the planner,
+        # which is what happened before this existed.
+        log.warning("rule fast path failed for %r: %s", command, e)
+        return None
+
+    spoken = (result or {}).get("message") or ""
+    print(f"[ai] response: {spoken!r} (rule: {hit.action}, no planner)")
+
+    try:
+        from backend.daemon.ui_events import IntentResolved
+        get_bus().publish(
+            IntentResolved(action=hit.action, target=command, source_layer="rule"),
+            priority=Priority.NORMAL,
+        )
+    except Exception:
+        pass
+
+    # handle_stop returns an empty message deliberately — _build_spoken_response
+    # turns a blank into silence, and answering "Done" out loud is the one
+    # thing the user just asked us not to do.
+    if spoken.strip():
+        state_manager.transition_to(AssistantState.SPEAKING)
+        try:
+            turn.mark("first_audio_out")
+        except Exception:
+            pass
+        await _speak_selective(spoken, None)
+        event = SpokenResponse(text=spoken)
+        get_bus().publish(event, priority=Priority.NORMAL)
+        _emit(emit, event)
+
+    state_manager.transition_to(AssistantState.IDLE)
+    try:
+        turn.mark("orchestrator_route")
+    except Exception:
+        pass
+    latency_ledger().record(turn)
+    return True
+
+
 async def _speak_selective(text: str, device_id: Optional[str] = None):
     """Speak locally (streaming) or push audio to a remote device."""
     if device_id:
@@ -187,6 +279,10 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         state_manager.transition_to(AssistantState.IDLE)
         latency_ledger().record(turn)
         return False
+
+    fast = await _try_rule_fast_path(command, emit, turn)
+    if fast is not None:
+        return fast
 
     # Use Brain for unified pipeline
     brain_request = BrainRequest(
