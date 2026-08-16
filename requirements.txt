@@ -15,6 +15,11 @@ pyjwt[crypto]==2.10.1
 # ── Phase 3: Speech-to-Text (Whisper) + recording tool ──
 faster-whisper==1.1.0
 sounddevice==0.5.1
+# tools/record_stt_corpus.py imports this at module scope, so it was not an
+# optional extra — the STT corpus recorder died on its first line with
+# ModuleNotFoundError. It went unnoticed because the recorder had never been
+# run to completion, which is the same reason the corpus does not exist yet.
+soundfile==0.14.0
 python-multipart==0.0.20
 requests==2.32.3
 
