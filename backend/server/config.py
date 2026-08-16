@@ -110,6 +110,23 @@ class Settings(BaseSettings):
     # authorise an action the user has forgotten about.
     confirmation_ttl_s: float = 90.0
 
+    # The "learning layer": after every tool-using turn it fires a second LLM
+    # call to extract facts and workflow patterns into long-term memory.
+    #
+    # Default OFF, on measurement. It is fire-and-forget, so it does not block
+    # the reply — but it does not finish before the NEXT turn either, and it
+    # competes with that turn for the same provider. Measured over sequential
+    # tool turns: 14535ms median with it live against 6539ms with it stubbed
+    # out. ~8s per turn, paid by the turn AFTER the one that triggered it.
+    #
+    # And it was not buying anything: the model returns patterns as objects,
+    # Chroma rejects a non-string document, and every extraction was discarded
+    # after the call had been paid for ("Expected document to be a str, got
+    # {'workflow_name': ...}"). That coercion is fixed, so turning this on now
+    # actually stores something — but its value is still unmeasured, and 8s a
+    # turn is a steep price for an unmeasured feature on a voice assistant.
+    enable_episodic_summarizer: bool = False
+
     enable_vision: bool = True      # passive screen glance every 5m
     # Perceptual-hash bits (of 256) that must differ before a glance is worth
     # a VLM run. Measured on real captures: one changed pixel scores 0, a

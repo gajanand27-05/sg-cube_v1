@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 
 from pydantic import BaseModel
@@ -31,19 +32,38 @@ def _log_to_db(
     status: str,
     latency_ms: int,
 ) -> None:
+    """Log the resolved command. Off the response path.
+
+    This is a network round-trip to Supabase and it used to run inline, before
+    process_input returned — measured at 248ms median and 1335ms worst, paid by
+    the user on every single turn, to write a telemetry row nothing reads
+    synchronously. The timeline and the dogfooding ledger are the records that
+    matter and both are written elsewhere.
+
+    Handed to a worker thread rather than a task: supabase-py is sync, so
+    awaiting it would block the event loop anyway, and callers are both sync
+    and async.
+    """
+    payload = {
+        "user_id": user_id,
+        "input_text": input_text,
+        "resolved_action": intent.model_dump() if intent else None,
+        "source_layer": source_layer,
+        "status": status,
+        "latency_ms": latency_ms,
+    }
+
+    def _write() -> None:
+        try:
+            get_service_client().table("command_logs").insert(payload).execute()
+        except Exception as e:
+            log.warning("command_logs insert failed: %s", e)
+
     try:
-        get_service_client().table("command_logs").insert(
-            {
-                "user_id": user_id,
-                "input_text": input_text,
-                "resolved_action": intent.model_dump() if intent else None,
-                "source_layer": source_layer,
-                "status": status,
-                "latency_ms": latency_ms,
-            }
-        ).execute()
+        threading.Thread(target=_write, name="command-log", daemon=True).start()
     except Exception as e:
-        log.warning("command_logs insert failed: %s", e)
+        # Thread creation failing is not a reason to lose the turn.
+        log.warning("command_logs thread failed to start: %s", e)
 
 
 def _publish_resolved(intent: Intent, source_layer: str) -> None:
