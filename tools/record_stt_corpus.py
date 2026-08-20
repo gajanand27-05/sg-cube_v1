@@ -109,7 +109,9 @@ def main() -> int:
 
     print(f"device: {sd.query_devices(kind='input')['name']!r}")
     print(f"corpus: {OUT}")
-    print("\nSay each line naturally, at the distance and volume you'd really use.\n"
+    print("\nSay each line ONCE, naturally, at the distance and volume you'd really use.\n"
+          "Saying it twice makes the transcript disagree with corpus.json, and the\n"
+          "bench then scores a perfect transcription as an error.\n"
           "ENTER to start, ENTER again to stop. Ctrl+C to quit — progress is kept.\n")
 
     todo = [

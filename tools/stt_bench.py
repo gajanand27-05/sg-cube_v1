@@ -67,6 +67,25 @@ def normalize(s: str) -> str:
     return " ".join(_PUNCT.sub(" ", s.lower()).split())
 
 
+def collapse_repeat(s: str) -> str:
+    """'be quiet be quiet' -> 'be quiet'.
+
+    The first recorded corpus has each phrase spoken TWICE (confirmed from the
+    energy envelope: quiet_1 has speech at 1.62-2.12s and again at 4.64-5.20s)
+    while corpus.json stores it once, so a PERFECT transcription scored as an
+    error and every model looked far worse than it was. Opt-in via
+    --collapse-repeats: on by default it would hide a real Whisper repetition
+    loop, which is a genuine failure mode on near-silent audio.
+
+    Only an exact whole-phrase doubling is collapsed, so "very very slow"
+    survives untouched.
+    """
+    w = normalize(s).split()
+    if w and len(w) % 2 == 0 and w[: len(w) // 2] == w[len(w) // 2:]:
+        return " ".join(w[: len(w) // 2])
+    return normalize(s)
+
+
 def wer(ref: str, hyp: str) -> tuple[int, int]:
     """(edit distance, reference length) in words — Levenshtein over tokens."""
     r, h = normalize(ref).split(), normalize(hyp).split()
@@ -95,7 +114,14 @@ def route(text: str) -> str:
         intent = match(normalize_for_rules(text))
     except Exception:
         return "error"
-    return f"{intent.action}:{intent.target}" if intent else "agent"
+    if not intent:
+        return "agent"
+    # args matter as much as target: _set_volume returns target="" and puts the
+    # level in args, so comparing action:target alone scored a correct route to
+    # "set volume to 50" as a miss. Sorted for a stable comparison.
+    args = getattr(intent, "args", None) or {}
+    rendered = ",".join(f"{k}={args[k]}" for k in sorted(args))
+    return f"{intent.action}:{intent.target}({rendered})"
 
 
 def main() -> int:
@@ -103,6 +129,15 @@ def main() -> int:
     ap.add_argument("--configs", nargs="*", help="substring filter on config labels")
     ap.add_argument("--show-errors", action="store_true",
                     help="print every mismatch, not just the summary")
+    # Production decodes greedily (stt_whisper.transcribe_array, beam_size=1).
+    # Benching at beam 5 flatters accuracy and inflates latency, so the result
+    # would describe a decoder the assistant never runs. Default to the truth;
+    # --beam 5 is for answering "would a wider beam be worth the time?"
+    ap.add_argument("--beam", type=int, default=1,
+                    help="beam size (default 1, matching production)")
+    ap.add_argument("--collapse-repeats", action="store_true",
+                    help="score 'stop stop' as 'stop' — for corpora recorded "
+                         "before the say-it-once instruction")
     args = ap.parse_args()
 
     corpus_path = CORPUS / "corpus.json"
@@ -117,7 +152,7 @@ def main() -> int:
         print("corpus.json has entries but no .wav files next to it")
         return 1
 
-    print(f"{len(items)} utterances from {CORPUS}\n")
+    print(f"{len(items)} utterances from {CORPUS}  (beam_size={args.beam})\n")
 
     from faster_whisper import WhisperModel
 
@@ -139,7 +174,7 @@ def main() -> int:
             t0 = time.perf_counter()
             try:
                 segs, _ = model.transcribe(
-                    str(wav), language="en", beam_size=5, vad_filter=True,
+                    str(wav), language="en", beam_size=args.beam, vad_filter=True,
                     vad_parameters={"min_silence_duration_ms": 300},
                     initial_prompt=_COMMAND_PROMPT,
                 )
@@ -148,12 +183,13 @@ def main() -> int:
                 hyp = f"<{type(e).__name__}>"
             times.append((time.perf_counter() - t0) * 1000)
 
-            d, n = wer(truth, hyp)
+            scored = collapse_repeat(hyp) if args.collapse_repeats else hyp
+            d, n = wer(truth, scored)
             errs += d
             ref_words += n
-            if normalize(truth) == normalize(hyp):
+            if normalize(truth) == normalize(scored):
                 exact += 1
-            if route(truth) == route(hyp):
+            if route(truth) == route(scored):
                 cmd_ok += 1
             else:
                 mistakes.append((pid, truth, hyp))

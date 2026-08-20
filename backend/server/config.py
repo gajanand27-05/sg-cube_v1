@@ -54,7 +54,13 @@ class Settings(BaseSettings):
     # "accurate" — always whisper_model_gpu on the GPU (pin this for a demo)
     # "fast"     — always whisper_model_cpu on the CPU
     stt_profile: str = "auto"
-    whisper_model_gpu: str = "large-v3"         # AC power, cuda/float16
+    # medium, not large-v3: on a 30-utterance corpus of the user's own voice
+    # (tools/stt_bench.py, beam_size=1) the two were IDENTICAL — EXACT 80.0%,
+    # CMD 90.0% each — while medium ran at p50 615ms vs 896ms. 281ms per
+    # utterance for no measured accuracy. Caveat: that corpus is a quiet room,
+    # so large-v3 may still win in noise; STT_PROFILE=accurate with
+    # WHISPER_MODEL_GPU=large-v3 pins it back if a real environment shows that.
+    whisper_model_gpu: str = "medium"           # AC power, cuda/float16
     whisper_model_cpu: str = "small"            # battery or no GPU, cpu/int8
     # Release the model after this many seconds idle. 0 disables. Kept well
     # above a conversational pause: unloading after every utterance would pay
