@@ -222,9 +222,66 @@ def _open_url(m: re.Match) -> Intent:
     return Intent(action="open_url", target=m.group("url").strip())
 
 
-def _set_volume(m: re.Match) -> Intent:
-    level = m.group("level")
-    return Intent(action="set_volume", target="", args={"level": int(level)})
+# ── Spoken numbers for level rules ──
+# Whisper emits digits for "set volume to fifty", which hid the fact that the
+# rules only ever accepted \d{1,3}. That is the decoder's formatting choice,
+# not a contract: the spelled form does reach the router (different prompt,
+# model, or phrasing such as "a hundred"), and it used to match nothing.
+# Scoped to level rules on purpose — a global word->digit pass in
+# normalize_for_rules would rewrite free-text targets like
+# "play one more time on youtube".
+_ONES = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+    "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+    "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+}
+_TENS = {
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+    "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+}
+
+# Longest-first: "nineteen" must win over "nine", "one hundred" over "one".
+_SPELLED_LEVEL = (
+    r"(?:a|one)[\s-]+hundred|hundred"
+    r"|(?:" + "|".join(_TENS) + r")(?:[\s-]+(?:" + "|".join(
+        w for w, v in _ONES.items() if 1 <= v <= 9) + r"))?"
+    r"|" + "|".join(sorted(_ONES, key=lambda w: -len(w)))
+)
+_LEVEL = rf"(?P<level>\d{{1,3}}|{_SPELLED_LEVEL})"
+
+_LEVEL_SPLIT = re.compile(r"[\s-]+")
+
+
+def _level_value(raw: str) -> int | None:
+    """Digits or spelled words -> int. None if unparseable, which makes the
+    handler return None and the input fall through to the planner rather than
+    firing set_volume with a garbage level."""
+    raw = raw.strip()
+    if raw.isdigit():
+        return int(raw)
+    total = 0
+    seen = False
+    for tok in _LEVEL_SPLIT.split(raw):
+        if tok in ("a", "and", ""):
+            continue
+        if tok == "hundred":
+            total = (total or 1) * 100
+        elif tok in _TENS:
+            total += _TENS[tok]
+        elif tok in _ONES:
+            total += _ONES[tok]
+        else:
+            return None
+        seen = True
+    return total if seen else None
+
+
+def _set_volume(m: re.Match) -> Intent | None:
+    level = _level_value(m.group("level"))
+    if level is None:
+        return None
+    return Intent(action="set_volume", target="", args={"level": level})
 
 
 def _volume_up(m: re.Match) -> Intent:
@@ -243,9 +300,11 @@ def _unmute(m: re.Match) -> Intent:
     return Intent(action="unmute", target="")
 
 
-def _set_brightness(m: re.Match) -> Intent:
-    level = m.group("level")
-    return Intent(action="set_brightness", target="", args={"level": int(level)})
+def _set_brightness(m: re.Match) -> Intent | None:
+    level = _level_value(m.group("level"))
+    if level is None:
+        return None
+    return Intent(action="set_brightness", target="", args={"level": level})
 
 
 def _brightness_up(m: re.Match) -> Intent:
@@ -602,8 +661,8 @@ RULES: list[RuleEntry] = [
     (re.compile(r"^(?:close|quit|exit|kill)\s+(?P<app>(?!.*\s+(?:with|for|in)\s).+?)$"), _close_app),
 
     # ── Volume ──
-    (re.compile(r"^(?:set|change)\s+volume\s+to\s+(?P<level>\d{1,3})\s*(?:percent)?$"), _set_volume),
-    (re.compile(r"^volume\s+(?P<level>\d{1,3})\s*(?:percent)?$"), _set_volume),
+    (re.compile(rf"^(?:set|change)\s+volume\s+to\s+{_LEVEL}\s*(?:percent)?$"), _set_volume),
+    (re.compile(rf"^volume\s+{_LEVEL}\s*(?:percent)?$"), _set_volume),
     (re.compile(r"^volume\s+up$"), _volume_up),
     (re.compile(r"^volume\s+down$"), _volume_down),
     (re.compile(r"^(?:turn\s+up|increase)\s+(?:the\s+)?volume$"), _volume_up),
@@ -612,8 +671,8 @@ RULES: list[RuleEntry] = [
     (re.compile(r"^(?:unmute|unsilence)\s*(?:audio|sound|volume)?$"), _unmute),
 
     # ── Brightness ──
-    (re.compile(r"^(?:set|change)\s+brightness\s+to\s+(?P<level>\d{1,3})\s*(?:percent)?$"), _set_brightness),
-    (re.compile(r"^brightness\s+(?P<level>\d{1,3})\s*(?:percent)?$"), _set_brightness),
+    (re.compile(rf"^(?:set|change)\s+brightness\s+to\s+{_LEVEL}\s*(?:percent)?$"), _set_brightness),
+    (re.compile(rf"^brightness\s+{_LEVEL}\s*(?:percent)?$"), _set_brightness),
     (re.compile(r"^brightness\s+up$"), _brightness_up),
     (re.compile(r"^brightness\s+down$"), _brightness_down),
     (re.compile(r"^(?:turn\s+up|increase)\s+(?:the\s+)?brightness$"), _brightness_up),
