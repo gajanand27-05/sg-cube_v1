@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import Any, AsyncGenerator
 
 from backend.ai_modules.llm import get_provider
@@ -193,7 +194,24 @@ class PlannerAgent(BaseInternalAgent):
             memory_parts.append("Recent activity:\n" + "\n".join(f"- {e.content}" for e in context.recent_events[:5]))
         memory_context = "\n\n".join(memory_parts) if memory_parts else "No relevant memory."
 
+        # Local time, in the prompt rather than behind get_time. The model has
+        # to already suspect the time matters before it will call a tool, and
+        # "good morning" never feels like it needs a lookup — so in the evening
+        # it answered 'Onyx morning.' with "Good morning!", mirroring the word
+        # back because it had no clock at all. datetime.now() is local by
+        # design: a UTC clock in an IST room is a WRONG clock, which reads as
+        # authoritative and is worse than a missing one.
+        now = datetime.now()
+        time_context = (
+            f"Current local date and time: {now.strftime('%A, %d %B %Y, %I:%M %p')}.\n"
+            f"Use this for anything time-dependent — greetings, 'today', "
+            f"'tonight', relative dates. Do not guess the time of day from the "
+            f"user's wording, and do not call get_time just to greet them."
+        )
+
         return f"""You are the PLANNER Agent for SG_CUBE.
+
+{time_context}
 
 ────────────────────────────────────────────────────────────────
 UNTRUSTED DATA HANDLING — Phase 2 safety invariant

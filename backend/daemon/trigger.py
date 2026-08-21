@@ -594,6 +594,18 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
                 log.info("stripped hallucinated text: %r -> %r", command, cleaned)
                 command = cleaned
 
+            # The capture starts with the wake word, and every rule pattern is
+            # anchored with ^ — so "Onyx, close chrome." matched nothing, went
+            # to the planner, and came back "Done." with zero tools while
+            # Chrome stayed open. Stripped here so the rule tier, the cache key
+            # and the planner prompt all see the same command.
+            from backend.core.orchestrator.normalize import strip_wake_prefix
+
+            unprefixed = strip_wake_prefix(command)
+            if unprefixed != command:
+                print(f"[trigger] stripped wake prefix: {command!r} -> {unprefixed!r}")
+                command = unprefixed
+
             # Echo gate. Separate from _is_dispatchable on purpose: that
             # function is pure (same input, same answer, no clock, no shared
             # state) and 23 tests depend on it staying that way. This one is
