@@ -58,3 +58,26 @@ def _isolate_dogfooding_ledger(tmp_path_factory):
     finally:
         led._path = real_path
         led._data = real_data
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_contact_book(tmp_path_factory):
+    """Keep the suite out of the user's real contacts file.
+
+    Same hazard as the ledger above, with a sharper edge: backend/database/
+    contacts.json holds real people's phone numbers. A test calling the
+    add_contact or delete_contact TOOL reaches the module-level singleton, not
+    a fixture — so without this, one such test would write into (or delete
+    from) the user's actual contacts. The store tests build their own
+    ContactBook and are unaffected either way; this exists for everything that
+    goes through the tool layer.
+    """
+    from backend.core import contacts
+
+    tmp = tmp_path_factory.mktemp("contacts") / "contacts.json"
+    real = contacts.book
+    contacts.book = contacts.ContactBook(tmp)
+    try:
+        yield contacts.book
+    finally:
+        contacts.book = real

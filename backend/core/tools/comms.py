@@ -47,20 +47,40 @@ def send_to_phone(content: str, is_url: bool = False) -> ToolResult:
 @tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.DESTRUCTIVE)  # tier: external comm, irreversible
 def send_whatsapp(contact: str, message: str) -> ToolResult:
     """Open WhatsApp with a pre-filled message to `contact`.
-    `contact` must be a phone number with country code (e.g. "+919876543210"
-    or "919876543210"). Use for "send X a whatsapp"."""
+    `contact` is a saved contact NAME (e.g. "Sharath") or a phone number with
+    country code (e.g. "+919876543210"). Names are resolved against the saved
+    contacts; add one with add_contact. Use for "send X a whatsapp"."""
     if not message.strip():
         return ToolResult.blocked("empty message")
-    phone = re.sub(r"[^\d]", "", contact)
-    if not phone or len(phone) < 7:
-        return ToolResult.blocked("contact must be a phone number with country code (digits only after country prefix)")
 
+    # Names, not just digits. Resolution refuses to guess between two similar
+    # contacts, because this opens a real chat with a real person and there is
+    # no undo — see backend/core/contacts.py.
+    from backend.core.contacts import book
+
+    resolved = book.resolve(contact)
+    if resolved is None:
+        options = book.candidates(contact)
+        if options:
+            return ToolResult.blocked(
+                f"{contact!r} matches more than one contact: "
+                f"{', '.join(options)}. Which one?")
+        known = ", ".join(c.name for c in book.all()) or "none saved yet"
+        return ToolResult.blocked(
+            f"no contact named {contact!r}, and it is not a phone number with "
+            f"a country code. Known contacts: {known}")
+
+    phone = resolved.number
     url = f"https://wa.me/{phone}?text={quote_plus(message)}"
     # No shell. `start "" "<url>"` via shell=True let an LLM-supplied url close
     # the quote and append `& <command>`; webbrowser.open hands the string to
     # ShellExecute/xdg-open directly, so there is no command line to break out of.
     webbrowser.open(url)
-    return ToolResult.success(f"opened WhatsApp chat with +{phone}")
+    # Lead with the NAME. The user hears this sentence, and a read-back number
+    # is unverifiable by ear — the name is their last chance to catch a
+    # resolution that went to the wrong person.
+    who = resolved.name if resolved.name != contact.strip() else f"+{phone}"
+    return ToolResult.success(f"opened WhatsApp chat with {who} (+{phone})")
 
 
 @tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.DESTRUCTIVE)  # tier: external email, irreversible

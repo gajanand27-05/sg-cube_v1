@@ -24,6 +24,8 @@ env/
 backend/database/*.db
 backend/database/chroma_db/
 backend/database/dogfooding.json
+# Real people's phone numbers. Never commit this.
+backend/database/contacts.json
 
 # Logs / runtime
 backend/logs/**
