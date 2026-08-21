@@ -154,11 +154,6 @@ class Settings(BaseSettings):
     # earlier planner measurements. Opt in with ENABLE_WAKE_WORD=true once echo
     # suppression and the follow-up content gate are both proven in the room.
     enable_wake_word: bool = False  # mic listener for the wake phrase
-    # Second HTTPS listener for the phone camera page — phone browsers only
-    # expose getUserMedia to secure contexts, and the Chrome insecure-origin
-    # flag proved unreliable. Self-signed; phone accepts a one-time warning.
-    enable_phone_tls: bool = True
-    phone_tls_port: int = 8443
     # Desktop-sensitive routes (/vision, /memory, /system, /agents,
     # /diagnostics, WS /ws/ui) are loopback-only because the HUD sends no
     # credential. Turn this on if you open the HUD via this machine's LAN IP

@@ -92,8 +92,12 @@ def test_the_audit_can_actually_see_publishers():
     finding event CLASSES, everything would pass by checking nothing."""
     names = _event_class_names()
     assert len(names) > 30, f"only found {len(names)} event classes; the parse is broken"
-    assert "ObstacleEvent" in names
-    assert {"ObstacleEvent", "HapticEvent", "SelfHealingEvent"} <= _constructed_names()
+    # Canaries: classes that exist AND are constructed somewhere. These were
+    # ObstacleEvent/HapticEvent until the phone-camera subsystem was removed —
+    # a canary that no longer exists makes this test pass by checking nothing,
+    # which is the exact failure it was written to prevent.
+    assert "SpokenResponse" in names
+    assert {"SpokenResponse", "SelfHealingEvent"} <= _constructed_names()
 
 
 def test_no_event_class_is_defined_twice():

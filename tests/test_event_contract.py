@@ -134,8 +134,12 @@ def test_flattening_rule_is_still_real():
 
 
 @pytest.mark.parametrize("wire, field", [
-    ("obstacle", "distance_m"),
-    ("vision_health", "frame_age_ms"),
+    # obstacle/distance_m and vision_health/frame_age_ms were the original two;
+    # both events were removed with the phone-camera subsystem. Replaced rather
+    # than dropped — spot-checks with named values are the only thing here that
+    # still bites when the generic check goes vacuous.
+    ("vision_update", "description"),
+    ("stt_partial", "is_final"),
     ("ai_metrics", "active_model"),
 ])
 def test_known_fields_resolve_end_to_end(wire, field):

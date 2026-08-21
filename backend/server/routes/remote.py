@@ -6,7 +6,7 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from backend.core.auth.deps import _is_private_host  # noqa: F401  (re-export: routes/phone_stream.py imports it from here)
+from backend.core.auth.deps import _is_private_host  # noqa: F401  (re-exported for callers)
 from backend.core.events import get_bus
 from backend.core.state import AssistantState, StateChangedEvent
 from backend.daemon.trigger import handle_wake, on_wake_detected

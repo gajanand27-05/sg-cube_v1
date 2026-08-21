@@ -1,9 +1,10 @@
 """Desktop-sensitive routes must not be reachable from the LAN.
 
-main.py binds a second uvicorn listener on phone_tls_port and the phone-camera
-feature needs APP_HOST=0.0.0.0, so /vision/screenshot (a live JPEG of the
-user's desktop), /memory/*, /system/*, /agents, /diagnostics/* and WS /ws/ui
-were all reachable, unauthenticated, by anything on the same Wi-Fi.
+Any deployment that binds APP_HOST=0.0.0.0 exposes /vision/screenshot (a live
+JPEG of the user's desktop), /memory/*, /system/*, /agents, /diagnostics/* and
+WS /ws/ui, unauthenticated, to anything on the same Wi-Fi. The phone-camera
+feature was the original reason to bind wide; it is gone, but the guard is not
+contingent on it — ALLOW_LAN_HUD still opens the same door on request.
 
 The HUD sends no credential, so the guard is peer-based, not token-based:
 loopback only, widened to RFC1918 by ALLOW_LAN_HUD for the user who opens the

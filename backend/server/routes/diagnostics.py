@@ -189,27 +189,6 @@ def get_latency(n: int = 20):
     return {"turns": turns, "count": len(turns)}
 
 
-@router.get("/vision")
-def get_vision_health():
-    """VisionClaw Phase 4: phone-camera pipeline health.
-
-    Every rate field is `null` rather than 0 when it was never measured, so a
-    detector that is imported but never feeds vision_health shows up here as
-    `fps_processed: null` instead of a plausible-looking zero. `stale` is true
-    when no frame has arrived within vision_health.STALE_AFTER_S.
-    """
-    from backend.core.vision.phone_session import registry
-    from backend.core.vision.vision_health import vision_health
-
-    sessions = registry.snapshot()
-    mode = sessions[0].mode if sessions else None
-    return {
-        "phones_connected": len(sessions),
-        "streaming": any(s.streaming for s in sessions),
-        **vision_health.snapshot(mode=mode).as_dict(),
-    }
-
-
 @router.get("/inspect")
 def agent_inspector():
     """Agent Inspector — current tool registry state with usage.

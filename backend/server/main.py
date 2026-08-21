@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.server.config import settings
-from backend.server.routes import admin, agents, auth, diagnostics, execute, files, memory, orchestrate, phone_stream, remote, system, ui, vision, voice, replay
+from backend.server.routes import admin, agents, auth, diagnostics, execute, files, memory, orchestrate, remote, system, ui, vision, voice, replay
 
 # Bootstrap tool registry — triggers all @tool decorators before any agent runs.
 import backend.core.tools  # noqa: F401
@@ -54,58 +54,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning("Preflight itself crashed (unexpected): %s", e)
 
-    # Phone HTTPS: a second uvicorn server for the SAME app, TLS on
-    # phone_tls_port, run as a task on THIS loop — no extra thread, no extra
-    # event loop (the vision-loop-under-uvicorn hang taught that lesson).
-    tls_server = None
-    tls_task = None
-    if settings.enable_phone_tls:
-        try:
-            import uvicorn as _uvicorn
-            from backend.server.routes.phone_stream import _lan_ip
-            from backend.server.tls import ensure_self_signed_cert
-
-            pair = ensure_self_signed_cert(_lan_ip())
-            if pair is not None:
-                cert_file, key_file = pair
-                tls_server = _uvicorn.Server(_uvicorn.Config(
-                    app, host=settings.app_host, port=settings.phone_tls_port,
-                    ssl_certfile=cert_file, ssl_keyfile=key_file,
-                    log_level="warning", lifespan="off",  # this lifespan already ran
-                ))
-                async def _serve_tls(server=tls_server):
-                    # The bind happens inside this task, so the except below
-                    # cannot see it — and uvicorn answers a busy port with
-                    # sys.exit(1). SystemExit is a BaseException, so it slips
-                    # past `except Exception` AND asyncio re-raises it out of
-                    # the loop, killing the whole process before the main
-                    # listener is even bound. A stale sg_cube holding 8443 took
-                    # the entire app down with a bare traceback, which is the
-                    # exact opposite of what this fallback was written for.
-                    try:
-                        await server.serve()
-                    except SystemExit as e:
-                        log.warning(
-                            "Phone HTTPS could not bind %s:%d (plain HTTP still up): "
-                            "port busy or cert rejected (exit %s)",
-                            settings.app_host, settings.phone_tls_port, e.code)
-                    except Exception as e:
-                        log.warning("Phone HTTPS stopped (plain HTTP still up): %s", e)
-
-                tls_task = asyncio.create_task(_serve_tls())
-                log.info("Phone HTTPS listening on %s:%d", settings.app_host, settings.phone_tls_port)
-        except Exception as e:
-            log.warning("Phone HTTPS failed to start (plain HTTP still up): %s", e)
+    # The second HTTPS listener lived here solely so phone browsers would grant
+    # camera permission to the /phone capture page. Removed with the phone
+    # camera subsystem; a replacement should bring its own transport decision
+    # rather than inherit this one.
 
     yield
 
-    if tls_server is not None:
-        tls_server.should_exit = True
-        if tls_task is not None:
-            try:
-                await asyncio.wait_for(tls_task, timeout=5)
-            except (asyncio.TimeoutError, Exception):
-                pass
     stop_services(service_handle)
     await bus.stop()
     log.info("Shutting down")
@@ -147,8 +102,6 @@ app.include_router(system.router)
 app.include_router(files.router)
 app.include_router(diagnostics.router)
 app.include_router(replay.router)
-app.include_router(phone_stream.router)       # WS /ws/phone_stream
-app.include_router(phone_stream.page_router)  # /phone capture page + /vision/phone_frame
 
 # Phase E: Optionally mount MCP server at /mcp
 try:

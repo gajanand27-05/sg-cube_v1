@@ -9,10 +9,6 @@ import {
   MemoryEngineStatusPill,
 } from "@/components/MemoryEnginePanel";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import {
-  VisionModulePanel,
-  VisionStatusPill,
-} from "@/components/VisionModulePanel";
 import { LiveTranscriptionPanel } from "@/components/LiveTranscriptionPanel";
 import { ConfidencePanel } from "@/components/ConfidencePanel";
 import { ActivityTimelinePanel } from "@/components/ActivityTimelinePanel";
@@ -94,9 +90,6 @@ export default function App() {
             statusSlot={<MemoryEngineStatusPill />}
           >
             <MemoryEnginePanel />
-          </Panel>
-          <Panel title="Vision Module" number="03" statusSlot={<VisionStatusPill />}>
-            <VisionModulePanel />
           </Panel>
           <ArchitectureSection />
         </div>

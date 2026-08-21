@@ -55,7 +55,9 @@ def test_the_check_can_see_real_tools():
     assert len(REGISTRY) > 50, f"only {len(REGISTRY)} tools registered — discovery looks broken"
     # Named spot-checks across several modules, so a partial import failure
     # cannot hide behind a healthy-looking total.
-    for name in ("get_time", "describe_scene", "ocr_read"):
+    # describe_scene/ocr_read were the phone-camera pair and went with that
+    # subsystem; describe_screen/ocr_screen are the surviving screen tools.
+    for name in ("get_time", "describe_screen", "ocr_screen"):
         assert name in REGISTRY, f"{name} missing from REGISTRY"
 
 

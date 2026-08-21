@@ -40,19 +40,11 @@ TRUSTED_ALLOWLIST = {
     # misheard transcript can reach it, so it can open an unintended video.
     # Audible, visible, and reversible — which is the bar for this list.
     "play_youtube",
-    # Camera control is trusted deliberately: the whole point is hands-free
-    # ("connect phone camera"), and a confirmation prompt would defeat it for
-    # the blind-assistance user this feature exists for. It is reversible, and
-    # it cannot start a camera unseen — the phone must already be paired with
-    # the page open and permission granted, and the running stream is visible
-    # on both the phone and the HUD.
-    # Residual risk, worth knowing: T-wake-word-executes-ambient-audio means a
-    # misheard transcript can reach a tool, so this can be started by a
-    # mishearing. The preconditions above are what bound that, not the prompt.
-    "connect_phone_camera", "disconnect_phone_camera",
-    # Same rationale: mode and silence are hands-free controls on an already
-    # running camera, and both are trivially reversible by saying the opposite.
-    "set_vision_mode", "set_silent_vision",
+    # connect_phone_camera / disconnect_phone_camera / set_vision_mode /
+    # set_silent_vision were trusted here on a hands-free-camera rationale.
+    # They went with the phone-camera subsystem. A replacement camera feature
+    # must argue its own way onto this list — inheriting a trust decision made
+    # for deleted code is exactly how an allowlist rots.
 
     # ── 2026-08-15 policy change: trust reversibility, not "writes something"
     #

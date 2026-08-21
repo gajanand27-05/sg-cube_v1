@@ -53,9 +53,6 @@ const NODES: MapNode[] = [
   { id: "screen", label: "Screen", sub: "capture", x: 30, y: 330, group: "input",
     desc: "Periodic screen capture feeding the passive vision loop (300s interval, skips unchanged screens).",
     files: ["backend/core/vision/capture.py"] },
-  { id: "phone", label: "Phone Camera", sub: "WS /ws/phone_stream", x: 30, y: 420, group: "input",
-    desc: "VisionClaw phase 1: phone streams camera frames over WebSocket. Frame pixels not yet wired end-to-end.",
-    files: ["backend/server/routes/phone_stream.py"] },
 
   // ── voice path ──
   { id: "wake", label: "Wake Word", sub: "Vosk + VAD", x: 200, y: 90, group: "voice", event: "wake_heard",
@@ -111,9 +108,6 @@ const NODES: MapNode[] = [
   { id: "vlm", label: "VLM", sub: "qwen2.5vl", x: 370, y: 330, group: "vision",
     desc: "Local vision-language model describing the screenshot as {app, summary, keywords}.",
     files: ["backend/core/vision/vlm.py"] },
-  { id: "ingest", label: "Frame Ingest", sub: "2fps throttle", x: 200, y: 420, group: "vision",
-    desc: "Throttles incoming phone frames and publishes PhoneFrameEvent. Obstacle detection (YOLO) lands here in VisionClaw phase 2.",
-    files: ["backend/core/vision/frame_ingest.py"] },
 
   // ── output ──
   { id: "prose", label: "Prose Extract", sub: "state machine", x: 880, y: 470, group: "output",
@@ -159,7 +153,6 @@ const EDGES: Array<[string, string]> = [
   ["screen", "visionloop"],
   ["visionloop", "vlm"],
   ["vlm", "chroma"],
-  ["phone", "ingest"],
   ["planner", "prose"],
   ["prose", "tts"],
   ["tts", "speaker"],

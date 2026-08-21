@@ -24,8 +24,7 @@ def _is_private_host(host: str) -> bool:
     also matched public 172.x space outside 172.16.0.0/12.
 
     Lives here rather than in routes/remote.py (its original home) because
-    it's an access-control primitive; remote.py re-exports it for
-    routes/phone_stream.py.
+    it's an access-control primitive; remote.py still re-exports it.
     """
     addr = _parse_host(host)
     return addr is not None and (addr.is_loopback or addr.is_private)
@@ -45,9 +44,8 @@ def peer_allowed(host: str | None) -> bool:
     the HUD runs on the host, the phone never touches these routes.
 
     Default: loopback only. `ALLOW_LAN_HUD=true` widens to RFC1918 for the
-    user who opens the HUD via the machine's LAN IP (plausible, since the
-    phone-camera feature needs APP_HOST=0.0.0.0) — an opt-in escape hatch, so
-    the safe posture holds for anyone who never sets it.
+    user who opens the HUD via the machine's LAN IP — an opt-in escape hatch,
+    so the safe posture holds for anyone who never sets it.
     """
     # "testclient" is what FastAPI's TestClient reports; a real uvicorn peer is
     # always an IP, so this can't open anything in production.
