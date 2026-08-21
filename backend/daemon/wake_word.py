@@ -28,7 +28,23 @@ _VAD_TRAILING_SILENCE_MS = 800  # stop after this much silence post-speech
 _VAD_MAX_CAPTURE_S = 10.0  # hard cap so a stuck mic doesn't hang forever
 _VAD_INITIAL_WAIT_S = 3.0  # how long to wait for the user to start speaking
 
-_FOLLOWUP_WINDOW_S = 3.0        # seconds the follow-up window stays open
+# Follow-up is content-gated: it closes on ABSENCE of usable speech, not on a
+# stopwatch from the moment the assistant stopped talking.
+#
+# The old flat 3.0s deadline was shorter than a person takes to hear a
+# sentence, decide, and start speaking, so nearly every exchange needed the
+# wake word again — a command line with extra steps rather than a
+# conversation.
+#
+# Idle is the think-time budget; a failed attempt buys a fresh one (you
+# mumbled, you get another go, not the 400ms left on the old clock).
+_FOLLOWUP_IDLE_S = 8.0
+# The brake, and the reason this is safe to widen at all. Under the restricted
+# grammar we can tell that speech HAPPENED but not that it was addressed to
+# us (T-wake-word-executes-ambient-audio), so an unbounded chain of refreshes
+# would let a television drive the assistant. No chain outlives this without a
+# fresh wake word.
+_FOLLOWUP_MAX_S = 45.0
 _FOLLOWUP_MAX_EMPTY = 2
 
 # How long a new turn waits for the previous one to unwind before starting
@@ -114,6 +130,16 @@ class WakeWordListener:
     for ~700ms of silence following speech, and stop. Hard caps at 8s.
     """
 
+    # Class-level defaults for the follow-up clocks. __init__ sets both, but
+    # several tests build a listener with object.__new__ to avoid loading a
+    # Vosk model, and _followup_open() reads BOTH. Without these, such a
+    # listener raises AttributeError inside the listen thread the moment the
+    # window is open — and `and` short-circuits, so a closed window hides it
+    # entirely. That is a crash that only appears once the feature is working.
+    _followup_until: float = 0.0
+    _followup_hard_until: float = 0.0
+    _empty_in_a_row: int = 0
+
     def __init__(
         self,
         on_wake: Callable[[bytes], Any],
@@ -161,10 +187,62 @@ class WakeWordListener:
         # because the turn now finishes on a worker thread, which is what
         # decides whether the window opens.
         self._followup_until: float = 0.0   # monotonic; <= now == closed
+        # Ceiling for one wake-free chain; see _FOLLOWUP_MAX_S.
+        self._followup_hard_until: float = 0.0
         self._empty_in_a_row: int = 0
         self._turn_thread: Optional[threading.Thread] = None
         # Rolling window of recent frames — see _PREROLL_FRAMES.
         self._preroll: deque[bytes] = deque(maxlen=_PREROLL_FRAMES)
+
+    # ── follow-up window ──────────────────────────────────────────────────
+    # Kept as three small methods rather than inline arithmetic in listen()
+    # so the close conditions are testable without driving a mic, a model and
+    # a thread to observe them.
+
+    def _open_followup(self, window: float | None = None, *,
+                       new_chain: bool = False) -> None:
+        """Open (or refresh) the window and reset the failure count.
+
+        `window` overrides the idle budget — the confirmation path passes a
+        longer one, because hearing a question and deciding takes longer than
+        continuing a thought.
+
+        `new_chain` must be True ONLY when a wake word (or barge-in) started
+        this exchange. It is what restarts the ceiling clock, so it is the
+        single point where the ambient-audio brake can be released. Defaulting
+        it to False is deliberate: a refresh that silently restarted the
+        ceiling would make _FOLLOWUP_MAX_S unreachable and the brake
+        decorative.
+        """
+        now = time.monotonic()
+        if window is None:
+            window = _FOLLOWUP_IDLE_S
+        if new_chain or self._followup_hard_until <= 0.0:
+            self._followup_hard_until = now + _FOLLOWUP_MAX_S
+        self._followup_until = min(now + window, self._followup_hard_until)
+        self._empty_in_a_row = 0
+
+    def _note_empty_capture(self) -> None:
+        """A capture produced nothing usable.
+
+        Refresh rather than let the remaining milliseconds run out — but count
+        it, because repeated nothing is what ambient noise looks like.
+        """
+        self._empty_in_a_row += 1
+        if self._empty_in_a_row >= _FOLLOWUP_MAX_EMPTY:
+            self._close_followup()
+            return
+        now = time.monotonic()
+        self._followup_until = min(now + _FOLLOWUP_IDLE_S, self._followup_hard_until)
+
+    def _close_followup(self) -> None:
+        self._followup_until = 0.0
+        self._followup_hard_until = 0.0
+        self._empty_in_a_row = 0
+
+    def _followup_open(self) -> bool:
+        now = time.monotonic()
+        return now < self._followup_until and now < self._followup_hard_until
 
     def _cb(self, indata, _frames, _time, _status):
         self.queue.put(bytes(indata))
@@ -211,8 +289,12 @@ class WakeWordListener:
         self._barge_in_saw_speech = False
         return False
 
-    def _start_turn(self, audio: bytes) -> None:
+    def _start_turn(self, audio: bytes, *, new_chain: bool = True) -> None:
         """Run the turn off the listen loop.
+
+        `new_chain` is False when this turn was triggered from inside an open
+        follow-up window, so the ceiling clock keeps running instead of being
+        restarted by the exchange it is supposed to bound.
 
         `on_wake` is handle_wake, which runs the whole turn synchronously —
         and `_run_brain_streaming` ends in `await sq.finish()`, which drains
@@ -276,8 +358,7 @@ class WakeWordListener:
                 except Exception:
                     pass
                 if command_handled:
-                    self._empty_in_a_row = 0
-                    window = _FOLLOWUP_WINDOW_S
+                    window = _FOLLOWUP_IDLE_S
                     # If the turn ended by ASKING something, keep listening.
                     # 3s begins when the assistant stops speaking, so after
                     # "I need your permission to close app. Should I proceed?"
@@ -291,16 +372,18 @@ class WakeWordListener:
                             window = settings.confirmation_followup_window_s
                     except Exception:
                         pass
-                    self._followup_until = time.monotonic() + window
-                    print(f"[wake] follow-up window open for {window:.0f}s")
+                    self._open_followup(window, new_chain=new_chain)
+                    remaining = self._followup_hard_until - time.monotonic()
+                    print(f"[wake] listening — {window:.0f}s idle, "
+                          f"{remaining:.0f}s left in this chain")
                 else:
-                    self._empty_in_a_row += 1
-                    if self._empty_in_a_row >= _FOLLOWUP_MAX_EMPTY:
-                        self._followup_until = 0.0
-                        self._empty_in_a_row = 0
-                        print(f"[wake] follow-up closed after {_FOLLOWUP_MAX_EMPTY} empty captures; say {self.wake_phrase!r} again")
+                    self._note_empty_capture()
+                    if self._followup_open():
+                        print(f"[wake] empty capture ({self._empty_in_a_row}/"
+                              f"{_FOLLOWUP_MAX_EMPTY}); still listening")
                     else:
-                        print(f"[wake] empty capture ({self._empty_in_a_row}/{_FOLLOWUP_MAX_EMPTY}); follow-up still open")
+                        print(f"[wake] follow-up closed after {_FOLLOWUP_MAX_EMPTY} "
+                              f"empty captures; say {self.wake_phrase!r} again")
 
         self._turn_thread = threading.Thread(target=_run, name="wake-turn", daemon=True)
         self._turn_thread.start()
@@ -464,11 +547,15 @@ class WakeWordListener:
                     continue
 
                 now = time.monotonic()
-                in_followup = now < self._followup_until
+                in_followup = self._followup_open()
 
                 trigger = False
                 is_barge_in = False
                 is_wake_preroll = False
+                # Only a wake word (or barge-in) starts a fresh chain; a turn
+                # triggered from inside the window must not reset the ceiling
+                # that bounds it.
+                from_followup = False
                 initial_audio: list[bytes] = []
                 trigger_label = ""
 
@@ -513,6 +600,7 @@ class WakeWordListener:
                             # so the follow-up window only ever reopened on a second
                             # "onyx", which is just the wake path.
                             trigger = True
+                            from_followup = True
                             trigger_label = f"followup: {partial!r} (rms={rms:.0f})"
                             initial_audio = [data]
                             state_manager._voice_trigger_source = "followup"
@@ -584,7 +672,7 @@ class WakeWordListener:
                 # The turn — planning, tools, and every spoken sentence — runs
                 # on a worker so this loop keeps reading the mic. That is what
                 # makes barge-in and "stop" possible at all while speaking.
-                self._start_turn(audio)
+                self._start_turn(audio, new_chain=not from_followup)
 
     def stop(self) -> None:
         self._running = False

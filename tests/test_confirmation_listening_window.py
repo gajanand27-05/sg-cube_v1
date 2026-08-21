@@ -49,6 +49,7 @@ def _listener(on_wake):
     listener.wake_phrase = "onyx"
     listener._turn_thread = None
     listener._followup_until = 0.0
+    listener._followup_hard_until = 0.0
     listener._empty_in_a_row = 0
     return listener
 
@@ -73,10 +74,10 @@ def test_a_pending_question_keeps_the_mic_open_longer():
     _run_turn(listener)
     remaining = listener._followup_until - t0
 
-    assert remaining > ww._FOLLOWUP_WINDOW_S + 1, (
+    assert remaining > ww._FOLLOWUP_IDLE_S + 1, (
         f"window was {remaining:.1f}s after the assistant asked a question; "
         "the user cannot hear it, think and answer inside "
-        f"{ww._FOLLOWUP_WINDOW_S:.0f}s"
+        f"{ww._FOLLOWUP_IDLE_S:.0f}s"
     )
     assert remaining == pytest.approx(settings.confirmation_followup_window_s, abs=1.0)
 
@@ -84,14 +85,19 @@ def test_a_pending_question_keeps_the_mic_open_longer():
 def test_an_ordinary_turn_keeps_the_short_window():
     """The long window is for questions only. Leaving the mic open for 20s
     after every turn is how ambient speech gets executed — the whole point of
-    T-wake-word-executes-ambient-audio."""
+    T-wake-word-executes-ambient-audio.
+
+    The ordinary window is now the content-gated idle budget rather than a
+    flat 3s, and _FOLLOWUP_MAX_S bounds any chain of them; neither changes
+    the rule this pins, which is that an ordinary turn must not inherit the
+    confirmation window."""
     listener = _listener(lambda audio: True)
 
     t0 = time.monotonic()
     _run_turn(listener)
     remaining = listener._followup_until - t0
 
-    assert remaining == pytest.approx(ww._FOLLOWUP_WINDOW_S, abs=1.0), (
+    assert remaining == pytest.approx(ww._FOLLOWUP_IDLE_S, abs=1.0), (
         f"ordinary turn left the mic open for {remaining:.1f}s"
     )
 
@@ -106,7 +112,7 @@ def test_an_expired_pending_does_not_hold_the_window_open():
 
     t0 = time.monotonic()
     _run_turn(listener)
-    assert (listener._followup_until - t0) == pytest.approx(ww._FOLLOWUP_WINDOW_S, abs=1.0)
+    assert (listener._followup_until - t0) == pytest.approx(ww._FOLLOWUP_IDLE_S, abs=1.0)
 
 
 def test_the_window_cannot_outlive_the_pending_it_waits_for():
