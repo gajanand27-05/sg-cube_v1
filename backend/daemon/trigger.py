@@ -79,9 +79,15 @@ def _spoken_response(response) -> str:
     """Extract spoken text from BrainResponse."""
     if hasattr(response, 'spoken_text'):
         return response.spoken_text
-    # Fallback for legacy format
+    # Fallback for legacy format. NOT "Done." — a response with neither
+    # spoken_text nor message is one we know nothing about, and announcing
+    # success for it is the same fabricated completion that brain.py's
+    # summarize_outcome exists to prevent.
     if isinstance(response, dict):
-        return response.get('spoken_text', response.get('message', 'Done.'))
+        from backend.core.brain import _NOTHING_HAPPENED
+
+        return response.get('spoken_text',
+                            response.get('message', _NOTHING_HAPPENED))
     return str(response)
 
 

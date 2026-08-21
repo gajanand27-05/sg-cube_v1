@@ -16,6 +16,58 @@ from backend.core.memory.base import MemoryEntry, MemoryType
 from backend.core.memory.manager import memory as memory_manager
 
 
+_NOTHING_HAPPENED = "I'm not sure what to do with that — could you say it again?"
+
+
+def _result_field(result: Any, name: str) -> Any:
+    """Tool results are ToolResult objects on some paths and plain dicts on
+    others. Reading only one shape would silently summarise nothing."""
+    if result is None:
+        return None
+    got = getattr(result, name, None)
+    if got is None and isinstance(result, dict):
+        got = result.get(name)
+    return got
+
+
+def summarize_outcome(tool_records: Any) -> str:
+    """What to say when the pipeline produced no spoken text.
+
+    This used to be the literal string "Done.":
+
+        spoken_text=sentence_buffer.strip() if sentence_buffer else "Done."
+
+    which announced success for turns where nothing ran at all — measured
+    live on 'Open code is there.' and 'I am going to take a tablet and drink
+    some water.', both "Done. (tools: 0)". A fabricated completion is the
+    worst failure available: an error is visible and silence is obvious, but a
+    confident "Done." is indistinguishable from having worked, so the user
+    only finds out by going to look.
+
+    Successful tools already said something true and specific, so their own
+    messages are used. If nothing succeeded, the reply admits it and avoids
+    the grammar of completion entirely.
+    """
+    parts: list[str] = []
+    for record in tool_records or []:
+        if not isinstance(record, dict):
+            continue
+        result = record.get("result")
+        status = _result_field(result, "status")
+        status_text = getattr(status, "value", status)
+        if str(status_text).lower().rsplit(".", 1)[-1] != "success":
+            continue
+        message = (_result_field(result, "message") or "").strip()
+        # A tool can succeed with no message. Naming it is honest; inventing
+        # an outcome for it is not.
+        parts.append(message or str(record.get("name", "")).replace("_", " "))
+
+    parts = [p for p in parts if p]
+    if not parts:
+        return _NOTHING_HAPPENED
+    return "; ".join(parts)
+
+
 @dataclass
 class BrainRequest:
     """Input to the brain from any transport layer."""
@@ -133,7 +185,8 @@ class Brain:
         execution_trace = self._build_execution_trace(tool_calls)
         
         response = BrainResponse(
-            spoken_text=sentence_buffer.strip() if sentence_buffer else "Done.",
+            spoken_text=(sentence_buffer.strip() if sentence_buffer.strip()
+                         else summarize_outcome(tool_records)),
             intent={"action": "agent_complete", "target": request.input_text, "args": {}},
             tool_calls=tool_calls,
             execution_trace=execution_trace,
