@@ -66,6 +66,17 @@ _FOLLOWUP_IDLE_S = 8.0
 _FOLLOWUP_MAX_S = 45.0
 _FOLLOWUP_MAX_EMPTY = 2
 
+# Loudness floor for a follow-up trigger. The window fires on decoded content
+# rather than volume, which is right — but with no floor at all, room noise
+# decoding to "[unk]" started full turns. Measured false triggers in one live
+# session: rms 64, 106, 178, 197, 203, all capturing nothing. Real follow-up
+# speech in the same session: 975, 1288, 1769, 2908.
+#
+# Below barge_in_rms_threshold (800) on purpose: a follow-up is someone
+# talking to a SILENT assistant and should not need the volume of talking
+# over one.
+_FOLLOWUP_MIN_RMS = 400
+
 # How long a new turn waits for the previous one to unwind before starting
 # anyway. Generous: the previous turn has already been interrupted, so this is
 # a safety valve against a wedged turn, not a normal wait.
@@ -217,6 +228,42 @@ class WakeWordListener:
     # Kept as three small methods rather than inline arithmetic in listen()
     # so the close conditions are testable without driving a mic, a model and
     # a thread to observe them.
+
+    def _wake_trigger_allowed(self, rms: float) -> bool:
+        """May a decoded wake phrase start a turn at this loudness?
+
+        Not while we are SPEAKING, unless it is loud enough to be a real
+        interruption. Barge-in is guarded by an RMS floor and a debounce; the
+        bare wake test beside it had neither, so our own TTS bleeding back
+        into the mic decoded as "onyx" and started a turn at rms=54 — cutting
+        off the sentence still being spoken, capturing nothing, and repeating.
+        Every barge-in protection was bypassed by sitting in the other branch.
+
+        Deferring to the same threshold keeps one number in charge of "is this
+        the user talking over us". With barge-in disabled there is no other
+        way to interrupt, so the guard steps aside.
+        """
+        if not settings.enable_barge_in:
+            return True
+        if state_manager.current != AssistantState.SPEAKING:
+            return True
+        return rms >= settings.barge_in_rms_threshold
+
+    def _followup_trigger_allowed(self, rms: float) -> bool:
+        """May decoded content inside the follow-up window start a turn?
+
+        The window fires on Vosk token growth with no loudness floor at all.
+        That part is deliberate — near-silence must never qualify, and a
+        loudness-only rule is what let ambient audio run whole commands. But
+        with no floor, room noise decoding to "[unk]" starts a full turn:
+        measured firing at rms=64, 106, 178, 197 and 203, every one of them
+        capturing nothing.
+
+        Lower than the barge-in floor on purpose: a follow-up is someone
+        talking to a SILENT assistant, which does not need the volume of
+        talking over one.
+        """
+        return rms >= _FOLLOWUP_MIN_RMS
 
     def _open_followup(self, window: float | None = None, *,
                        new_chain: bool = False) -> None:
@@ -593,7 +640,8 @@ class WakeWordListener:
                         partial_json = json.loads(self.recognizer.PartialResult())
                         partial = (partial_json.get("partial") or "").lower()
 
-                        if self.wake_phrase in partial.split():
+                        if (self.wake_phrase in partial.split()
+                                and self._wake_trigger_allowed(rms)):
                             trigger = True
                             # Everything the recognizer consumed getting here.
                             initial_audio = list(self._preroll)
@@ -604,7 +652,9 @@ class WakeWordListener:
                             self._partial_tokens = 0
                             self._empty_in_a_row = 0
                             state_manager._voice_trigger_source = "wake"
-                        elif in_followup and _partial_grew(partial, self._partial_tokens):
+                        elif (in_followup
+                                and _partial_grew(partial, self._partial_tokens)
+                                and self._followup_trigger_allowed(rms)):
                             # T-wake-word-executes-ambient-audio item 2: gate the
                             # follow-up window on CONTENT, not loudness. Near-silence
                             # after the speaker cut off still clears rms>500 and
