@@ -76,9 +76,21 @@ def matches(query: str, title: str) -> bool:
     return q in clean_title(title).lower()
 
 
+def _configure_uia(auto) -> None:
+    """Stop uiautomation writing @AutomationLog.txt into the working
+    directory. It logs control-lookup failures to a file next to wherever the
+    process happened to start — which for this app is the repo root. Its
+    failures are already surfaced through log.warning here."""
+    try:
+        auto.Logger.WriteFlag = False
+    except Exception:
+        pass
+
+
 def _chrome_windows():
     import uiautomation as auto
 
+    _configure_uia(auto)
     auto.SetGlobalSearchTimeout(2)
     for win in auto.GetRootControl().GetChildren():
         if win.ClassName == "Chrome_WidgetWin_1" and (win.Name or "").endswith(
