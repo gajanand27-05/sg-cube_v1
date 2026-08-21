@@ -59,6 +59,12 @@ pycaw==20240210
 screen-brightness-control==0.24.0
 pygetwindow==0.0.9
 pyautogui==0.9.54
+# Reads and closes tabs in the user's REAL Chrome (backend/core/chrome_tabs.py).
+# Chrome publishes its tab strip over UI Automation, which is the only way to
+# reach it without restarting Chrome on a CDP debugging port. Windows-only;
+# every entry point degrades to empty elsewhere. Pure Python over comtypes,
+# which was already installed.
+uiautomation==2.0.29
 
 # ── Phase 1: window management + grid snapping ──
 # pywin32 drives EnumWindows, GetWindowRect, SetWindowPos, EnumDisplayMonitors,

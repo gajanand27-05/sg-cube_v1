@@ -48,8 +48,27 @@ def open_app(name: str, profile: str = "") -> ToolResult:
     confirm_if=confirm_close_app,
 )  # trusted for stateless apps, but the guard still confirms anything that looks like it holds unsaved work — "close Chrome" is routine, "close VS Code" is not
 def close_app(name: str) -> ToolResult:
-    """Close a running desktop application by name."""
+    """Close a running desktop application by name. If nothing by that name is
+    running, falls back to closing matching tabs in the user's Chrome — "close
+    youtube" means the tab, because YouTube is not an application."""
     res = cw.handle_close_app(Intent(action="close_app", target=name))
+
+    # Fall back to the tab strip ONLY on "not running". Anything else blocked
+    # here — dangerous target, empty target — must stay blocked, or the safety
+    # check becomes a suggestion.
+    reason = str(res.get("reason") or "")
+    if res.get("status") == "blocked" and "is not running" in reason:
+        from backend.core import chrome_tabs
+
+        if chrome_tabs.available():
+            closed = chrome_tabs.close_matching(name)
+            if closed:
+                # Name every title. The match is loose by design, so this is
+                # the user's only way to notice it took something they wanted.
+                what = closed[0] if len(closed) == 1 else \
+                    f"{len(closed)} tabs: {'; '.join(closed)}"
+                return ToolResult.success(f"Closed {what}")
+
     return ToolResult(
         status=res["status"],
         message=res.get("message"),
