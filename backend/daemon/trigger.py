@@ -576,6 +576,20 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
             command = (stt.get("text") or "").strip()
             print(f"[command] {command!r}")
 
+            # Archive BEFORE the gates. An empty or rejected transcript is the
+            # most interesting case there is — it is the one that failed — so
+            # skipping those would build a corpus of only the successes.
+            try:
+                from backend.core import capture_archive
+
+                capture_archive.archive(
+                    audio_float, command,
+                    trigger=getattr(state_manager, "_voice_trigger_source", ""),
+                    dispatched=bool(command),
+                )
+            except Exception:
+                pass
+
             # Content gate. The only prior check is an RMS floor, which
             # measures loudness, not speech — so Whisper hallucinating on
             # room noise or on the assistant's own TTS bleeding back into the

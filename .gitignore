@@ -24,6 +24,9 @@ env/
 backend/database/*.db
 backend/database/chroma_db/
 backend/database/dogfooding.json
+# Recorded microphone audio from live sessions. Never commit this.
+backend/database/captures/
+
 # Real people's phone numbers. Never commit this.
 backend/database/contacts.json
 

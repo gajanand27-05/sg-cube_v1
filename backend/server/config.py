@@ -53,6 +53,16 @@ class Settings(BaseSettings):
     # "auto"     — GPU + accurate model on AC, CPU + fast model on battery
     # "accurate" — always whisper_model_gpu on the GPU (pin this for a demo)
     # "fast"     — always whisper_model_cpu on the CPU
+    # Save every captured utterance next to its transcript, so real
+    # mis-transcriptions accumulate into a corpus instead of vanishing when
+    # the turn ends. Every accuracy number so far comes from clean
+    # push-to-talk audio, which is not the distribution that fails.
+    #
+    # OFF by default on purpose: this records everything the microphone hears
+    # in a room where someone lives. Capped at 500 files by
+    # capture_archive._MAX_CAPTURES.
+    stt_archive_captures: bool = False
+
     stt_profile: str = "auto"
     # medium, not large-v3: on a 30-utterance corpus of the user's own voice
     # (tools/stt_bench.py, beam_size=1) the two were IDENTICAL — EXACT 80.0%,
