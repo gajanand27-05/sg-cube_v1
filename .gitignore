@@ -88,3 +88,6 @@ DB_*/
 chroma_backup*/
 certs/
 yolov8n*.pt
+
+# Session handoff for coding agents — local, like AGENTS.md
+HANDOFF.md
