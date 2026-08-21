@@ -34,6 +34,35 @@ MAX_ITER = 5
 _CANVAS_INTENT_RE = re.compile(r"\bcanvas\b|\bshow\s+me\b|\bdisplay\b|\brender\b", re.IGNORECASE)
 
 
+def _pending_tool_calls(content) -> list:
+    """Tool calls carried in a planner 'final' envelope, or [].
+
+    Models routinely emit final_response AND tool_calls together, where the
+    prose narrates what the tool is ABOUT to return — sometimes with a literal
+    placeholder. Observed live reading a Notepad window:
+
+        I've read the text from the Notepad window. Here's what it says:
+        [The OCR result will be provided after the tool runs.]
+
+    Commander used to test for "final_response" first, speak it and return, so
+    ocr_screen never ran. That is worse than an error: an error is visible,
+    while this is a fluent confident sentence with no data behind it.
+
+    When both are present the tool calls win; the answer is produced on the
+    next iteration with real results in history. Tolerant of malformed input
+    on purpose — it parses model output, so it must never be what crashes a
+    turn.
+    """
+    if isinstance(content, list):
+        return content
+    if not isinstance(content, dict):
+        return []
+    # planner.py accepts both spellings; knowing only one would let the other
+    # through as a spoken placeholder.
+    calls = content.get("tool_calls") or content.get("toolCalls") or []
+    return calls if isinstance(calls, list) else []
+
+
 def _iteration_instruction(user_query: str) -> str:
     """The instruction handed back to the planner with tool results.
 
@@ -250,7 +279,9 @@ class CommanderAgent:
                     yield CommanderChunk("prose", chunk["content"], {"request_id": request_id})
                 elif chunk["type"] == "final":
                     content = chunk["content"]
-                    if isinstance(content, dict) and "final_response" in content:
+                    queued_calls = _pending_tool_calls(content)
+                    if (isinstance(content, dict) and "final_response" in content
+                            and not queued_calls):
                         yield CommanderChunk("final_response", content["final_response"])
                         context.add_assistant(content["final_response"])
                         asyncio.create_task(episodic_summarizer.summarize_and_store(text, tool_records))
@@ -259,7 +290,14 @@ class CommanderAgent:
                         )
                         return
                     # tool_calls
-                    calls = content if isinstance(content, list) else content.get("tool_calls", [content])
+                    if isinstance(content, dict) and "final_response" in content and queued_calls:
+                        log.warning(
+                            "Planner answered AND asked for tools in one envelope; "
+                            "running the tools and discarding the premature answer: %r",
+                            str(content.get("final_response"))[:120],
+                        )
+                    calls = queued_calls or (
+                        content if isinstance(content, list) else [content])
                     # B. Guardian Stage (Verification)
                     # verify_plan signature is (user_query, calls, request_id, agent_context) — the
                     # fourth arg carries metadata (trigger_source) that the verifier's tier gate uses

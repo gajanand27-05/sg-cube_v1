@@ -23,7 +23,26 @@ DEFAULT_MODEL = "vosk-model-small-en-us-0.15"
 # VAD tuning for command capture. RMS values are int16-amplitude scaled
 # (full-scale = 32768). 400 is well above mic noise floor on consumer
 # laptops but below normal speech (~1500-3000).
-_VAD_RMS_THRESHOLD = 50  # ponytail: lowered from 400 for quieter mics
+# DO NOT RAISE THIS. It looks too low — a live wake fired at rms=55 and the
+# capture behind it measured rms=15, i.e. Vosk was handed near-silence and
+# decoded '[unk] onyx' from it. Raising it makes that worse, not better:
+#
+# This gate decides which frames reach the recognizer at all, so raising it
+# DROPS the quiet gaps between words and splices the loud fragments into a
+# discontinuous stream. Vosk then hallucinates the wake phrase out of ordinary
+# speech. Measured against tests/test_barge_in_real_audio.py, which drives the
+# real loop and the real model with a clip verified NOT to contain "onyx":
+#
+#     threshold  50 -> 4 passed
+#     threshold  70 -> 1 failed   (false wake on plain speech, rms 5296)
+#     threshold  90 -> 1 failed
+#     threshold 120 -> 1 failed
+#
+# So 50 is load-bearing, not a leftover. The rms=55 nuisance wake is already
+# handled downstream: capture rejects it ("skipping whisper: capture too
+# quiet") and it counts toward the empty-capture close. Trading a handled
+# nuisance for false wakes on real speech is a bad deal.
+_VAD_RMS_THRESHOLD = 50
 _VAD_TRAILING_SILENCE_MS = 800  # stop after this much silence post-speech
 _VAD_MAX_CAPTURE_S = 10.0  # hard cap so a stuck mic doesn't hang forever
 _VAD_INITIAL_WAIT_S = 3.0  # how long to wait for the user to start speaking

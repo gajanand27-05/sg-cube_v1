@@ -23,7 +23,17 @@ from backend.server.config import settings
 # spoke similar commands, which is how Whisper's prompt mechanism is
 # designed to work.
 _COMMAND_PROMPT = (
-    "I am using a voice assistant. I say things like open notepad, "
+    # "Onyx" leads this on purpose. The captured audio starts with the wake
+    # word (the pre-roll includes it), and the decoder had never been primed
+    # for that name — so it reinterpreted the wake word TOGETHER with the
+    # first word of the command. Measured live against clean TTS speech:
+    #     "Onyx, who is the CEO of Nvidia" -> 'I am the CEO of Nvia.'
+    #     "Onyx. What's the weather"       -> 'And of course the weather.'
+    # When the name survives as its own token the command transcribes intact
+    # ('Onyx, what is the latest tech news?'), which is what points at
+    # priming rather than acoustics.
+    "I am talking to my voice assistant, which is called Onyx. I start by "
+    "saying Onyx, then a command. I say things like open notepad, "
     "close chrome, lock the screen, play music on youtube, search google, "
     "what time is it, whats the weather, read the news, set a reminder, "
     "translate this to spanish, summarize this article. The assistant "

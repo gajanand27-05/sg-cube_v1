@@ -125,7 +125,39 @@ _TTL_NEWS = 300
 # 0.2-1.5s, but hnrss.org (the "tech" topic) runs 2.4-4.4s and was seen to
 # exceed 6s under load, which cost a live answer. 8s leaves it real headroom
 # and still fits the budget.
-_FEED_TIMEOUT_S = 8.0
+# httpx applies a BARE FLOAT to each phase separately — connect, read, write
+# and pool each get the full value — so `timeout=8.0` permitted roughly 32s,
+# not 8, inside a 10s tool budget. That is how "Task get_news timed out after
+# 10.0s" happened: the outer asyncio.wait_for fired first, so the user got a
+# timeout instead of this tool's own error, and because tools run in a thread
+# pool the cancelled await left the blocking fetch running behind it.
+# Measured after naively setting the float to 5.0, one slow feed host still
+# took 10.15s — which is what proved the per-phase behaviour rather than
+# assuming it.
+#
+# Named components bound the WORST CASE. _FEED_TIMEOUT_S is their sum, and
+# tests/test_feed_timeout_fits_tool_budget.py checks it still fits the tier
+# budget with room for feedparser and pool scheduling.
+_FEED_CONNECT_S = 2.0
+_FEED_READ_S = 3.0
+_FEED_WRITE_S = 1.0
+_FEED_POOL_S = 1.0
+_FEED_TIMEOUT_S = _FEED_CONNECT_S + _FEED_READ_S + _FEED_WRITE_S + _FEED_POOL_S
+
+
+def _feed_timeout(total: float | None = None) -> "httpx.Timeout":
+    """Per-phase timeouts summing to `total` (default _FEED_TIMEOUT_S).
+
+    Scaled proportionally so callers passing a smaller budget still get a
+    bounded worst case rather than that number applied four times over.
+    """
+    scale = 1.0 if not total else float(total) / _FEED_TIMEOUT_S
+    return httpx.Timeout(
+        connect=_FEED_CONNECT_S * scale,
+        read=_FEED_READ_S * scale,
+        write=_FEED_WRITE_S * scale,
+        pool=_FEED_POOL_S * scale,
+    )
 
 
 def fetch_feed(url: str, timeout: float = _FEED_TIMEOUT_S):
@@ -141,7 +173,7 @@ def fetch_feed(url: str, timeout: float = _FEED_TIMEOUT_S):
     Raises on network failure; callers already have stale-serve paths.
     """
     with httpx.Client(
-        timeout=timeout,
+        timeout=_feed_timeout(timeout),
         follow_redirects=True,
         headers={"User-Agent": "Mozilla/5.0 (SG_CUBE)"},
     ) as c:
