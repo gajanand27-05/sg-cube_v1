@@ -19,7 +19,11 @@ from backend.ai_modules.speech.tts_piper import (
     stop_speech,
     was_recently_spoken,
 )
-from backend.ai_modules.speech.tts_queue import get_sentence_queue
+from backend.ai_modules.speech.tts_queue import (
+    SentenceQueue,
+    get_sentence_queue,
+    new_sentence_queue,
+)
 from backend.core.agents.commander import commander
 from backend.core.brain import brain, BrainRequest, BrainResponse
 from backend.core.events import get_bus, Priority
@@ -305,11 +309,17 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
     # For remote (device_id set) we keep the old collect-then-broadcast
     # path since streaming audio bytes to a remote device would require
     # a different transport protocol than what's currently wired.
+    # Built here, not inside _run_brain_streaming, because the fallback check
+    # further down must ask THIS turn whether it spoke — not whatever turn is
+    # current by then. If an overlapping turn has since become current, reading
+    # its flag would either double-speak this reply or swallow it.
+    sq: Optional[SentenceQueue] = None
     try:
         if device_id:
             response = await brain.run(brain_request)
         else:
-            response = await _run_brain_streaming(brain_request, turn=turn)
+            sq = new_sentence_queue()
+            response = await _run_brain_streaming(brain_request, turn=turn, sq=sq)
     except Exception as e:
         try:
             dogfooding_ledger.record_crash()
@@ -385,7 +395,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         await _speak_selective(reply, device_id)
     else:
         # If streaming already spoke everything, skip. Otherwise fall back.
-        if not get_sentence_queue().spoke_anything and reply.strip():
+        if (sq is None or not sq.spoke_anything) and reply.strip():
             state_manager.transition_to(AssistantState.SPEAKING)
             await _speak_selective(reply, device_id)
 
@@ -398,7 +408,11 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
     return True
 
 
-async def _run_brain_streaming(brain_request: BrainRequest, turn: Optional[TurnLatency] = None) -> BrainResponse:
+async def _run_brain_streaming(
+    brain_request: BrainRequest,
+    turn: Optional[TurnLatency] = None,
+    sq: Optional["SentenceQueue"] = None,
+) -> BrainResponse:
     """Phase 4B: drain brain.run_stream() into per-sentence TTS as chunks
     arrive. Returns the final BrainResponse when the stream completes.
 
@@ -407,7 +421,11 @@ async def _run_brain_streaming(brain_request: BrainRequest, turn: Optional[TurnL
     * Anything else (token/tool_start/tool_end/context_ready) is ignored
       here — token stream is separate WS traffic handled elsewhere.
     """
-    sq = get_sentence_queue()
+    # The caller passes the queue it will later ask `spoke_anything` of, so the
+    # answer describes THIS turn. Falling back to building one here keeps the
+    # signature usable from tools/ and tests, which drive this directly.
+    if sq is None:
+        sq = new_sentence_queue()
     await sq.start()
     response: Optional[BrainResponse] = None
 

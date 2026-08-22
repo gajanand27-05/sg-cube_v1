@@ -22,6 +22,7 @@ tts_piper.py, see _PlaybackSession and T-tts-loop-globals.
 """
 import asyncio
 import logging
+import threading
 from typing import Optional
 
 from backend.ai_modules.speech.tts_piper import speak_stream, stop_speech
@@ -138,20 +139,61 @@ class SentenceQueue:
                 # the whole turn's playback.
 
 
-# Module-level singleton — one voice turn at a time.
-_QUEUE: Optional[SentenceQueue] = None
+# ── Queue ownership (same hazard as T-tts-loop-globals) ────────────────
+#
+# This used to be a module-level singleton reused by every turn, and `start()`
+# rebinds `_queue` and `_task` to the CALLING loop. handle_wake() runs
+# asyncio.run() per capture, so when two turn bodies overlap, turn N+1's
+# start() replaced the task turn N was still awaiting in finish():
+#
+#     got Future <Task ... SentenceQueue._consumer()> attached to a
+#     different loop            -> "Sorry, I encountered an error"
+#     await wasn't used with future
+#
+# Turn serialization (wake_word._start_turn) made that rare but cannot make it
+# unreachable: the handover join is bounded by _TURN_HANDOVER_TIMEOUT_S so a
+# wedged turn cannot deafen the listener forever, and past that bound two turns
+# run anyway. So each turn now OWNS its queue, and the module only remembers
+# which one is current — for stop / wake / barge-in, which interrupt from the
+# listener thread and must land on the turn that is actually speaking.
+#
+# Note the failure needs the foreign task to still be PENDING; awaiting an
+# already-finished task across loops is legal, which is why this hid so well.
+_CURRENT: Optional[SentenceQueue] = None
+_current_lock = threading.Lock()
+
+
+def new_sentence_queue() -> SentenceQueue:
+    """Build the queue for a new turn and make it the current one.
+
+    Call once per turn, from the loop that will consume it. The previous
+    turn's queue is left alone — it is still draining on its own loop.
+    """
+    global _CURRENT
+    q = SentenceQueue()
+    with _current_lock:
+        _CURRENT = q
+    return q
 
 
 def get_sentence_queue() -> SentenceQueue:
-    global _QUEUE
-    if _QUEUE is None:
-        _QUEUE = SentenceQueue()
-    return _QUEUE
+    """The turn currently speaking, for interrupt() from another thread.
+
+    Builds one if no turn has run yet so that a stray stop/barge-in before the
+    first turn is a no-op rather than an AttributeError.
+    """
+    global _CURRENT
+    with _current_lock:
+        if _CURRENT is None:
+            _CURRENT = SentenceQueue()
+        return _CURRENT
 
 
 def sentence_queue_depth() -> Optional[int]:
     """Current queue depth for diagnostics, or None if no turn has built a
-    queue yet. Deliberately does NOT construct the singleton — reading a
-    metric must not create the thing it measures.
+    queue yet. Deliberately does NOT construct the queue — reading a metric
+    must not create the thing it measures.
     """
-    return None if _QUEUE is None else _QUEUE.depth
+    with _current_lock:
+        current = _CURRENT
+    return None if current is None else current.depth

@@ -402,6 +402,29 @@ Also fixed on the same defect: `SentenceQueue.start()` now rebuilds its `asyncio
 
 **Not verified**: the specific production sequence (HTTP `/voice/say` landing mid-voice-turn) was not staged end to end; the reproduction models it with two loops rather than two entry points.
 
+## T-sentence-queue-turn-ownership (opened + FIXED 2026-08-22)
+
+**Observed**: intermittent `"Sorry, I encountered an error"` on a voice turn, logged as `got Future <Task ... SentenceQueue._consumer()> attached to a different loop`, plus `await wasn't used with future` on the other turn. Carried over as open item 1 in the 2026-08-21 handoff.
+
+**Mechanism**: the residual half of T-tts-loop-globals. That fix made `SentenceQueue.start()` rebuild its `asyncio.Queue` so the *queue* was bound to the consuming loop — but `start()` also rebinds `self._task`, and the object was still a module-level singleton. Turn N+1's `start()` overwrote the consumer task that turn N was still awaiting in `finish()`.
+
+Turn serialization (`wake_word._start_turn`, `b8e379a`) made it rare, and cannot make it unreachable: the handover join is bounded by `_TURN_HANDOVER_TIMEOUT_S = 15.0` so a wedged turn cannot deafen the listener forever, and past that bound `_start_turn` prints *"previous turn still running; starting anyway"* and two turn bodies run on two `asyncio.run()` loops. Serializing was mitigation; the shared object was the defect.
+
+Second symptom from the same root, not previously recorded: `spoke_anything` is per-object too, so turn N+1's `start()` reset the flag turn N reads to decide whether to speak its reply as a fallback — either double-speaking a reply or swallowing it.
+
+**Fix**: per-turn ownership, the same shape T-tts-loop-globals used for playback. `new_sentence_queue()` builds a fresh queue and records it as current; the module pointer exists only so `stop` / wake / barge-in — which call `get_sentence_queue().interrupt()` from the listener thread — land on the turn that is actually speaking. `trigger.py` builds the queue at the turn's top and passes it into `_run_brain_streaming`, so the fallback check asks *that* turn whether it spoke rather than whichever turn is current by then.
+
+**Verified by reproducing first**, A/B through the real `_run_brain_streaming` on two overlapping loops, sequenced so the second turn's consumer is still pending when the first finishes:
+
+| | shared singleton | per-turn queue |
+|---|---|---|
+| errors | `attached to a different loop` (A), `await wasn't used with future` (B) | none |
+| sentences spoken | `['B speaking.']` — turn A's speech lost | `['A speaking.', 'B speaking.']` |
+
+The sequencing matters and cost a first attempt: awaiting an *already-completed* foreign task is legal, so a version of the repro that let turn B finish first passed against the broken code. `tests/test_turn_queue_ownership.py` (4) encodes it.
+
+**Not fixed, same family**: `interrupt()` still mutates the queue cross-loop from the listener thread (`get_nowait`/`put_nowait` drain + sentinel poke), where `tts_piper.stop_speech()` deliberately touches only a `threading.Event`. It has not been observed failing — `put_nowait` only reaches another loop's future if a getter is waiting — but it is the same hazard class and is left recorded rather than bundled into this fix.
+
 ## T-log-cp1252 (opened + FIXED 2026-07-30)
 
 **Observed**: `trigger crash: 'charmap' codec can't encode character '→' in position 5` — and the actual exception being reported was never logged.
