@@ -2,7 +2,7 @@
 
 **Date**: 2026-08-23
 **Status**: approved, not yet implemented
-**Ticket**: extends `T-sentence-queue-turn-ownership`'s sibling class; new ticket `T-tool-claims-unverified`
+**Ticket**: extends `T-sentence-queue-turn-ownership`'s sibling class; new ticket `T-tool-claims-unconfirmed`
 
 ## The property we want
 
@@ -60,10 +60,10 @@ Signature: `verify(args: dict, result: ToolResult) -> Optional[str]`.
 
 | verify | outcome | meaning |
 |---|---|---|
-| returns `None` | **verified** | read the world back, it agrees |
+| returns `None` | **confirmed** | read the world back, it agrees |
 | returns a string | **contradicted** | it disagrees; the string is the human reason |
-| raises | **unverified** | the read-back itself could not run |
-| not declared | **unverified** | no post-condition exists |
+| raises | **unconfirmed** | the read-back itself could not run |
+| not declared | **unconfirmed** | no post-condition exists |
 
 Letting the read-back raise is the honest signal for "couldn't check", and the exception never propagates to the caller. This is a deliberate divergence from `confirm_if`, which must never raise because a broken guard there has to fail closed into asking the user. Here there is no user to ask — the action has already happened — so the honest outcome is to record that we do not know.
 
@@ -96,7 +96,7 @@ Runs only when:
 
 Verification needs its own short timeout — by the coercion point the tool's `asyncio.wait_for` has already returned, so its budget is spent and cannot cover the check. A read-back is a cheap local call; a couple of seconds is generous. Because `verify` is a plain sync callable in the common case (the audio ones make blocking COM calls), it runs in the executor rather than on the event loop, the same way `run_tool` already dispatches sync tool functions (`runtime.py:62-64`).
 
-A `verify` that hangs or explodes yields **unverified**, never an error: the check failing tells us nothing about whether the action succeeded, and turning "I couldn't look" into "it failed" is its own false claim.
+A `verify` that hangs or explodes yields **unconfirmed**, never an error: the check failing tells us nothing about whether the action succeeded, and turning "I couldn't look" into "it failed" is its own false claim.
 
 ### 3. What it produces
 
@@ -104,29 +104,38 @@ Into fields that already exist and are currently inert (`registry.py:74-75`):
 
 | outcome | status | confidence | confidence_reason |
 |---|---|---|---|
-| verified | `SUCCESS` | 100.0 | what was read back |
-| unverified | `SUCCESS` | reduced | why not (`"no post-condition declared"`, or the exception) |
+| confirmed | `SUCCESS` | 100.0 | what was read back |
+| unconfirmed | `SUCCESS` | reduced | why not (`"no post-condition declared"`, or the exception) |
 | contradicted | **`ERROR`** | 0.0 | the disagreement, e.g. `"volume is 30%, expected 50%"` |
 
 Contradicted becoming `ERROR` is the load-bearing decision. The world was read and it disagrees; that is not a low-confidence success, it is a failure that happens to have been detected.
 
-Unverified staying `SUCCESS` is equally deliberate. It keeps the 31 existing tools working while the retrofit proceeds, and avoids an invisible fail-closed — the pattern that made an Ollama outage look exactly like bad speech recognition.
+Unconfirmed staying `SUCCESS` is equally deliberate. It keeps the 31 existing tools working while the retrofit proceeds, and avoids an invisible fail-closed — the pattern that made an Ollama outage look exactly like bad speech recognition.
 
-The exact reduced-confidence value is an implementation choice, not a contract; only the ordering `verified > unverified > contradicted` is specified.
+The exact reduced-confidence value is an implementation choice, not a contract; only the ordering `confirmed > unconfirmed > contradicted` is specified.
 
 ### 4. What changes downstream
 
 Three consumers read tool success today. All three currently treat all successes as equal.
 
-**a. The planner handback** — the highest-leverage one. `operator.py:63` already does `res.model_dump()`, so `confidence` and `confidence_reason` **already reach the planner's `tool_results` JSON** (`commander.py:399`). The pipe exists and transmits a constant. This work puts real information into it; the planner's system prompt must then state that an unverified result may not be narrated as confirmed.
+**a. The planner handback** — the highest-leverage one. `operator.py:63` already does `res.model_dump()`, so `confidence` and `confidence_reason` **already reach the planner's `tool_results` JSON** (`commander.py:399`). The pipe exists and transmits a constant. This work puts real information into it; the planner's system prompt must then state that an unconfirmed result may not be narrated as confirmed.
 
-**b. `summarize_outcome`** (`brain.py:33`) — the no-spoken-text fallback. Already prefers each tool's own message. Unverified results get hedged: *"I set volume to 50%, but couldn't confirm it"* rather than *"volume is 50%"*.
+**b. `summarize_outcome`** (`brain.py:33`) — the no-spoken-text fallback. Already prefers each tool's own message. Unconfirmed results get hedged: *"I set volume to 50%, but couldn't confirm it"* rather than *"volume is 50%"*.
 
 **c. `_confirmed_summary`** (`commander.py:98`) — what is spoken after a confirmed action. Same hedging rule. Notable because this is the path the user explicitly authorised, which makes a false success claim here the most costly of the three.
 
-### 5. Naming collision to resolve
+### 5. Naming collision — resolved by naming the new concept, not renaming the old
 
-`_publish_completed("verified", ...)` (`commander.py:390`) already uses the word "verified" to mean *Guardian approved the plan before execution* — a pre-condition check on intent, the opposite of what this spec calls verification. Both words cannot mean both things in one codebase. The implementation picks one and renames the other; the pre-execution sense should probably become `"authorised"`.
+`_publish_completed("verified", ...)` (`commander.py:391`) already uses "verified" to mean *Guardian approved the plan before execution* — a pre-condition on intent, roughly the opposite of a post-condition on outcome.
+
+The first instinct was to rename that one. **Don't.** That string is a typed union on both sides of the process boundary — `ui_events.py:131` and `frontend/src/lib/uiEvents.ts:36` — so renaming it is a py↔ts event-contract change, and this repo keeps a standing guard on exactly that contract. It would turn a self-contained backend change into a cross-boundary one for a word.
+
+So the **new** concept takes distinct vocabulary instead:
+
+- the decorator kwarg stays `verify=` — it is a tool-declaration API, a different namespace from the event status, and it reads naturally at the call site;
+- the **outcomes** are `confirmed` / `unconfirmed` / `contradicted`, and those are the words used in `confidence_reason` strings, log lines and docs.
+
+`AgentCompletedEvent.status == "verified"` keeps its existing pre-execution meaning, untouched. A comment at the outcome definitions records why the two vocabularies differ, so the next reader does not "fix" the inconsistency by reintroducing the collision.
 
 ## Scope of the first pass
 
@@ -147,9 +156,9 @@ Then:
 
 - Each of the three outcomes at the `run_tool` chokepoint, with a fake tool: verify returns `None` / a string / raises.
 - A `verify` that hangs or raises does not fail the turn.
-- `READONLY` tools are not verified.
-- A non-`SUCCESS` result is not verified.
-- The three downstream consumers each hedge an unverified result and none of them speak completion grammar for a contradicted one.
+- `READONLY` tools are not checked.
+- A non-`SUCCESS` result is not checked.
+- The three downstream consumers each hedge an unconfirmed result and none of them speak completion grammar for a contradicted one.
 - Retrofit tests for all four audio tools against a stubbed endpoint.
 
 **Live probe before this is called done.** Unit tests on a stubbed endpoint prove the contract, not the pipeline — the same distinction that let `close_matching` pass 12 unit tests while closing nothing. Set the real volume to a known value, run a real turn, confirm what Onyx *says* matches what the endpoint *reads*.
