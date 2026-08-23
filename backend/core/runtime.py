@@ -28,13 +28,25 @@ log = logging.getLogger(__name__)
 _UNCONFIRMED_CONFIDENCE = 60.0
 _VERIFY_TIMEOUT_S = 2.0
 
-# A hung verify() must not hang the turn. asyncio.run(main()) waits for the
-# DEFAULT executor to fully drain on shutdown (shutdown_default_executor), so
-# a sync verify() that ignores the wait_for timeout and keeps running in a
-# default-executor thread would still hold up the surrounding asyncio.run()
-# call for its full duration even though wait_for itself returned on time.
-# A dedicated executor isn't touched by that shutdown, so the orphaned thread
-# can finish on its own time without delaying the turn.
+# A hung verify() must not hang the CURRENT turn. If it ran on the default
+# executor, asyncio.run(main()) would wait for that executor to fully drain
+# on shutdown (shutdown_default_executor) before returning — so a sync
+# verify() that ignores the wait_for timeout would still hold up that
+# asyncio.run() call for its full duration even though wait_for itself
+# returned on time. This matters most in tests (each one is its own
+# asyncio.run()); the daemon's event loop is long-lived, so in production
+# shutdown_default_executor only fires once, at real process shutdown.
+#
+# A dedicated executor avoids that per-asyncio.run() join. It does NOT make a
+# hang free: concurrent.futures.thread installs an atexit hook (_python_exit)
+# that joins EVERY ThreadPoolExecutor ever created, this one included, at
+# final interpreter shutdown — independent of asyncio.run(). A verify() that
+# hangs forever still blocks process exit; this executor only moves that
+# block from "end of each asyncio.run()" to "interpreter teardown", it does
+# not eliminate it. verify callables MUST NOT block indefinitely — the
+# _VERIFY_TIMEOUT_S wait_for bounds how long the CALLER waits, but nothing
+# can force an uncooperative sync call (e.g. a hung blocking COM call) to
+# actually stop running in its worker thread.
 _VERIFY_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="tool-verify")
 
 
