@@ -451,7 +451,7 @@ Vocabulary is deliberately NOT "verified": `AgentCompletedEvent.status == "verif
 
 **Fix (audio only)**: a `threading.local`-guarded `_ensure_com()` in `audio.py::_endpoint()`. Probe after: `SUCCESS / confidence 100.0 / ["confirmed: read back and agrees"]`. No `CoUninitialize` — `_endpoint()` returns a live interface pointer the caller uses after return, so tearing the apartment down would invalidate it; pool threads are long-lived.
 
-**STILL OPEN — `chrome_tabs.py` almost certainly has the same bug.** It uses `uiautomation`, which imports `comtypes` and calls `comtypes.client.CreateObject` transitively. A grep of `backend/` for "comtypes" does not see it. This is the subsystem behind `"close youtube"`. **Not probed.** Probe it the same way — drive a real tab close from a worker thread, not the main thread — before assuming it works. `win32gui`/`win32api` in `windowing.py` are plain Win32, not COM, and are safe.
+**`chrome_tabs.py` was suspected and is CLEAN — probed 2026-08-23, prediction falsified.** It uses `uiautomation`, which imports `comtypes` transitively, so it looked like the same bug. It is not: `uiautomation` initialises COM on the calling thread itself, which pycaw does not. Measured with `list_tabs()` (read-only, closes nothing) against real Chrome: main thread, plain worker thread, and the production shape (`asyncio.run` on a fresh thread → default executor) all returned the same 9 tabs. Then stressed for the *crash* half — 12 turns on fresh threads with another thread running allocation + `gc.collect()` churn — exit 0, no faults, consistent results. Recorded because "transitively imports comtypes" is a reasonable inference that happens to be wrong here, and someone will re-derive it. `win32gui`/`win32api` in `windowing.py` are plain Win32, not COM, and are safe.
 
 **Per-thread init was NOT enough — it hard-crashed the process.** Those worker threads die (`asyncio.run()` tears down its default executor every turn) and an apartment dies with its thread. A repeated real-turn probe segfaulted: `STATUS_ACCESS_VIOLATION`, exit `-1073741819`. `faulthandler` put the fault here:
 
@@ -471,13 +471,17 @@ An audio COM pointer released mid-ChromaDB-query on a context-builder thread. co
 
 **Note for anyone reading tool-failure metrics**: `contradicted` results now count as tool failures in the session success rate and `dogfooding.json`. A dip after this lands is ambiguous between a regression and detection finally working.
 
-## T-planner-omits-required-args (opened 2026-08-23)
+## T-planner-omits-required-args (opened 2026-08-23 — recovery FIXED, omission still open)
 
 **Observed** during the live voice-turn probe, n=9 real turns: 2-3 of 9 produced `Commander: Guardian rejected parts of the plan: ["Missing required argument 'level' for tool 'set_volume'."]`. The planner emits `set_volume` with no `level`, Guardian correctly rejects it, and the turn degrades into a clarification question (*"Could you tell me the exact volume level?"*) for a command that already stated it.
 
 Phrasing-independent: seen on "set volume to seventy", "set volume to 70" and "set the volume to seventy percent". Same family as the closed `T-planner-arg-hallucination`, but the arg is **omitted**, not misnamed — so the alias band-aid does not apply. Pre-existing; not caused by the post-condition work.
 
 **Note the user-visible shape**: Onyx asks for information the user already gave. That reads as "it didn't hear me", which is how it would get misdiagnosed as an STT problem.
+
+**Recovery FIXED (`662fd00`)** — the asking was a separate bug underneath this one. Commander already fed a healer instruction back and re-looped, but `healing.py` matched on `"missing argument"` while `verifier.py` emits `"Missing required argument ..."` — not a substring, so it fell through to ESCALATE, whose default instruction ends *"Ask the user for clarification."* Now matched on `"missing"` + `"argument"` independently, and the FIX instruction points the planner back at the user's own words. Same probe after: **9/9 set the volume, up from 6/9.**
+
+**Still open**: the omission itself. Guardian still rejected 3 of 9 plans — the planner keeps emitting `set_volume` without `level`. It now recovers silently, costing an extra planner round trip (~90% of a turn) each time, so this is a latency bug now rather than a correctness one.
 
 ## T-planner-narrates-state-it-never-read (opened 2026-08-23)
 
