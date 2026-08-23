@@ -425,6 +425,24 @@ The sequencing matters and cost a first attempt: awaiting an *already-completed*
 
 **Not fixed, same family**: `interrupt()` still mutates the queue cross-loop from the listener thread (`get_nowait`/`put_nowait` drain + sentinel poke), where `tts_piper.stop_speech()` deliberately touches only a `threading.Event`. It has not been observed failing — `put_nowait` only reaches another loop's future if a getter is waiting — but it is the same hazard class and is left recorded rather than bundled into this fix.
 
+## T-tool-claims-unconfirmed (opened + FIXED 2026-08-23)
+
+**Observed**: `set_volume` reported the level it was ASKED for and never read the volume back, at `confidence: 100.0`. Same shape in `volume_up`, `volume_down`, `mute`. 31 `"status": "success"` literals across `backend/core/tools/` are all unchecked claims.
+
+**Mechanism**: no post-condition contract existed, and `runtime.run_tool` stamped every success `confidence=100.0` unconditionally. The class had already been fixed pointwise three times — `"Done."` (`c2fdd13`), `close_matching` reporting success while closing nothing (`952b475`), and the OCR placeholder narrated ahead of its data.
+
+**Fix**: `@tool(verify=...)`, run at the `run_tool` coercion chokepoint. Three outcomes — confirmed / unconfirmed / contradicted — landing in `ToolResult.confidence` and `.confidence_reason`. Only contradicted becomes `ERROR`; unconfirmed stays `SUCCESS` so the un-retrofitted tools keep working and this does not become another invisible fail-closed. A `verify` that raises or hangs is unconfirmed, never an error.
+
+Vocabulary is deliberately NOT "verified": `AgentCompletedEvent.status == "verified"` already means Guardian approved the plan pre-execution, and it is a typed union on both sides of the py/ts boundary.
+
+**Verified by reproducing first**: `set_volume(50)` against an endpoint whose setter silently no-ops — the real failure mode — reported success before, does not after.
+
+**Retrofit status**: `audio.py` (4 tools) done. The other modules still return unconfirmed successes; that is honest but weak, and each should be retrofitted with its own evidence.
+
+**Spec**: `docs/superpowers/specs/2026-08-23-tool-verification-design.md`
+
+**Adjacent, not fixed**: `operator.py:60-64` keys result wrappers `"name"` while `commander.py:114` and `:251` read `wrapper.get("tool")`. That lookup always misses — the timeline records "Executed unknown tool: <msg>" for every confirmed action.
+
 ## T-log-cp1252 (opened + FIXED 2026-07-30)
 
 **Observed**: `trigger crash: 'charmap' codec can't encode character '→' in position 5` — and the actual exception being reported was never logged.
