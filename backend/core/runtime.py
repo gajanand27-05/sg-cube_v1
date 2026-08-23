@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Coroutine, Optional
@@ -11,6 +12,91 @@ from backend.core.tools.registry import ToolResult, ToolStatus
 from backend.daemon.ui_events import ToolFinishedEvent, ToolStartedEvent
 
 log = logging.getLogger(__name__)
+
+# ── Post-condition outcomes (T-tool-claims-unconfirmed) ──────────────
+#
+# A side-effecting tool reports the outcome it INTENDED, not the one it
+# achieved: set_volume returned "volume set to 50%" without ever reading the
+# volume back, stamped confidence 100.0 by this very function. Three outcomes
+# now exist instead of one.
+#
+# Vocabulary is confirmed / unconfirmed / contradicted, NOT "verified" —
+# AgentCompletedEvent.status already spends that word on Guardian's
+# pre-execution plan approval, and it is a typed union on both sides of the
+# py/ts boundary. Two meanings for one word across a process boundary is how
+# you get a bug nobody can describe.
+_UNCONFIRMED_CONFIDENCE = 60.0
+_VERIFY_TIMEOUT_S = 2.0
+
+# A hung verify() must not hang the turn. asyncio.run(main()) waits for the
+# DEFAULT executor to fully drain on shutdown (shutdown_default_executor), so
+# a sync verify() that ignores the wait_for timeout and keeps running in a
+# default-executor thread would still hold up the surrounding asyncio.run()
+# call for its full duration even though wait_for itself returned on time.
+# A dedicated executor isn't touched by that shutdown, so the orphaned thread
+# can finish on its own time without delaying the turn.
+_VERIFY_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="tool-verify")
+
+
+async def _apply_post_condition(name: str, args: dict, res: ToolResult) -> ToolResult:
+    """Check a successful side-effecting tool's claim against the world.
+
+    Never raises and never blocks the loop: verify callables are sync in the
+    common case (the audio ones make blocking COM calls), so this dispatches
+    to the executor the same way run_tool dispatches sync tools.
+
+    A check that raises or hangs yields UNCONFIRMED, never ERROR. "I could not
+    look" is not "it failed", and conflating them is its own false claim.
+    """
+    from backend.core.tools.registry import REGISTRY, CapabilityTier
+
+    if res.status != ToolStatus.SUCCESS:
+        return res
+
+    tool_obj = REGISTRY.get(name)
+    if tool_obj is None or tool_obj.tier == CapabilityTier.READONLY:
+        # READONLY: the tool's result IS the observation. Reading a second time
+        # and believing that one instead buys nothing.
+        return res
+
+    if tool_obj.verify is None:
+        res.confidence = _UNCONFIRMED_CONFIDENCE
+        res.confidence_reason = list(res.confidence_reason) + [
+            "unconfirmed: no post-condition declared"
+        ]
+        return res
+
+    try:
+        loop = asyncio.get_running_loop()
+        disagreement = await asyncio.wait_for(
+            loop.run_in_executor(_VERIFY_EXECUTOR, lambda: tool_obj.verify(args, res)),
+            timeout=_VERIFY_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        res.confidence = _UNCONFIRMED_CONFIDENCE
+        res.confidence_reason = list(res.confidence_reason) + [
+            f"unconfirmed: post-condition timed out after {_VERIFY_TIMEOUT_S}s"
+        ]
+        return res
+    except Exception as e:
+        res.confidence = _UNCONFIRMED_CONFIDENCE
+        res.confidence_reason = list(res.confidence_reason) + [
+            f"unconfirmed: post-condition could not run: {e}"
+        ]
+        return res
+
+    if disagreement:
+        log.warning("Tool %r claimed success but the world disagrees: %s", name, disagreement)
+        return ToolResult(
+            status=ToolStatus.ERROR,
+            reason=str(disagreement),
+            data=res.data,
+            confidence=0.0,
+            confidence_reason=[f"contradicted: {disagreement}"],
+        )
+
+    res.confidence_reason = list(res.confidence_reason) + ["confirmed: read back and agrees"]
+    return res
 
 
 class TaskStatus(str, Enum):
@@ -87,7 +173,11 @@ class Runtime:
                     confidence=res.get("confidence", 100.0),
                     confidence_reason=res.get("confidence_reason") or [],
                 )
-            
+
+            # Between coercion and recording: every tool result, whichever
+            # shape it arrived in, gets checked against the world here.
+            res = await _apply_post_condition(name, args, res)
+
             task.result = res
             task.status = TaskStatus.COMPLETED if res.status == ToolStatus.SUCCESS else TaskStatus.FAILED
 
