@@ -146,3 +146,47 @@ if __name__ == "__main__":
         if _name.startswith("test_") and callable(_fn):
             _fn()
             print(f"  [PASS] {_name}")
+
+
+# ── COM apartment ownership ───────────────────────────────────────────
+
+def test_audio_com_work_is_marshalled_to_the_owning_thread():
+    """Every COM touch must happen on the dedicated audio-com thread.
+
+    Two separate live failures came from this not holding. First, tools ran on
+    executor threads with no COM apartment at all ("CoInitialize has not been
+    called") and every audio tool was dead on every real turn. Then, once
+    apartments existed per-thread, the pointers outlived them and a repeated
+    real-turn probe hard-crashed with STATUS_ACCESS_VIOLATION — the faulting
+    stack pointing at ChromaDB, because the GC that freed the COM pointer
+    happened to run there.
+
+    Neither is reachable from a single call on the main thread, which is
+    exactly why the suite stayed green through both.
+    """
+    import threading as _t
+    from backend.core.tools import audio
+
+    seen = []
+    real_endpoint = audio._endpoint
+
+    def _recording_endpoint():
+        seen.append(_t.current_thread().name)
+        return real_endpoint()
+
+    result = {}
+
+    def worker():
+        with patch.object(audio, "_endpoint", _recording_endpoint):
+            result["volume"] = audio._read_volume()
+
+    t = _t.Thread(target=worker, name="pretend-tool-worker")
+    t.start()
+    t.join(30)
+
+    assert isinstance(result.get("volume"), int), result
+    assert seen, "_endpoint was never called"
+    assert all(n.startswith("audio-com") for n in seen), (
+        f"COM was touched on {seen} — it must only ever run on the dedicated "
+        "audio-com thread, whose apartment outlives every pointer it creates"
+    )
