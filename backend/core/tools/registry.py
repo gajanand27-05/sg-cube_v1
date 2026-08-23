@@ -142,6 +142,17 @@ class Tool:
     # rather than granting silent execution. See verifier.py.
     confirm_if: Optional[Callable[[dict], Optional[str]]] = None
 
+    # Post-condition. Called with (args, result) AFTER the tool returns
+    # successfully; returns None when the world agrees with the claim, or a
+    # short human reason when it disagrees. Raising means "could not check",
+    # which is deliberately different from "it failed" — see the outcome
+    # vocabulary in runtime.run_tool.
+    #
+    # Unlike confirm_if, this one MAY raise: confirm_if guards an action that
+    # has not happened yet and must fail closed into asking the user, while by
+    # the time this runs the action is already done and there is nobody to ask.
+    verify: Optional[Callable[[dict, "ToolResult"], Optional[str]]] = None
+
     async def __call__(self, request_id: Optional[str] = None, **kwargs) -> ToolResult:
         from backend.core.runtime import runtime
         timeout = _timeout_for_tool(self)
@@ -244,6 +255,7 @@ def tool(
     tier: Any = None,
     trusted: bool = False,
     confirm_if: Optional[Callable[[dict], Optional[str]]] = None,
+    verify: Optional[Callable[..., Optional[str]]] = None,
 ) -> Any:
     """Register a function as a tool. Supports:
       @tool                                                     # bare (tier → DESTRUCTIVE, trusted=False — fail closed)
@@ -252,6 +264,7 @@ def tool(
       @tool(security=SecurityLevel.CAUTION)                     # legacy security only
       @tool(security=SecurityLevel.CAUTION, tier=..., trusted=True)  # all three
       @tool(tier=..., trusted=True, confirm_if=_guard)           # trusted, except when _guard objects
+      @tool(tier=..., verify=_reads_world_back)                 # post-condition checked after it runs
 
     `trusted=True` on a DESTRUCTIVE tool is a bug — destructive tools
     always prompt, no override. The decorator forces it back to False
@@ -330,6 +343,7 @@ def tool(
             tier=resolved_tier,
             trusted=effective_trusted,
             confirm_if=confirm_if,
+            verify=verify,
         )
         return f
 
