@@ -443,6 +443,20 @@ Vocabulary is deliberately NOT "verified": `AgentCompletedEvent.status == "verif
 
 **Adjacent, not fixed**: `operator.py:60-64` keys result wrappers `"name"` while `commander.py:114` and `:251` read `wrapper.get("tool")`. That lookup always misses — the timeline records "Executed unknown tool: <msg>" for every confirmed action.
 
+## T-com-per-thread-apartment (opened 2026-08-23 — audio FIXED, chrome_tabs UNVERIFIED)
+
+**Observed**: the mandated live probe for `T-tool-claims-unconfirmed` found `set_volume` failing on the real endpoint with `OSError: [WinError -2147221008] CoInitialize has not been called` — in the tool body, before any post-condition ran. **Every audio tool had been failing on every real turn while all 962 tests stayed green.**
+
+**Mechanism**: COM apartments are per-thread. `comtypes/__init__.py` initialises COM at import, for the importing thread only — its own comment says so. `runtime.run_tool` dispatches sync tools via `loop.run_in_executor`, so a tool body never runs on the importing thread. The tests call these functions directly from the main thread, where COM is already up, which is exactly why a full green suite sat on top of a dead subsystem.
+
+**Fix (audio only)**: a `threading.local`-guarded `_ensure_com()` in `audio.py::_endpoint()`. Probe after: `SUCCESS / confidence 100.0 / ["confirmed: read back and agrees"]`. No `CoUninitialize` — `_endpoint()` returns a live interface pointer the caller uses after return, so tearing the apartment down would invalidate it; pool threads are long-lived.
+
+**STILL OPEN — `chrome_tabs.py` almost certainly has the same bug.** It uses `uiautomation`, which imports `comtypes` and calls `comtypes.client.CreateObject` transitively. A grep of `backend/` for "comtypes" does not see it. This is the subsystem behind `"close youtube"`. **Not probed.** Probe it the same way — drive a real tab close from a worker thread, not the main thread — before assuming it works. `win32gui`/`win32api` in `windowing.py` are plain Win32, not COM, and are safe.
+
+**Known wart in the fix**: `_ensure_com`'s `except OSError: pass` followed by an unconditional `done = True` swallows any init failure and never retries on that thread. It cannot fake success (the following `GetSpeakers()` raises), but it will re-surface a misleading `CO_E_NOTINITIALIZED` forever. Tighten to re-raise anything that is not `RPC_E_CHANGED_MODE`.
+
+**Note for anyone reading tool-failure metrics**: `contradicted` results now count as tool failures in the session success rate and `dogfooding.json`. A dip after this lands is ambiguous between a regression and detection finally working.
+
 ## T-log-cp1252 (opened + FIXED 2026-07-30)
 
 **Observed**: `trigger crash: 'charmap' codec can't encode character '→' in position 5` — and the actual exception being reported was never logged.
