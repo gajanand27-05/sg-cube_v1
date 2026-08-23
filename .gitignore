@@ -91,3 +91,4 @@ yolov8n*.pt
 
 # Session handoff for coding agents — local, like AGENTS.md
 HANDOFF.md
+COMMANDS.md
