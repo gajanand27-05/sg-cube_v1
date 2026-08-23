@@ -355,7 +355,8 @@ class WakeWordListener:
         self._barge_in_saw_speech = False
         return False
 
-    def _start_turn(self, audio: bytes, *, new_chain: bool = True) -> None:
+    def _start_turn(self, audio: bytes, *, new_chain: bool = True,
+                    source: str = "wake") -> None:
         """Run the turn off the listen loop.
 
         `new_chain` is False when this turn was triggered from inside an open
@@ -420,7 +421,13 @@ class WakeWordListener:
             finally:
                 # ponytail: one-line dogfooding hook — survived wake=True/False
                 try:
-                    dogfooding_ledger.record_wake(command_handled)
+                    # Booked against the trigger that actually started this
+                    # turn. Passed in rather than read from
+                    # state_manager._voice_trigger_source, because this runs
+                    # later on a worker thread and trigger.py resets that back
+                    # to None at end of turn — reading it here would race and
+                    # silently mislabel.
+                    dogfooding_ledger.record_wake(command_handled, source=source)
                 except Exception:
                     pass
                 if command_handled:
@@ -741,7 +748,12 @@ class WakeWordListener:
                 # The turn — planning, tools, and every spoken sentence — runs
                 # on a worker so this loop keeps reading the mic. That is what
                 # makes barge-in and "stop" possible at all while speaking.
-                self._start_turn(audio, new_chain=not from_followup)
+                self._start_turn(
+                    audio,
+                    new_chain=not from_followup,
+                    source=("barge_in" if is_barge_in
+                            else "followup" if from_followup else "wake"),
+                )
 
     def stop(self) -> None:
         self._running = False

@@ -50,6 +50,15 @@ _WINDOWED = (
     # ITSELF. A high ratio means the threshold or AEC needs work; a low one
     # means barge-in is behaving and the tuning ticket can close.
     "barge_ins", "barge_in_self",
+    # Triggers that are NOT the wake word. _start_turn fires for wake,
+    # barge-in and follow-up capture alike, and record_wake used to book all
+    # three against `wake_attempts` — so "wake success" was never measuring
+    # the wake word. A follow-up window opens after every successful command
+    # and tolerates _FOLLOWUP_MAX_EMPTY empty captures, each of which landed
+    # as a failed wake with no wake word spoken. Reported 236/470 = 50.2% on
+    # a window, 379/2742 = 13.8% lifetime; both uninterpretable.
+    "followup_attempts", "followup_successes",
+    "barge_in_attempts", "barge_in_successes",
 )
 
 
@@ -66,7 +75,19 @@ def _rates(d: dict[str, Any]) -> dict[str, Any]:
     """Rates from a counter dict — used for both lifetime and window."""
     cmd_t = d.get("command_total", 0)
     return {
+        # Now genuinely the wake WORD: follow-up and barge-in triggers are
+        # counted separately below instead of being booked as failed wakes.
         "wake_success_pct":    _pct_or_none(d.get("wake_successes", 0), d.get("wake_attempts", 0)),
+        # A low follow-up rate is not a defect the way a low wake rate is —
+        # the window opens speculatively after every command and is EXPECTED
+        # to catch nothing most of the time. It is a tuning signal for the
+        # 8s idle / 45s ceiling, not a reliability score.
+        "followup_success_pct": _pct_or_none(
+            d.get("followup_successes", 0), d.get("followup_attempts", 0)
+        ),
+        "barge_in_success_pct": _pct_or_none(
+            d.get("barge_in_successes", 0), d.get("barge_in_attempts", 0)
+        ),
         "command_success_pct": _pct_or_none(d.get("command_success", 0), cmd_t),
         "tool_success_pct":    _pct_or_none(d.get("tools_success", 0), d.get("tools_total", 0)),
         "crash_rate_pct":      _pct_or_none(d.get("crashes", 0), cmd_t),
@@ -95,6 +116,8 @@ class Ledger:
         # ensure numeric counters exist even if file pre-dates them
         for k in (
             "wake_attempts", "wake_successes",
+            "followup_attempts", "followup_successes",
+            "barge_in_attempts", "barge_in_successes",
             "command_total", "command_success",
             "tools_total", "tools_success",
             "crashes", "p0_bugs", "p1_bugs",
@@ -144,11 +167,24 @@ class Ledger:
             os.fsync(f.fileno())
         os.replace(tmp, self._path)
 
-    def record_wake(self, success: bool) -> None:
+    _WAKE_SOURCE_PREFIX = {
+        "wake": "wake",
+        "followup": "followup",
+        "barge_in": "barge_in",
+    }
+
+    def record_wake(self, success: bool, source: str = "wake") -> None:
+        """Book a turn against the trigger that actually started it.
+
+        `source` is one of wake / followup / barge_in. Anything unrecognised
+        counts as a wake: an untagged trigger must not be able to quietly
+        improve the wake word's score, which is how a metric flatters itself.
+        """
+        prefix = self._WAKE_SOURCE_PREFIX.get(source, "wake")
         with self._lock:
-            self._bump("wake_attempts")
+            self._bump(f"{prefix}_attempts")
             if success:
-                self._bump("wake_successes")
+                self._bump(f"{prefix}_successes")
             self._save()
 
     def record_command(self, success: bool, latency_ms: int = 0) -> None:
