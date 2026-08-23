@@ -112,7 +112,18 @@ def _confirmed_summary(batch_results: list[dict], tool_name: str) -> str:
                 from backend.core.brain import _hedge
                 messages.append(_hedge(str(msg), res))
         else:
-            failed.append(str(msg) if msg else wrapper.get("tool", "that"))
+            # A contradicted post-condition builds its ToolResult with `reason`
+            # and no `message` — "volume is 30%, expected 50%" is the single
+            # most informative sentence this feature can produce, and reading
+            # only `message` dropped it. The wrapper key is "name" (see
+            # operator.execute_batch), never "tool", so the old fallback always
+            # missed and the user heard "...but it failed: that".
+            reason = getattr(res, "reason", res.get("reason") if isinstance(res, dict) else None)
+            failed.append(
+                str(msg) if msg
+                else str(reason) if reason
+                else wrapper.get("name", "that")
+            )
     if failed:
         return f"I tried to {tool_name}, but it failed: {failed[0]}"
     if messages:
@@ -249,7 +260,9 @@ class CommanderAgent:
                     res = res_wrapper.get("result")
                     status = getattr(res, "status", res.get("status") if isinstance(res, dict) else "error")
                     if status == "success":
-                        name = res_wrapper.get("tool", "unknown tool").replace("_", " ")
+                        # "name", not "tool": operator.execute_batch keys its
+                        # wrappers "name".
+                        name = res_wrapper.get("name", "unknown tool").replace("_", " ")
                         msg = getattr(res, "message", res.get("message") if isinstance(res, dict) else "success")
                         timeline.record_event(
                             content=f"Executed {name}: {msg}", source="execution"
@@ -365,7 +378,7 @@ class CommanderAgent:
                         res = res_wrapper.get("result")
                         status = getattr(res, "status", res.get("status") if isinstance(res, dict) else "error")
                         if status == "success":
-                            tool_name = res_wrapper.get("tool", "unknown tool").replace("_", " ")
+                            tool_name = res_wrapper.get("name", "unknown tool").replace("_", " ")
                             msg = getattr(res, "message", res.get("message") if isinstance(res, dict) else "success")
                             timeline.record_event(
                                 content=f"Executed {tool_name}: {msg}",
@@ -383,7 +396,14 @@ class CommanderAgent:
                         msg = getattr(res, "message", res.get("message") if isinstance(res, dict) else None)
                         
                         if status == "success" and msg:
-                            spoken = msg
+                            # The dominant spoken path. Without the hedge every
+                            # tool with no declared post-condition spoke its
+                            # claim verbatim, which is exactly the flattening
+                            # this branch exists to prevent. Imported inside the
+                            # function: brain imports commander, so a top-level
+                            # import is circular.
+                            from backend.core.brain import _hedge
+                            spoken = _hedge(str(msg), res)
                             context.add_assistant(spoken)
                             asyncio.create_task(episodic_summarizer.summarize_and_store(text, tool_records))
                             yield CommanderChunk("final_response", spoken)

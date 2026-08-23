@@ -80,11 +80,95 @@ def test_planner_prompt_tells_the_model_what_confidence_means():
     """The tool_results handback already carries confidence via
     operator.py's res.model_dump(). If the prompt never explains it, the model
     narrates confidently regardless and iteration 2 launders the uncertainty
-    away."""
-    from backend.core.prompts.registry import DEFAULT_PROMPTS
-    planner = DEFAULT_PROMPTS["planner"]["content"].lower()
-    assert "confidence" in planner
-    assert "confirm" in planner
+    away.
+
+    Asserted against the prompt PlannerAgent actually builds, not against
+    DEFAULT_PROMPTS: the live planner assembles its system prompt inline in
+    _build_prompt and never reads the registry, so the same paragraph sitting
+    in the registry alone would be dead text that no model ever sees.
+    """
+    from backend.core.agents.planner import PlannerAgent
+    from backend.core.context.types import AgentContext
+
+    prompt = PlannerAgent()._build_prompt(AgentContext(user_intent="turn the volume down"))
+    # The prompt is hard-wrapped; compare on normalised whitespace so a rewrap
+    # is not a test failure while a deletion still is.
+    lowered = " ".join(prompt.lower().split())
+
+    # Distinctive enough to fail if the guidance is removed OR reversed.
+    assert "reduced confidence means the tool did the thing but could not confirm it" in lowered
+    assert "never describe such a result as confirmed, completed or done" in lowered
+    assert "contradicted" in lowered
+    # The JSON envelope's own braces must survive the f-string intact.
+    assert '{"tool_calls":' in prompt
+
+
+def test_planner_prompt_is_not_only_in_the_registry():
+    """Guard against the paragraph drifting back to being registry-only."""
+    from backend.core.agents.planner import PlannerAgent
+    from backend.core.context.types import AgentContext
+
+    built = PlannerAgent()._build_prompt(AgentContext(user_intent="hi"))
+    assert "confidence_reason" in built
+
+
+def test_single_tool_fast_path_hedges_unconfirmed():
+    """Commander's dominant spoken branch: one tool, success, has a message.
+    ~105 tools declare no post-condition, so this path decides whether the
+    honesty survives to the speaker at all."""
+    from backend.core.brain import _hedge
+
+    unconfirmed = {
+        "status": "success",
+        "message": "opened notepad",
+        "confidence": _UNCONFIRMED_CONFIDENCE,
+        "confidence_reason": [],
+    }
+    spoken = _hedge(str(unconfirmed["message"]), unconfirmed)
+    assert "couldn't confirm" in spoken.lower()
+
+    confirmed = dict(unconfirmed, confidence=100.0)
+    assert _hedge(str(confirmed["message"]), confirmed) == "opened notepad"
+
+
+def test_commander_single_tool_branch_calls_hedge():
+    """The above proves _hedge works; this proves the branch USES it."""
+    import inspect
+    from backend.core.agents import commander as commander_mod
+
+    src = inspect.getsource(commander_mod.CommanderAgent._run_loop_stream)
+    assert 'spoken = _hedge(str(msg), res)' in src, (
+        "the single-tool fast path speaks the tool's claim verbatim again"
+    )
+
+
+def test_contradicted_result_speaks_its_reason():
+    """A contradicted post-condition's reason -- 'volume is 30%, expected 50%'
+    -- is the most informative sentence this feature produces. It used to be
+    dropped for the literal word 'that'."""
+    from backend.core.agents.commander import _confirmed_summary
+
+    batch = [{
+        "name": "set_volume",
+        "result": {
+            "status": "error",
+            "message": None,
+            "reason": "volume is 30%, expected 50%",
+            "confidence": 0.0,
+            "confidence_reason": ["contradicted: volume is 30%, expected 50%"],
+        },
+    }]
+    spoken = _confirmed_summary(batch, "set volume")
+    assert "volume is 30%, expected 50%" in spoken
+    assert "that" != spoken.rsplit(": ", 1)[-1]
+
+
+def test_failure_with_no_message_or_reason_names_the_tool():
+    """The wrapper key is 'name' (operator.execute_batch), never 'tool'."""
+    from backend.core.agents.commander import _confirmed_summary
+
+    batch = [{"name": "set_volume", "result": {"status": "error"}}]
+    assert "set_volume" in _confirmed_summary(batch, "set volume")
 
 
 if __name__ == "__main__":

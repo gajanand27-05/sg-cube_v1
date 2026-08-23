@@ -1,13 +1,45 @@
 """Audio control tools (Phase 11b) — system master volume and mute via pycaw."""
+import threading
 from ctypes import POINTER, cast
 
+import comtypes
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
 from backend.core.tools.registry import CapabilityTier, tool
 
+# COM apartments are PER THREAD. `import comtypes` initialises COM on the
+# importing thread only — which is the MAIN thread — while every one of these
+# tools actually runs on a worker: runtime.run_tool dispatches sync tools to
+# the default executor, and post-conditions run on _VERIFY_EXECUTOR, a
+# different pool again. Measured live against the real endpoint before this
+# guard existed, on both threads:
+#
+#   OSError: [WinError -2147221008] CoInitialize has not been called
+#
+# i.e. every audio tool failed outright off the main thread, and had the body
+# somehow survived, its post-condition would still have raised on the verify
+# thread and degraded silently to "unconfirmed" forever. Nothing in the test
+# suite noticed, because tests call the verify callables directly from the
+# main thread where COM is already up.
+_com_ready = threading.local()
+
+
+def _ensure_com() -> None:
+    """Initialise COM on the calling thread, once."""
+    if getattr(_com_ready, "done", False):
+        return
+    try:
+        comtypes.CoInitialize()
+    except OSError:
+        # RPC_E_CHANGED_MODE: this thread already has an apartment of the other
+        # kind. That is still a usable apartment — don't retry on every call.
+        pass
+    _com_ready.done = True
+
 
 def _endpoint():
+    _ensure_com()
     devices = AudioUtilities.GetSpeakers()
     interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
     return cast(interface, POINTER(IAudioEndpointVolume))

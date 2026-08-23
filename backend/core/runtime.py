@@ -72,10 +72,23 @@ async def _apply_post_condition(name: str, args: dict, res: ToolResult) -> ToolR
         return res
 
     if tool_obj.verify is None:
-        res.confidence = _UNCONFIRMED_CONFIDENCE
-        res.confidence_reason = list(res.confidence_reason) + [
-            "unconfirmed: no post-condition declared"
-        ]
+        # min(), not assignment. Several tools already read the world back
+        # themselves and declare a MEANINGFUL confidence — open_url 95.0 after
+        # comparing the final URL, arrange_windows 65.0 when some placements
+        # failed. Overwriting with 60.0 both RAISED the honest 65.0-partial
+        # signal's neighbours and destroyed the partial-failure signal itself.
+        # The ceiling still applies: no undeclared post-condition means we
+        # cannot ratify a tool's own 100.0.
+        res.confidence = min(res.confidence, _UNCONFIRMED_CONFIDENCE)
+        # A tool that recorded its own reasoning is not silent, so appending
+        # "it said nothing" contradicts the line above it. Say what is actually
+        # true instead: nobody checked independently.
+        if res.confidence_reason:
+            res.confidence_reason = list(res.confidence_reason) + [
+                "unconfirmed: nothing checked this independently"
+            ]
+        else:
+            res.confidence_reason = ["unconfirmed: no post-condition declared"]
         return res
 
     try:
