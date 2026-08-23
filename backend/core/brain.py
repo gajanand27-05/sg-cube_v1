@@ -30,6 +30,21 @@ def _result_field(result: Any, name: str) -> Any:
     return got
 
 
+def _hedge(message: str, result: Any) -> str:
+    """Say what was attempted, and admit when it was not confirmed.
+
+    A tool that could not read the world back still did something — claiming
+    nothing happened would be its own inaccuracy. What it must not do is use
+    the grammar of completion for an outcome nobody observed.
+    """
+    from backend.core.runtime import _UNCONFIRMED_CONFIDENCE
+
+    confidence = _result_field(result, "confidence")
+    if confidence is None or float(confidence) > _UNCONFIRMED_CONFIDENCE:
+        return message
+    return f"{message} — though I couldn't confirm it"
+
+
 def summarize_outcome(tool_records: Any) -> str:
     """What to say when the pipeline produced no spoken text.
 
@@ -60,7 +75,7 @@ def summarize_outcome(tool_records: Any) -> str:
         message = (_result_field(result, "message") or "").strip()
         # A tool can succeed with no message. Naming it is honest; inventing
         # an outcome for it is not.
-        parts.append(message or str(record.get("name", "")).replace("_", " "))
+        parts.append(_hedge(message or str(record.get("name", "")).replace("_", " "), result))
 
     parts = [p for p in parts if p]
     if not parts:

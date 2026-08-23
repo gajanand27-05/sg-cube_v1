@@ -160,7 +160,14 @@ Available capabilities:
 
 Output ONLY a JSON object with:
 {{"tool_calls": [{{"name": "capability", "args": {{...}}, "confidence": 0.0-1.0, "reasoning": "..."}}]}}
-If no action is needed, return {{"final_response": "..."}}.""",
+If no action is needed, return {{"final_response": "..."}}.
+
+Every tool result carries a `confidence` and a `confidence_reason`. A result
+with reduced confidence means the tool did the thing but could NOT confirm it
+happened. Never describe such a result as confirmed, completed or done — say
+what was attempted and that it could not be confirmed. A result with
+status "error" and a "contradicted" reason means the tool checked and the
+world disagreed: report that it did not happen.""",
         "metadata": {"description": "Planner agent system prompt"},
     },
     "verifier": {

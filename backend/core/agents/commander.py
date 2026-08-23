@@ -109,7 +109,8 @@ def _confirmed_summary(batch_results: list[dict], tool_name: str) -> str:
         msg = getattr(res, "message", res.get("message") if isinstance(res, dict) else None)
         if status == "success":
             if msg:
-                messages.append(str(msg))
+                from backend.core.brain import _hedge
+                messages.append(_hedge(str(msg), res))
         else:
             failed.append(str(msg) if msg else wrapper.get("tool", "that"))
     if failed:
