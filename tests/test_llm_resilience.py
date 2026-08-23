@@ -16,9 +16,29 @@ from pathlib import Path
 from typing import AsyncGenerator
 from unittest.mock import patch
 
+import pytest
+
 _project_root = Path(__file__).resolve().parents[1]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
+
+
+@pytest.fixture(autouse=True)
+def _restore_fallback_setting():
+    """Snapshot and restore `llm_fallback_backend` around every test here.
+
+    Several tests below set it and then restore it to a hardcoded "" in their
+    `finally`. That was the default once; it is not any more, so those
+    restores silently clobbered the real setting for every test that ran
+    afterwards. Restoring to the value we actually found is the only version
+    that stays correct when the default changes again.
+    """
+    from backend.server.config import settings
+    original = settings.llm_fallback_backend
+    try:
+        yield
+    finally:
+        settings.llm_fallback_backend = original
 
 
 # ── Gemini retry helpers ──────────────────────────────────────────────
@@ -276,3 +296,60 @@ if __name__ == "__main__":
     test_chat_stream_fallback_on_pre_yield_failure()
     test_chat_stream_mid_stream_failure_does_not_fallback()
     print("All Phase 5B LLM resilience tests passed.")
+
+
+# ── The failover must actually be ENABLED, not merely implemented ─────
+
+def test_llm_fallback_backend_is_configured():
+    """A 12-second network drop killed 12 consecutive commands in a live
+    sweep — every one of them `[Errno 11001] getaddrinfo failed`, spoken as
+    "Sorry, I encountered an error".
+
+    provider.chat_stream has a complete, careful pre-yield failover: it
+    catches, picks a fallback backend, emits telemetry and re-streams, and it
+    correctly refuses to fail over once tokens have been yielded. None of it
+    ran, because `llm_fallback_backend` defaulted to "" and
+    _get_fallback_backend returns None on empty.
+
+    Machinery that is built, tested and switched off is worth exactly nothing
+    during the outage it was written for.
+    """
+    from backend.server.config import settings
+    assert settings.llm_fallback_backend, (
+        "llm_fallback_backend is empty — a cloud outage takes the assistant "
+        "down entirely instead of degrading to the local model"
+    )
+
+
+def test_the_configured_fallback_backend_is_actually_registered():
+    """_get_fallback_backend logs a warning and returns None for an
+    unregistered name, which fails silently at exactly the wrong moment."""
+    from backend.ai_modules.llm import create_llm_provider
+    from backend.server.config import settings
+
+    provider = create_llm_provider()
+    assert settings.llm_fallback_backend in provider._backends, (
+        f"fallback {settings.llm_fallback_backend!r} is not registered; "
+        f"registered: {list(provider._backends)}"
+    )
+
+
+def test_the_fallback_runs_on_a_local_model():
+    """The point of the fallback is surviving a network loss, so it must not
+    be another cloud backend. It also must not silently inherit phi3
+    (settings.fast_model), which the verifier uses and which is weak at the
+    tool-call JSON the planner emits."""
+    from backend.ai_modules.llm import create_llm_provider
+    from backend.server.config import settings
+
+    provider = create_llm_provider()
+    backend = provider._backends[settings.llm_fallback_backend]
+    base = (getattr(backend, "base_url", "") or "").lower()
+    assert "127.0.0.1" in base or "localhost" in base, (
+        f"fallback points at {base!r} — a cloud fallback cannot survive the "
+        "outage it exists for"
+    )
+    assert getattr(backend, "default_model", None), (
+        "fallback backend has no explicit model, so it inherits fast_model "
+        "(phi3) — pin a capable local planner model instead"
+    )

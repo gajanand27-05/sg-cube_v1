@@ -23,7 +23,17 @@ def create_llm_provider(test_mode: bool = False) -> LLMProvider:
     try:
         provider.register("ollama", OllamaBackend())
         provider.register("embedding", OllamaBackend())  # embeddings via ollama
-        log.info("Registered Ollama backend")
+        # Dedicated failover seat for when the cloud is unreachable. Separate
+        # from "ollama" so it can pin a capable planner model without moving
+        # settings.fast_model (phi3), which the verifier runs on. Registered
+        # unconditionally: the whole point is that it exists when the network
+        # does not, so it must not depend on any cloud probe succeeding.
+        provider.register("ollama_fallback", OllamaBackend(
+            base_url=settings.ollama_url,
+            default_model=settings.llm_fallback_model,
+        ))
+        log.info("Registered Ollama backend (+ local failover on %s)",
+                 settings.llm_fallback_model)
     except Exception as e:
         log.warning(f"Ollama backend unavailable: {e}")
 

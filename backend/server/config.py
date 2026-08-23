@@ -231,7 +231,31 @@ class Settings(BaseSettings):
     # provider.py + backends/gemini_backend.py + ollama_client.py.
     llm_max_retries: int = 3
     llm_backoff_base_s: float = 2.0  # used only when server doesn't send Retry-After
-    llm_fallback_backend: str = ""  # e.g. "ollama" — falls over to local on cloud failure
+    # Defaulted ON 2026-08-23. It shipped as "" — no fallback — and a live
+    # sweep caught what that costs: a ~12 second network drop killed 12
+    # consecutive commands, every one of them `[Errno 11001] getaddrinfo
+    # failed`, every one spoken as the same "Sorry, I encountered an error".
+    # The failover above was already written, careful and correct; it never ran
+    # because _get_fallback_backend returns None on an empty name. Machinery
+    # that is switched off is worth nothing during the outage it was built for.
+    #
+    # Points at a DEDICATED local backend rather than "ollama": the plain
+    # local backend resolves its model to settings.fast_model (phi3), which
+    # the verifier uses and which is weak at the tool-call JSON the planner
+    # emits. Pinning the fallback separately keeps the verifier's phi3 alone.
+    llm_fallback_backend: str = "ollama_fallback"
+    # Local planner used only when the cloud is unreachable. It must FIT: this
+    # box has a 6144 MiB GPU with ~2.5 GB already resident (qwen2.5vl + the
+    # embedding model, both on a keep-alive), so the obvious pick — gemma4:12b,
+    # a far better planner — is 7.6 GB and cannot load at all. It would fail or
+    # spill to CPU during precisely the outage this exists to survive.
+    #
+    # phi3 is 2.2 GB, fits the headroom, and is usually already warm because
+    # the verifier runs on it. It is weak at tool-call JSON, so expect the
+    # fallback to answer conversationally more often than it executes tools —
+    # which is still strictly better than 12 consecutive "Sorry, I encountered
+    # an error". Revisit if this ever runs on a bigger GPU.
+    llm_fallback_model: str = "phi3"
 
     # ── Phase 5A: tool execution timeouts (per-tier) ──
     # Every tool call is wrapped in asyncio.wait_for. Tier is derived from

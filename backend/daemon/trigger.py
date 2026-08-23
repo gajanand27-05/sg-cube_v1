@@ -194,6 +194,42 @@ _VOICE_FAST_PATH_ACTIONS = frozenset({
     "stop",
 })
 
+# Rule actions dispatched straight to the TOOL REGISTRY, no planner.
+#
+# A live sweep lost 12 consecutive commands to a ~12 second network drop, and
+# the casualties included `battery status`, `system status`, `volume up` and
+# `set brightness to 40` — every one a LOCAL tool the rule tier had already
+# resolved. They failed only because this path sent them to a cloud planner.
+# Turning the volume up should not require a working DNS resolver.
+#
+# Widening _VOICE_FAST_PATH_ACTIONS alone would have changed nothing: it is
+# gated on HANDLERS, and HANDLERS has no entry for set_volume or get_battery.
+# Hence a second, registry-backed set.
+#
+# Dispatch goes through registry.call -> runtime.run_tool, NOT through a
+# direct function call. That is load-bearing: run_tool is where post-conditions
+# run, so calling the tool function directly here would silently un-do the
+# "never claim what you didn't verify" work for the four tools that have one.
+#
+# Membership rule, enforced by tests/test_voice_fast_path_tools.py: this path
+# skips the Guardian, so an entry must be one the Guardian would have waved
+# through anyway — READONLY, or SYSTEM_WRITE explicitly marked trusted. A
+# DESTRUCTIVE entry would execute without the confirmation the tier contract
+# says can never be silenced. `unmute` is deliberately absent: the rule is a
+# distinct action but the tool is a toggle, so "unmute" on an unmuted system
+# would mute it.
+_VOICE_FAST_PATH_TOOLS = frozenset({
+    "get_battery",
+    "get_system_status",
+    "set_volume",
+    "volume_up",
+    "volume_down",
+    "mute",
+    "set_brightness",
+    "brightness_up",
+    "brightness_down",
+})
+
 
 async def _try_rule_fast_path(command: str, emit: EmitFn | None, turn) -> Optional[bool]:
     """Answer from the rule tier when it is safe to. None => not handled."""
@@ -203,12 +239,25 @@ async def _try_rule_fast_path(command: str, emit: EmitFn | None, turn) -> Option
         from backend.core.safe_executor.command_whitelist import HANDLERS
 
         hit = rule_engine.match(normalize_for_rules(command))
-        if hit is None or hit.action not in _VOICE_FAST_PATH_ACTIONS:
+        if hit is None:
             return None
-        handler = HANDLERS.get(hit.action)
-        if handler is None:
+
+        if hit.action in _VOICE_FAST_PATH_TOOLS:
+            from backend.core.tools import registry as tool_registry
+
+            res = await tool_registry.call(hit.action, dict(hit.args or {}))
+            result = res.model_dump() if hasattr(res, "model_dump") else dict(res)
+            # A contradicted post-condition arrives as ERROR with `reason` and
+            # no `message`. Speaking only `message` would drop the single most
+            # informative sentence the tool produced and answer with silence.
+            result.setdefault("message", result.get("reason") or "")
+        elif hit.action in _VOICE_FAST_PATH_ACTIONS:
+            handler = HANDLERS.get(hit.action)
+            if handler is None:
+                return None
+            result = handler(hit)
+        else:
             return None
-        result = handler(hit)
     except Exception as e:
         # Never let the fast path break a turn — fall through to the planner,
         # which is what happened before this existed.
