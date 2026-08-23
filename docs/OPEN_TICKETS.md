@@ -453,9 +453,37 @@ Vocabulary is deliberately NOT "verified": `AgentCompletedEvent.status == "verif
 
 **STILL OPEN — `chrome_tabs.py` almost certainly has the same bug.** It uses `uiautomation`, which imports `comtypes` and calls `comtypes.client.CreateObject` transitively. A grep of `backend/` for "comtypes" does not see it. This is the subsystem behind `"close youtube"`. **Not probed.** Probe it the same way — drive a real tab close from a worker thread, not the main thread — before assuming it works. `win32gui`/`win32api` in `windowing.py` are plain Win32, not COM, and are safe.
 
-**Known wart in the fix**: `_ensure_com`'s `except OSError: pass` followed by an unconditional `done = True` swallows any init failure and never retries on that thread. It cannot fake success (the following `GetSpeakers()` raises), but it will re-surface a misleading `CO_E_NOTINITIALIZED` forever. Tighten to re-raise anything that is not `RPC_E_CHANGED_MODE`.
+**Per-thread init was NOT enough — it hard-crashed the process.** Those worker threads die (`asyncio.run()` tears down its default executor every turn) and an apartment dies with its thread. A repeated real-turn probe segfaulted: `STATUS_ACCESS_VIOLATION`, exit `-1073741819`. `faulthandler` put the fault here:
+
+```
+Garbage-collecting
+  comtypes ... Release / __del__
+  chromadb/api/rust.py _get
+  backend/core/memory/screen_memory.py get_recent_observations
+  backend/core/context/builder.py _get_screen_objects
+```
+
+An audio COM pointer released mid-ChromaDB-query on a context-builder thread. comtypes objects land in reference **cycles**, so refcounting never retires them — they survive as garbage until whatever GC pass runs next, on whatever thread, and a cross-apartment release is an access violation. **The stack blames ChromaDB; the bug is audio's.**
+
+**What actually holds** (`2882ea3`): all COM work confined to one dedicated `audio-com` thread created once and never exiting; no interface pointer ever leaves it; read-modify-write done in a single apartment visit; and `gc.collect()` on that thread after each call so the cycles retire where the apartment lives. `_ensure_com` now re-raises anything that is not `RPC_E_CHANGED_MODE`.
+
+**Two fixes were tried and measured first, and both failed** — per-thread `CoInitialize`, then flattening exceptions so no traceback carried a pointer out. Both looked obviously right. Recorded so nobody re-tries them.
 
 **Note for anyone reading tool-failure metrics**: `contradicted` results now count as tool failures in the session success rate and `dogfooding.json`. A dip after this lands is ambiguous between a regression and detection finally working.
+
+## T-planner-omits-required-args (opened 2026-08-23)
+
+**Observed** during the live voice-turn probe, n=9 real turns: 2-3 of 9 produced `Commander: Guardian rejected parts of the plan: ["Missing required argument 'level' for tool 'set_volume'."]`. The planner emits `set_volume` with no `level`, Guardian correctly rejects it, and the turn degrades into a clarification question (*"Could you tell me the exact volume level?"*) for a command that already stated it.
+
+Phrasing-independent: seen on "set volume to seventy", "set volume to 70" and "set the volume to seventy percent". Same family as the closed `T-planner-arg-hallucination`, but the arg is **omitted**, not misnamed — so the alias band-aid does not apply. Pre-existing; not caused by the post-condition work.
+
+**Note the user-visible shape**: Onyx asks for information the user already gave. That reads as "it didn't hear me", which is how it would get misdiagnosed as an STT problem.
+
+## T-planner-narrates-state-it-never-read (opened 2026-08-23)
+
+**Observed** in the same probe: one turn answered *"The volume is set to 70%."* with **tools: 0**, while the real volume was 50%. No tool ran, so nothing lied — the planner simply asserted world state it never read.
+
+This is the **narration layer**, explicitly scoped out of `T-tool-claims-unconfirmed` (see that spec's Scope section). The post-condition contract cannot catch it by construction: it only governs tools that actually execute. This is the first live sighting of that gap, and it is the strongest argument for doing the narration-gate follow-up — a tool layer that never lies is still not an assistant that never lies.
 
 ## T-log-cp1252 (opened + FIXED 2026-07-30)
 
