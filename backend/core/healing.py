@@ -90,7 +90,17 @@ class SelfHealer:
         #     invented a tool name.
         #   - "parse failed" from data_sources.py: response body wasn't
         #     the shape we expected — a retry with fresh args often works.
-        if ("missing argument" in err or "type mismatch" in err
+        #
+        # 2026-08-23: "missing argument" MISSED the error the Guardian actually
+        # emits — verifier.py says "Missing required argument 'level' for tool
+        # 'set_volume'.", and "missing argument" is not a substring of "missing
+        # required argument". So it fell all the way through to ESCALATE, whose
+        # default instruction literally ends "Ask the user for clarification."
+        # Measured live over 9 real turns: 2-3 of them asked the user for a
+        # volume level the user had already said out loud. Matching on the two
+        # words independently survives the next rewording too.
+        missing_arg = "missing" in err and "argument" in err
+        if (missing_arg or "type mismatch" in err
                 or "hallucinated" in err
                 or "empty symbol" in err or "empty location" in err
                 or "unknown tool" in err
@@ -170,7 +180,17 @@ class SelfHealer:
         if path == RecoveryPath.RETRY:
             return f"The tool {tool_name} failed due to a transient error ({error}). I'm retrying automatically."
         if path == RecoveryPath.FIX:
-            return f"The tool {tool_name} was malformed: {error}. Please correct the parameters and try again."
+            # "Correct the parameters" alone left the planner free to satisfy
+            # the correction by ASKING for the value instead of supplying it —
+            # which is the observed failure, and infuriating when the user
+            # already said it. Point it back at the words it was given.
+            return (
+                f"The tool {tool_name} was malformed: {error}. Re-read the "
+                "user's original request, take the argument values from what "
+                "they already said, and call the tool again. Request "
+                "clarification only if the value genuinely is not in their "
+                "request."
+            )
         if path == RecoveryPath.PIVOT:
             return f"The tool {tool_name} couldn't find the result ({error}). Try a different tool or search strategy."
         if path == RecoveryPath.ABORT:
