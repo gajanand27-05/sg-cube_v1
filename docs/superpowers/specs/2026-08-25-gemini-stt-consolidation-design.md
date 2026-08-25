@@ -175,8 +175,11 @@ they are exactly the "unnecessary stuff" this effort targets:
   sample JPEG from its site-packages assets. That is a multi-gigabyte
   dependency (it is what drags `torch` in) kept alive to supply one test image.
   Replace with a small checked-in fixture, drop the dep.
-- `livekit_worker.py` (81 lines) — `requirements.txt` shows the livekit installs
-  commented out. Confirm dead, then remove.
+- `livekit_worker.py` (81 lines) — unreachable, confirmed. `voice_pipeline`
+  defaults to `"local"` (`config.py:116`), no `.env` overrides it, and the
+  `livekit` package is not installed in the venv at all. `is_enabled()` can only
+  return False; setting `VOICE_PIPELINE=livekit` would `ImportError` rather than
+  switch pipelines. Remove the module and the four dead `livekit_*` settings.
 
 Once `ultralytics` and the silero path are gone, `torch` has no importer left in
 `backend/`.
