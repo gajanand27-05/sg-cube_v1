@@ -117,32 +117,55 @@ def _speccd_client():
     return create_autospec(genai.Client(api_key="dummy-key-not-used"), instance=True)
 
 
-def _make_backend(client):
-    from backend.ai_modules.llm.backends.gemini_backend import GeminiBackend
-    from backend.ai_modules.llm.key_pool import pool
+@pytest.fixture
+def _fake_pool(monkeypatch):
+    """Isolates GeminiBackend's key pool from the real, process-wide singleton.
+
+    _make_backend() below draws a slot from the pool to know where to seed
+    its mock client. Left pointed at the real singleton, that call reads
+    whatever keys are actually in .env — these tests were green only because
+    this repo's .env happens to hold a real gemini_api_key, and they fail
+    outright (pool.acquire() returns None) on any machine with an empty or
+    placeholder key. Mirrors the `three_keys` fixture in
+    test_gemini_backend_key_pool.py: fake keys in, fresh KeyPool installed on
+    both module bindings that matter (key_pool.pool itself, and
+    gemini_backend.pool, which is the name _client_for_call() actually reads).
+    """
+    from backend.ai_modules.llm import key_pool as kp
+    from backend.ai_modules.llm.backends import gemini_backend as gb
+    monkeypatch.setattr(kp.settings, "gemini_api_key", "k" * 20)
+    monkeypatch.setattr(kp.settings, "gemini_api_key_2", "j" * 20)
+    monkeypatch.setattr(kp.settings, "gemini_api_key_3", "m" * 20)
+    fresh = kp.KeyPool()
+    monkeypatch.setattr(kp, "pool", fresh)
+    monkeypatch.setattr(gb, "pool", fresh)
+    return fresh
+
+
+def _make_backend(client, fake_pool):
+    from backend.ai_modules.llm.backends import gemini_backend as gb
 
     with patch("google.genai.Client", return_value=client):
-        be = GeminiBackend()
+        be = gb.GeminiBackend()
     # Task 3: GeminiBackend no longer builds its client in __init__ — it
     # draws a (slot, client) pair from the shared key pool lazily, per call,
     # inside generate()/chat_stream(). The `with patch(...)` above is already
     # closed by the time that happens, so an unpatched genai.Client() would
     # be constructed for real. Seed the per-slot cache directly so
     # _client_for_call() reuses this mock instead — otherwise these tests
-    # would fire a real network call against whatever key is in .env,
-    # against a free-tier quota of 20 requests/day.
-    got = pool.acquire()
-    assert got is not None, "no Gemini key configured for this test run"
+    # would fire a real network call against a real key.
+    got = fake_pool.acquire()
+    assert got is not None, "the fake pool has no unparked key — fixture bug"
     slot, _key = got
     be._clients[slot] = client
     return be
 
 
-def test_gemini_generate_calls_a_real_sdk_method():
+def test_gemini_generate_calls_a_real_sdk_method(_fake_pool):
     client = _speccd_client()
     client.aio.models.generate_content.return_value = type("R", (), {"text": " hi "})()
 
-    be = _make_backend(client)
+    be = _make_backend(client, _fake_pool)
     out = asyncio.run(be.generate("ping", system="be brief", temperature=0.0))
 
     assert out == "hi", f"expected stripped text, got {out!r}"
@@ -150,7 +173,7 @@ def test_gemini_generate_calls_a_real_sdk_method():
     print("  [PASS] generate() drives client.aio.models.generate_content")
 
 
-def test_gemini_reports_concrete_model_to_telemetry():
+def test_gemini_reports_concrete_model_to_telemetry(_fake_pool):
     """The HUD's MODEL row renders ai_metrics.active_model verbatim.
 
     GeminiBackend inherited the base active_model_name() -> None, so
@@ -160,7 +183,7 @@ def test_gemini_reports_concrete_model_to_telemetry():
     from backend.ai_modules.llm.provider import _model_label
     from backend.server.config import settings
 
-    be = _make_backend(_speccd_client())
+    be = _make_backend(_speccd_client(), _fake_pool)
     label = _model_label(be, "gemini")
     assert label == settings.gemini_model, (
         f"telemetry should name the model, got {label!r}"
@@ -169,13 +192,13 @@ def test_gemini_reports_concrete_model_to_telemetry():
     print(f"  [PASS] telemetry reports {label!r}, not the routing key")
 
 
-def test_gemini_chat_stream_calls_a_real_sdk_method():
+def test_gemini_chat_stream_calls_a_real_sdk_method(_fake_pool):
     client = _speccd_client()
     client.models.generate_content_stream.return_value = iter(
         [type("C", (), {"text": "a"})(), type("C", (), {"text": "b"})()]
     )
 
-    be = _make_backend(client)
+    be = _make_backend(client, _fake_pool)
 
     async def _drive():
         return [ev async for ev in be.chat_stream([{"role": "user", "content": "hi"}])]
@@ -372,15 +395,29 @@ def test_chat_stream_mid_stream_failure_does_not_fallback():
     print("  [PASS] chat_stream: mid-stream failure propagates, no fallback")
 
 
+def _standalone_fake_pool():
+    """Builds the same isolation as the `_fake_pool` fixture, for the
+    __main__ block below which runs outside pytest (no `monkeypatch`)."""
+    from backend.ai_modules.llm import key_pool as kp
+    from backend.ai_modules.llm.backends import gemini_backend as gb
+    kp.settings.gemini_api_key = "k" * 20
+    kp.settings.gemini_api_key_2 = "j" * 20
+    kp.settings.gemini_api_key_3 = "m" * 20
+    fresh = kp.KeyPool()
+    kp.pool = fresh
+    gb.pool = fresh
+    return fresh
+
+
 if __name__ == "__main__":
     test_parse_gemini_retry_after_from_repr()
     test_parse_gemini_retry_after_fallback_when_unparseable()
     test_is_gemini_retryable_429()
     test_is_gemini_retryable_timeout()
     test_is_gemini_retryable_non_429_not_retried()
-    test_gemini_generate_calls_a_real_sdk_method()
-    test_gemini_reports_concrete_model_to_telemetry()
-    test_gemini_chat_stream_calls_a_real_sdk_method()
+    test_gemini_generate_calls_a_real_sdk_method(_standalone_fake_pool())
+    test_gemini_reports_concrete_model_to_telemetry(_standalone_fake_pool())
+    test_gemini_chat_stream_calls_a_real_sdk_method(_standalone_fake_pool())
     test_generate_no_failure_no_fallback()
     test_generate_fallback_configured_and_primary_fails()
     test_generate_no_fallback_configured_reraises()

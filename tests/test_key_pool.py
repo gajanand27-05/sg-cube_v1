@@ -54,6 +54,28 @@ def test_daily_quota_parks_for_hours_not_seconds(pool):
     assert pool.acquire() == (2, "j" * 20)
 
 
+def test_ambiguous_429_defaults_to_daily_park(pool):
+    """The headline defect in the ported original: it parked EVERY failure
+    for 60s regardless of scope, so a key that had spent its daily quota
+    came back off cooldown a minute later and failed again, forever.
+
+    classify() defaults a 429 with neither 'PerDay' nor 'PerMinute' in the
+    body to the daily park on purpose (guessing per-minute on a daily
+    exhaustion reproduces exactly that thrash). Every other 429 test here
+    passes an explicit scope hint; this is the one that pins the default
+    itself, so a regression to "unscoped 429 -> 60s" cannot slip back in
+    silently.
+    """
+    pool.report_failure(1, _client_error(
+        429, "RESOURCE_EXHAUSTED: Quota exceeded for quota metric "
+             "'generate_content_free_tier_requests'"))
+    status = {s.slot: s for s in pool.status()}[1]
+    assert status.parked_until is not None
+    parked_for = status.parked_until - time.time()
+    assert parked_for > 3600, f"ambiguous 429 parked only {parked_for:.0f}s"
+    assert status.reason == "daily quota exhausted"
+
+
 def test_per_minute_rate_limit_parks_for_60s(pool):
     pool.report_failure(1, _client_error(
         429, "RESOURCE_EXHAUSTED: Quota exceeded PerMinute"))

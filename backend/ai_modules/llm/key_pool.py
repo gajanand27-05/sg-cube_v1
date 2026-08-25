@@ -89,8 +89,37 @@ def classify(exc: Exception) -> tuple[float, str]:
 
 
 class KeyPool:
-    """Slot-ordered key rotation. Thread-safe: STT runs on the turn worker
-    thread while the planner runs on the event loop, and both draw here."""
+    """Slot-ordered key rotation, shared by STT (turn worker thread) and the
+    planner (event loop).
+
+    Thread-safety scope, precisely: each individual `acquire()`,
+    `report_success()`, or `report_failure()` call is atomic under `_lock`
+    — the internal dicts are never read or written half-updated, and
+    `status()` always reflects one consistent snapshot. What is NOT
+    guaranteed is ordering across the acquire -> network call -> report
+    sequence of two DIFFERENT concurrent callers sharing the same slot.
+    `report_success()`/`report_failure()` take only a slot number, not a
+    token tying the report back to a specific `acquire()`, so whichever
+    report lands last wins — a `report_success()` that started before, but
+    finishes after, another caller's `report_failure()` will un-park a slot
+    that was just correctly parked.
+
+    A generation token returned by `acquire()` and required by the report
+    methods would close this window, but both current callers of this pool
+    (`GeminiBackend` and `stt_gemini`) call `report_success(slot)` /
+    `report_failure(slot, exc)` with a bare slot number, and `stt_gemini` is
+    out of scope to change here — so tightening this API would either break
+    it or leave it exempt and not actually close the cross-subsystem race it
+    exists to prevent. The window is accepted instead, because it is
+    self-correcting on both sides:
+      - A wrongly-cleared park just means the next `acquire()` hands out an
+        already-exhausted key again; that call fails immediately and
+        re-parks it. Cost: one wasted call, never a stuck state.
+      - A wrongly-applied park (a fresh success clobbered by a late failure
+        report) delays reuse of a healthy key, capped by that failure's own
+        park duration (60s transient, or until the daily quota reset for an
+        unparkable-scope 429). It never corrupts state or loops forever.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
