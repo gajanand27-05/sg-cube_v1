@@ -6,7 +6,12 @@ export function ModuleStatusPanel() {
   const vision = useUiEvent("vision_update");
 
   const modelName = metrics?.active_model ?? "—";
-  const memoryStatus = "Ollama Cloud" ;
+  // Was hardcoded "Ollama Cloud". Wrong on two counts: this row describes the
+  // MEMORY store, and embeddings have always run on the local daemon
+  // (nomic-embed-text) because no cloud catalog here serves embedding models.
+  // It read as the reasoning provider, which is now Gemini — so the one row
+  // that named a provider named the wrong one for the wrong subsystem.
+  const memoryStatus = "Local embeddings";
   const visionStatus = vision ? "Active" : "Idle";
   const visionApp = vision?.windows?.[0] ?? "—";
 

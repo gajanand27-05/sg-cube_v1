@@ -98,6 +98,81 @@ def test_is_gemini_retryable_non_429_not_retried():
     print("  [PASS] unrelated errors are NOT retryable")
 
 
+# ── SDK call-surface contract ─────────────────────────────────────────
+# The tests above only exercise the retry HELPERS. They stayed green for the
+# whole time GeminiBackend.generate called `client.models.generate_content_async`
+# — a method of the OLD google-generativeai SDK that does not exist in
+# google-genai. Every real Gemini generate() raised AttributeError, which
+# _is_gemini_retryable classes as non-retryable, so the turn died outright.
+# These two assert the attribute paths the backend actually calls exist on a
+# real client object. No network: genai.Client() does not dial out on
+# construction, and we never invoke the methods.
+
+def _speccd_client():
+    """A mock shaped by the REAL genai.Client — attributes the SDK does not
+    have raise AttributeError, exactly as they did in production."""
+    from unittest.mock import create_autospec
+    from google import genai
+    # Client() does not dial out on construction; nothing here hits the network.
+    return create_autospec(genai.Client(api_key="dummy-key-not-used"), instance=True)
+
+
+def _make_backend(client):
+    from backend.ai_modules.llm.backends.gemini_backend import GeminiBackend
+    with patch("google.genai.Client", return_value=client):
+        return GeminiBackend()
+
+
+def test_gemini_generate_calls_a_real_sdk_method():
+    client = _speccd_client()
+    client.aio.models.generate_content.return_value = type("R", (), {"text": " hi "})()
+
+    be = _make_backend(client)
+    out = asyncio.run(be.generate("ping", system="be brief", temperature=0.0))
+
+    assert out == "hi", f"expected stripped text, got {out!r}"
+    assert client.aio.models.generate_content.await_count == 1
+    print("  [PASS] generate() drives client.aio.models.generate_content")
+
+
+def test_gemini_reports_concrete_model_to_telemetry():
+    """The HUD's MODEL row renders ai_metrics.active_model verbatim.
+
+    GeminiBackend inherited the base active_model_name() -> None, so
+    _model_label fell back to the ROUTING KEY and the HUD read "gemini"
+    instead of "gemini-2.5-flash".
+    """
+    from backend.ai_modules.llm.provider import _model_label
+    from backend.server.config import settings
+
+    be = _make_backend(_speccd_client())
+    label = _model_label(be, "gemini")
+    assert label == settings.gemini_model, (
+        f"telemetry should name the model, got {label!r}"
+    )
+    assert label != "gemini", "active_model must not be the routing key"
+    print(f"  [PASS] telemetry reports {label!r}, not the routing key")
+
+
+def test_gemini_chat_stream_calls_a_real_sdk_method():
+    client = _speccd_client()
+    client.models.generate_content_stream.return_value = iter(
+        [type("C", (), {"text": "a"})(), type("C", (), {"text": "b"})()]
+    )
+
+    be = _make_backend(client)
+
+    async def _drive():
+        return [ev async for ev in be.chat_stream([{"role": "user", "content": "hi"}])]
+
+    events = asyncio.run(_drive())
+
+    assert [e["token"] for e in events if not e["done"]] == ["a", "b"]
+    assert events[-1]["done"] is True
+    assert client.models.generate_content_stream.call_count == 1
+    print("  [PASS] chat_stream() drives client.models.generate_content_stream")
+
+
 # ── LLMProvider fallback wiring ───────────────────────────────────────
 
 class _FakeBackend:
@@ -288,6 +363,9 @@ if __name__ == "__main__":
     test_is_gemini_retryable_429()
     test_is_gemini_retryable_timeout()
     test_is_gemini_retryable_non_429_not_retried()
+    test_gemini_generate_calls_a_real_sdk_method()
+    test_gemini_reports_concrete_model_to_telemetry()
+    test_gemini_chat_stream_calls_a_real_sdk_method()
     test_generate_no_failure_no_fallback()
     test_generate_fallback_configured_and_primary_fails()
     test_generate_no_fallback_configured_reraises()

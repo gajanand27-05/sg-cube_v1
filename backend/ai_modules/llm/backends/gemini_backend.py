@@ -112,8 +112,15 @@ class GeminiBackend(LLMBackend):
         max_retries = settings.llm_max_retries
         for attempt in range(1, max_retries + 1):
             try:
+                # `client.aio.models` is the async surface in google-genai.
+                # This used to call `client.models.generate_content_async`,
+                # which is the OLD google-generativeai SDK's name and does not
+                # exist here — every call raised AttributeError, which
+                # _is_gemini_retryable classes as non-retryable, so the turn
+                # died outright. The unit tests only covered the retry helpers,
+                # never this call, so it stayed green while dead.
                 resp = await asyncio.wait_for(
-                    self.client.models.generate_content_async(
+                    self.client.aio.models.generate_content(
                         model=model, contents=contents, config=config
                     ),
                     timeout=timeout,
@@ -207,6 +214,13 @@ class GeminiBackend(LLMBackend):
                     yield {"token": item, "done": False}
             await task
             return
+
+    def active_model_name(self) -> str | None:
+        # Without this the base class returns None and _model_label falls back
+        # to the ROUTING KEY, so the HUD's MODEL row read "gemini" instead of
+        # "gemini-2.5-flash" — the exact regression active_model_name was added
+        # to fix for Ollama, never implemented here.
+        return self.default_model
 
     def embed(self, text: str, **kwargs: Any) -> list[float]:
         raise NotImplementedError("Use Ollama for embeddings")
