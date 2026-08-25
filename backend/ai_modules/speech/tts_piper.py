@@ -112,6 +112,28 @@ ECHO_CONTAINMENT_RATIO = 0.8
 # cheaper error.
 ECHO_MIN_TOKENS = 3
 
+# How many CONSECUTIVE utterances one echo span may cover.
+#
+# The span used to be every live utterance concatenated — up to
+# _RECENT_SPOKEN_CAP of them, ~40 tokens. Containment only asks whether the
+# transcript's words appear in order somewhere in the span, so a short command
+# scores by having its words scattered across sentences it has nothing to do
+# with. Measured on the real ring from a live session:
+#
+#     'Can you open me whatsapp?'   whole ring 0.80   <- dropped, exactly at
+#                                   any 1 utterance 0.40   the threshold
+#                                   any 2 or 3     0.40
+#
+# 'can'/'you' from "How can I help you?", 'me' from a clarifying question three
+# sentences later, 'whatsapp' from an "opened WhatsApp" at the far end. The
+# user was not echoing anything; the command was silently discarded.
+#
+# 2 is the minimum that keeps the case the span exists for (a capture
+# straddling one sentence boundary — test_capture_spanning_two_sentences_is_
+# suppressed); 3 gives headroom for a capture that swallows a short sentence
+# whole, and still leaves the false positive above at 0.40.
+ECHO_SPAN_UTTERANCES = 3
+
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
@@ -223,9 +245,20 @@ def was_recently_spoken(transcript: str) -> bool:
     # A capture does not respect our sentence boundaries. Streaming TTS pushes
     # one utterance per sentence, and the mic happily records across two of
     # them — such a transcript scores ~0.5 against each half and would survive
-    # a per-utterance check. Test the live window as one span too.
-    spanning = tuple(token for u in live for token in u.tokens)
-    return _containment(spanning, tokens) >= ECHO_CONTAINMENT_RATIO
+    # a per-utterance check.
+    #
+    # The span is over CONSECUTIVE utterances only. Spanning the whole ring
+    # let a command's words be collected from four unrelated sentences and
+    # dropped as echo; a capture that really straddles a boundary is
+    # contiguous by construction. See ECHO_SPAN_UTTERANCES.
+    for width in range(2, ECHO_SPAN_UTTERANCES + 1):
+        for start in range(0, len(live) - width + 1):
+            spanning = tuple(
+                token for u in live[start:start + width] for token in u.tokens
+            )
+            if _containment(spanning, tokens) >= ECHO_CONTAINMENT_RATIO:
+                return True
+    return False
 
 
 def recent_spoken_snapshot() -> list[tuple[str, float | None]]:

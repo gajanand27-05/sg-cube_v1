@@ -96,6 +96,64 @@ def test_capture_spanning_two_sentences_is_suppressed():
     assert was_recently_spoken("three meetings today the first one starts") is True
 
 
+def test_span_does_not_stitch_words_from_across_the_whole_ring():
+    """T-echo-gate-ate-a-real-command.
+
+    The span used to be the concatenation of every live utterance — up to ten
+    of them, ~40 tokens. A short command only has to have its words appear
+    somewhere in that pile, in order, to score as echo. Live:
+
+        [command] 'Can you open me whatsapp?'
+        [trigger] dropping TTS echo 'Can you open me whatsapp?'
+
+    'can' and 'you' came from "How can I help you?", 'me' from a clarifying
+    question three sentences later, and 'whatsapp' from an "opened WhatsApp"
+    at the other end of the ring. Four separate sentences, none of which the
+    user was echoing. Containment: 0.80 against the whole ring, exactly the
+    threshold — but only 0.40 against any single utterance, and 0.40 against
+    any two or three CONSECUTIVE ones.
+
+    A real straddled capture is contiguous, so the span must be too. Ring
+    below is the real one, reconstructed from the session log.
+    """
+    for line in [
+        "Yes, I'm here.",
+        "How can I help you?",
+        "I'm not sure what to do with that — could you say it again?",
+        "I'm not sure what to do with that — could you say it again?",
+        "I'm not sure what to do with that — could you say it again?",
+        "I’m not sure which picture you’re referring to.",
+        "Could you tell me if it’s a picture on your screen, a file on your "
+        "computer, or something else you’d like information about?",
+        "I'm not sure what to do with that — could you say it again?",
+        "I'm not sure what to do with that — could you say it again?",
+        "opened WhatsApp — though I couldn't confirm it",
+    ]:
+        _spoke(line)
+
+    assert was_recently_spoken("Can you open me whatsapp?") is False
+
+
+def test_verbatim_echo_still_suppressed_with_a_full_ring():
+    """The narrowed span must not blunt the case the gate exists for."""
+    for line in [
+        "Yes, I'm here.",
+        "How can I help you?",
+        "I'm not sure what to do with that — could you say it again?",
+        "I'm not sure what to do with that — could you say it again?",
+        "I'm not sure what to do with that — could you say it again?",
+        "I'm not sure what to do with that — could you say it again?",
+        "I'm not sure what to do with that — could you say it again?",
+        "I'm not sure what to do with that — could you say it again?",
+        "Sure, I can open a file for you.",
+        "opened WhatsApp — though I couldn't confirm it",
+    ]:
+        _spoke(line)
+
+    assert was_recently_spoken("opened WhatsApp though I couldn't confirm it") is True
+    assert was_recently_spoken("sure I can open a file for you") is True
+
+
 # ── Speech it must not touch ───────────────────────────────────────────
 
 def test_unrelated_command_passes():
