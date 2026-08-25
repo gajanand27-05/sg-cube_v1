@@ -256,29 +256,60 @@ time.
 
 ### 7.1 Gate criteria
 
-Run against the owner's real voice on the real hardware, not fixtures. Every row
-must pass. A row that cannot be measured counts as a FAIL, not a pass-by-default.
+Run against the owner's real voice on the real hardware, not fixtures. A row
+that cannot be measured counts as a FAIL, not a pass-by-default.
 
-| # | Criterion | Threshold |
-|---|---|---|
-| 1 | Rule-match rate, 30-clip corpus | ≥ Phase 0 Whisper baseline |
-| 2 | Wrong-rule fires | 0. Any wrong action is an automatic FAIL |
-| 3 | Median wake→transcript | ≤ Phase 0 baseline + 400ms |
-| 4 | Median wake→first_audio_out | ≤ Phase 0 baseline + 400ms |
-| 5 | Network unplugged | speaks the §5 line, reaches IDLE |
-| 6 | All keys parked | speaks the §5 line (distinct from row 5), reaches IDLE |
-| 7 | Key failover | kill key 1 mid-session; turn completes on key 2 |
-| 8 | Requests per interaction | counted over ≥20 real turns; matches predicted 1/rule-hit, 2/planner-command |
-| 9 | State machine | IDLE reached on every path incl. every failure branch |
-| 10 | Barge-in / interrupt | still works — the six fixes in `59eb62f` still hold |
+**Three independent gates. All three must pass; they do not trade against each
+other.** A latency win does not buy a recognition failure, and nothing buys a
+safety failure.
 
-The 400ms in rows 3-4 is a starting proposal, not a measured tolerance. It is
-the owner's call to move once Phase 0 shows what the baseline actually is; a
-network hop that costs 150ms is fine and one that costs 1.2s is not.
+**Gate A — Latency.** Materially better than the Phase 0 Whisper distribution.
 
-Row 8 exists because "STT works" and "Onyx is usable on a 60/day budget" are
-different questions, and only the second one decides whether this migration was
+| # | Criterion |
+|---|---|
+| A1 | Median wake→transcript vs Phase 0 median |
+| A2 | p95 wake→transcript vs Phase 0 p95 — a good median with a bad tail is a FAIL |
+| A3 | Median and p95 wake→first_audio_out vs Phase 0 |
+
+**No threshold is set here.** The spec previously proposed "baseline + 400ms";
+that was written before any measurement existed and is withdrawn. Phase 0
+reports min/median/p95/max, and the owner sets the threshold from that
+distribution. Task 7 cannot be evaluated until they have.
+
+**Gate B — Recognition.** Real commands produce the intended transcript and fire
+the intended rule.
+
+| # | Criterion |
+|---|---|
+| B1 | Rule-match rate, 30-clip corpus, ≥ Phase 0 Whisper baseline |
+| B2 | ≥10 live spoken commands transcribe to what was actually said |
+| B3 | `speech_detected: false` on silence/noise, rather than an invented transcript |
+
+**Gate C — Safety and state.** Nothing wrong executes; nothing gets stranded.
+
+| # | Criterion |
+|---|---|
+| C1 | **Zero incorrect rule executions.** Any wrong action is an automatic FAIL of the whole gate |
+| C2 | Network unplugged → speaks the §5 line, reaches IDLE |
+| C3 | All keys parked → speaks a DIFFERENT §5 line, reaches IDLE |
+| C4 | Key failover: kill key 1 mid-session, turn completes on key 2 |
+| C5 | IDLE reached on every path including every failure branch |
+| C6 | Barge-in / interrupt still works — the six fixes in `59eb62f` still hold |
+| C7 | Requests per interaction over ≥20 real turns matches the predicted 1/rule-hit, 2/planner-command |
+
+C1 is absolute because the Vosk probe showed how quietly a wrong-rule fire
+ships: `translate → lang="him the"` was consistent across every take and looked
+unremarkable in aggregate statistics.
+
+C7 exists because "STT works" and "Onyx is usable on a 60/day budget" are
+different questions, and only the second decides whether this migration was
 worth doing.
+
+**On honesty at this gate.** The purpose is not to prove the migration right; it
+is to grant permission to delete Whisper only if the evidence says that is safe.
+Record what actually happens. Report the distribution across all runs including
+a bad one. Do not drop an outlier without saying so and why. On a FAIL, stop and
+leave the rollback intact.
 
 ## 8. Known risks
 

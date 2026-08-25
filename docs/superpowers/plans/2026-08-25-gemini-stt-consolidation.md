@@ -128,7 +128,15 @@ def main() -> int:
         print(f"  {k:<14} {counts[k]:>3} / {total}")
     timings.sort()
     if timings:
-        print(f"  transcribe ms: median {timings[len(timings)//2]:.0f}  max {timings[-1]:.0f}")
+        # Distribution, not a single number. A median hides the tail, and the
+        # tail is what a user actually notices — one 4s wait per ten commands
+        # reads as "it's slow" regardless of what the median says.
+        def pct(p: float) -> float:
+            return timings[min(len(timings) - 1, int(len(timings) * p))]
+        print(f"  transcribe ms: min {timings[0]:.0f}  median {pct(0.5):.0f}  "
+              f"p95 {pct(0.95):.0f}  max {timings[-1]:.0f}")
+        print(f"  NOTE: clip 1 includes the 2-3s model load. Re-run and use the")
+        print(f"        second run's numbers, or drop clip 1 before reading these.")
     print("=" * 60)
     return 0
 
@@ -149,9 +157,11 @@ Expected: 30 rows, then a summary block. First run loads the Whisper model (2-3s
 
 Append a `## Phase 0 — Whisper baseline` section with the summary block verbatim, the date, and the exact command used.
 
-- [ ] **Step 4: Report the median to the owner and get the latency tolerance set**
+- [ ] **Step 4: Report the distribution to the owner and let THEM set the threshold**
 
-The spec's 400ms in gate rows 3-4 is explicitly flagged as a proposal, not a measurement. Report the baseline median and ask the owner to confirm or change the tolerance before Task 7. Do not proceed past Task 7 on an unconfirmed threshold.
+Report min / median / p95 / max. **Do not propose a latency threshold and do not carry the spec's old 400ms figure forward** — it was written before any measurement existed and the owner has explicitly withdrawn it. The threshold is set by the owner after seeing this distribution, and Task 7 cannot be evaluated until they have set it.
+
+State the number plainly whatever it is. If Whisper turns out to be fast, say so — that makes the migration harder to justify, and that is information, not a problem to be managed.
 
 - [ ] **Step 5: Commit**
 
@@ -1566,6 +1576,26 @@ EOF
 ### Task 7: The gate — real voice, real hardware
 
 This task runs software; it does not write much. **Do not proceed to Task 8 on a FAIL.**
+
+> **Instruction to whoever executes this task, from the owner:**
+>
+> **Do not optimise the results to justify Gemini. Record what actually happens.**
+> If Gemini fails the gate, stop here and leave the rollback intact
+> (`STT_BACKEND=whisper`, Whisper undeleted).
+>
+> The purpose of this gate is not to prove the migration right. It is to give
+> permission to delete Whisper *only if* the evidence says that is safe. A
+> re-run that happened to look better is not a result; report the distribution
+> across all runs, including the bad one. Do not drop an outlier without saying
+> you dropped it and why.
+
+**Three independent gates. All three must pass — they do not trade against each other.** A latency win does not buy a recognition failure, and nothing buys a safety failure.
+
+| Gate | Requirement |
+|---|---|
+| **Latency** | Materially better than the Task 1 Whisper distribution, at the threshold the owner set in Task 1 Step 4. Compared on median AND p95 — a good median with a bad tail is a fail. |
+| **Recognition** | Real spoken commands reliably produce the intended transcript and fire the intended rule. |
+| **Safety / state** | Zero incorrect rule executions. Every failure path returns to IDLE. |
 
 **Files:**
 - Create: `tools/_scratch/stt_gate.py` (git-ignored)
