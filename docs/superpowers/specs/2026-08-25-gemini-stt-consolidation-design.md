@@ -227,26 +227,68 @@ in SPEAKING, which is the failure mode `59eb62f` documents.
 
 ## 7. Phases
 
-1. **Key pool.** `key_pool.py` + tests; wire `GeminiBackend` to it. Ships alone.
-2. **`stt_gemini.py`** + contract tests. Not yet wired.
-3. **Swap.** `trigger.py` and `voice.py` imports. Full suite must stay green.
-4. **Delete.** Whisper, silero, dead `transcribe_stream`, settings, deps.
-5. **Failure UX** (§5) + live probe.
-6. **Tool audit** — separate, independent: `core/tools/` is 6,246 lines across
+**Deletion is gated on a live PASS, not on "Gemini works".** Whisper stays
+installed and callable through Phase 4 so it remains a real fallback while the
+replacement is on trial. Nothing is removed until §7.1 passes.
+
+0. **Baseline.** Measure the CURRENT Whisper stack before touching it: rule-match
+   rate over the 30-clip corpus, and live wake→transcript / wake→first_audio_out.
+   Without a "before" number the latency gate is unfalsifiable and can be argued
+   either way after the fact. Recorded in `logs.md`.
+1. **Key pool.** `key_pool.py` + tests; wire `GeminiBackend` to it. Ships alone,
+   and is worth shipping alone — it fixes quota thrash regardless of STT.
+2. **`stt_gemini.py`** + contract tests. Not yet wired to anything.
+3. **Wire in.** `trigger.py` and `voice.py` imports, behind a setting that can
+   fall back to Whisper. Full suite must stay green.
+4. **REAL VOICE TEST — the gate.** §7.1. Whisper still present.
+5. **Delete, on PASS only.** Whisper, silero, dead `transcribe_stream`, the
+   fallback setting, `livekit_worker.py`, `ultralytics`, dead settings, deps.
+   On FAIL: fix the Gemini path and re-run the gate. Do not delete.
+6. **Failure UX** (§5) hardening from what the gate actually surfaced.
+7. **Tool audit** — separate, independent: `core/tools/` is 6,246 lines across
    44 modules. Static reachability only; there is no per-tool usage data in
    `dogfooding.json` (only `tools_total`/`tools_success` aggregates), so this
    finds dead code, not unused-but-live code. Every removal listed for approval
    before deletion.
 
-Phases 1-5 are the STT work. Phase 6 shares nothing with it.
+Phases 0-6 are the STT work. Phase 7 shares nothing with it and can run at any
+time.
+
+### 7.1 Gate criteria
+
+Run against the owner's real voice on the real hardware, not fixtures. Every row
+must pass. A row that cannot be measured counts as a FAIL, not a pass-by-default.
+
+| # | Criterion | Threshold |
+|---|---|---|
+| 1 | Rule-match rate, 30-clip corpus | ≥ Phase 0 Whisper baseline |
+| 2 | Wrong-rule fires | 0. Any wrong action is an automatic FAIL |
+| 3 | Median wake→transcript | ≤ Phase 0 baseline + 400ms |
+| 4 | Median wake→first_audio_out | ≤ Phase 0 baseline + 400ms |
+| 5 | Network unplugged | speaks the §5 line, reaches IDLE |
+| 6 | All keys parked | speaks the §5 line (distinct from row 5), reaches IDLE |
+| 7 | Key failover | kill key 1 mid-session; turn completes on key 2 |
+| 8 | Requests per interaction | counted over ≥20 real turns; matches predicted 1/rule-hit, 2/planner-command |
+| 9 | State machine | IDLE reached on every path incl. every failure branch |
+| 10 | Barge-in / interrupt | still works — the six fixes in `59eb62f` still hold |
+
+The 400ms in rows 3-4 is a starting proposal, not a measured tolerance. It is
+the owner's call to move once Phase 0 shows what the baseline actually is; a
+network hop that costs 150ms is fine and one that costs 1.2s is not.
+
+Row 8 exists because "STT works" and "Onyx is usable on a 60/day budget" are
+different questions, and only the second one decides whether this migration was
+worth doing.
 
 ## 8. Known risks
 
 - **Latency is unmeasured.** Whisper ran on the GPU locally; Gemini adds a
   network round-trip on the critical wake→first-audio path, which is the number
-  that matters. Measure at Phase 3 and report before Phase 4 deletes the
-  fallback. If it regresses badly, the merged single-call design (Phase 6
-  candidate) becomes the mitigation rather than an optimisation.
+  that matters. Phase 0 measures the baseline, gate rows 3-4 enforce it, and
+  Whisper is not deleted until they pass. If it regresses badly, the merged
+  audio→plan single-call design becomes the mitigation rather than an
+  optimisation — it removes a whole round-trip, at the cost of restructuring
+  Commander.
 - **60 requests/day is a real ceiling** and this change makes every command cost
   one. Phase 1 exists so the ceiling is actually reachable.
 - **No offline voice.** Accepted, ruled on, made honest in §5. Not mitigated.
