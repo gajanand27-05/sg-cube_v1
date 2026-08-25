@@ -11,9 +11,11 @@ _surrounding_quotes = re.compile(r"^[\"'`]+|[\"'`]+$")
 
 
 # A leading wake phrase, with the punctuation Whisper puts after it. Optional
-# "hey"/"ok" because people say them and Whisper transcribes them.
+# "hey"/"ok" because people say them and Whisper transcribes them. Group 1 is
+# the bare name, so a transcript that is nothing but wake words can be
+# collapsed to the canonical attention call — see strip_wake_prefix.
 _wake_prefix = re.compile(
-    r"^\s*(?:hey\s+|ok(?:ay)?\s+)?onyx\b[\s,.:;!?—–-]*", re.IGNORECASE)
+    r"^\s*(?:hey\s+|ok(?:ay)?\s+)?(onyx)\b[\s,.:;!?—–-]*", re.IGNORECASE)
 
 
 def strip_wake_prefix(text: str, _pattern: re.Pattern = _wake_prefix) -> str:
@@ -31,14 +33,49 @@ def strip_wake_prefix(text: str, _pattern: re.Pattern = _wake_prefix) -> str:
     cleanly at the front of every command — turning a garbled-transcript bug
     into a universal routing miss.
 
-    Only the FRONT, and only once: "what is onyx 130" is a question about
-    onyx, and a bare "Onyx" is someone getting attention rather than a command
-    with the name removed — stripping that to "" would hide it from the
-    content gate that is supposed to reject it.
+    Only the FRONT: "what is onyx 130" is a question about onyx, and a bare
+    "Onyx" is someone getting attention rather than a command with the name
+    removed — stripping that to "" would hide it from the content gate that is
+    supposed to reject it.
+
+    Repetitions at the front all go, because a stutter is not a command. This
+    used to strip exactly one, which left a sentence made entirely of the
+    assistant's own name in front of the planner — and the planner read it as
+    a request to launch an app:
+
+        [command] 'Onyx, onyx, onyx, onyx.'
+        [trigger] stripped wake prefix: -> 'onyx, onyx, onyx.'
+        [ai] response: I attempted to open the Onyx application ... (tools: 1)
+        The system cannot find the file Onyx.
+
+    When repetitions are ALL there is, the result collapses to the single bare
+    wake word — which is the attention call it always was, and which the
+    planner already answers conversationally.
     """
     if not text:
         return ""
-    stripped = _pattern.sub("", text, count=1)
+    stripped = text
+    first = True
+    while True:
+        nxt = _pattern.sub("", stripped, count=1)
+        if nxt == stripped:
+            break
+        if not nxt.strip():
+            if first:
+                # A single bare wake word — unchanged, byte for byte. The
+                # content gate is what decides about it, not this function.
+                return text
+            # Two or more, and nothing else. Hand back the canonical bare form
+            # rather than the pile, so it is indistinguishable from someone
+            # saying the name once. Falls back for a caller that supplied a
+            # pattern without the name captured.
+            m = _pattern.match(stripped)
+            try:
+                return m.group(1)
+            except (IndexError, AttributeError):
+                return stripped.strip() or text
+        stripped = nxt
+        first = False
     return stripped if stripped.strip() else text
 
 

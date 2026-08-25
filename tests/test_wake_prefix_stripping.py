@@ -80,11 +80,29 @@ def test_the_name_is_only_stripped_from_the_FRONT():
     assert strip_wake_prefix("search for onyx paint") == "search for onyx paint"
 
 
-def test_only_one_leading_wake_word_is_removed():
+def test_every_leading_wake_word_is_removed():
     """Vosk partials like '[unk] [unk] onyx' show the word can land twice.
-    Removing the first is enough; consuming an unbounded run risks eating a
-    real word that follows."""
-    assert strip_wake_prefix("onyx onyx close chrome") == "onyx close chrome"
+
+    This used to stop after one, on the reasoning that "consuming an unbounded
+    run risks eating a real word that follows". It cannot: the pattern matches
+    the literal wake word on a \\b boundary, so a run can only ever be made of
+    the wake word itself. Meanwhile stopping at one had two live costs —
+
+      * 'onyx close chrome' misses every anchored rule, which is the exact
+        routing miss this function exists to prevent; and
+      * 'Onyx, onyx, onyx, onyx.' reached the planner as 'onyx, onyx, onyx.'
+        and was read as a request to launch an app:
+            [ai] I attempted to open the Onyx application ... (tools: 1)
+            The system cannot find the file Onyx.
+    """
+    assert strip_wake_prefix("onyx onyx close chrome") == "close chrome"
+    assert strip_wake_prefix("onyx onyx onyx close chrome") == "close chrome"
+
+
+def test_a_run_of_wake_words_never_eats_the_word_after_it():
+    """The bound that actually matters: only the wake word is consumable."""
+    assert strip_wake_prefix("onyx onyx onions in the fridge") == "onions in the fridge"
+    assert strip_wake_prefix("onyx onyx one more thing") == "one more thing"
 
 
 def test_a_command_without_the_wake_word_is_untouched():
