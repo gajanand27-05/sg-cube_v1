@@ -109,7 +109,13 @@ class Settings(BaseSettings):
     ollama_cloud_model: str = "gpt-oss:120b"
 
     # ── Gemini (Google AI SDK) ──
+    # Three keys, tried in slot order. Free tier is metered PER DAY, so one
+    # key exhausts in a session; the pool (llm/key_pool.py) rotates and, more
+    # importantly, parks an exhausted key until its quota resets instead of
+    # retrying it every 60s forever.
     gemini_api_key: str = ""
+    gemini_api_key_2: str = ""
+    gemini_api_key_3: str = ""
     gemini_model: str = "gemini-2.5-flash"
 
     # ── Phase C3: LiveKit optional voice pipeline ──
