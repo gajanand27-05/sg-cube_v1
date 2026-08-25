@@ -320,7 +320,21 @@ def handle_wake(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optio
     # deliberately left playing through the recording.
     if settings.defer_stop_speech_after_capture:
         stop_speech()
-    return asyncio.run(_handle_wake_async(audio_bytes, emit, device_id))
+    try:
+        return asyncio.run(_handle_wake_async(audio_bytes, emit, device_id))
+    except asyncio.CancelledError:
+        # Backstop for a cancel that reaches the turn task. commander.interrupt
+        # no longer aims at it (see CommanderAgent.run_stream), but this is the
+        # boundary where the consequences were worst and they were invisible:
+        # CancelledError is a BaseException, so the `except Exception` here and
+        # in wake_word._start_turn both missed it. The turn thread died with
+        # `Exception in thread wake-turn`, the IDLE transition at the end of
+        # _process_and_execute never ran, and the state machine sat in SPEAKING
+        # — which then makes the wake word need barge-in loudness to fire.
+        print("[trigger] turn cancelled mid-flight; ending it cleanly")
+        log.warning("turn cancelled mid-flight")
+        state_manager.transition_to(AssistantState.IDLE)
+        return False
 
 
 async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn | None = None, device_id: Optional[str] = None, turn: Optional[TurnLatency] = None) -> bool:
@@ -751,13 +765,33 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
 from backend.daemon.ui_events import ProactiveEvent
 import time
 
+# How long a proactive event waits for a voice turn to finish before giving
+# up. Bounded because the wait used to be `while True`-shaped: a turn that
+# never returned to IDLE (which is exactly what a crashed turn thread leaves
+# behind) would park this thread forever, one leaked thread per event.
+_PROACTIVE_IDLE_WAIT_S = 60.0
+
+
 def on_proactive_event(event: ProactiveEvent):
     """Handle events fired by the Watcher Agent in the background."""
     def _run():
-        while state_manager.current_state != AssistantState.IDLE:
-            time.sleep(1)
-
+        # `state_manager.current`, NOT `.current_state` — StateMachine has
+        # `_current_state` and a `current` property, and there has never been
+        # a `current_state`. Reading it raised AttributeError on the first
+        # iteration, above the try, so this thread died before ever calling
+        # the handler: every proactive event the Watcher fired was silently
+        # dropped while the subscription looked perfectly wired.
         try:
+            deadline = time.monotonic() + _PROACTIVE_IDLE_WAIT_S
+            while state_manager.current != AssistantState.IDLE:
+                if time.monotonic() >= deadline:
+                    log.warning(
+                        "Proactive event dropped: assistant busy (%s) for %.0fs",
+                        state_manager.current, _PROACTIVE_IDLE_WAIT_S,
+                    )
+                    return
+                time.sleep(0.1)
+
             asyncio.run(_handle_proactive_async(event.query))
         except Exception as e:
             log.error(f"Proactive trigger failed: {e}")

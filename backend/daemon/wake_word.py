@@ -10,6 +10,7 @@ import numpy as np
 import sounddevice as sd
 import vosk
 
+from backend.ai_modules.speech.tts_piper import is_speaking
 from backend.core.agents.pending_confirmation import store as _pending_store
 from backend.core.dogfooding import ledger as dogfooding_ledger
 from backend.core.state import AssistantState, manager as state_manager
@@ -242,10 +243,31 @@ class WakeWordListener:
         Deferring to the same threshold keeps one number in charge of "is this
         the user talking over us". With barge-in disabled there is no other
         way to interrupt, so the guard steps aside.
+
+        "Are we speaking?" is asked of the TTS module as well as the state
+        machine, because the state machine can be stale in exactly the
+        situation that matters. Two turns overlap, turn A is mid-reply, turn B
+        finishes and runs its own transition_to(IDLE) — and from then on A's
+        playback is unguarded. That is what these are:
+
+            [wake] heard wake: 'onyx' (rms=88)      [TTS] Speech interrupted
+            [wake] heard wake: 'onyx' (rms=73)      [TTS] Speech interrupted
+            [wake] heard wake: '[unk] onyx' (rms=59)[TTS] Speech interrupted
+
+        wakes far below any speech level, each cutting a live sentence. Note
+        the fix is NOT an RMS floor on the wake path: while nothing is
+        playing, a quiet "onyx" is a wake we want, and _VAD_RMS_THRESHOLD is
+        load-bearing at 50. is_speaking() answers the question exactly —
+        it reports whether the current playback session's player task is
+        still running.
         """
         if not settings.enable_barge_in:
             return True
-        if state_manager.current != AssistantState.SPEAKING:
+        try:
+            playing = is_speaking()
+        except Exception:
+            playing = False
+        if state_manager.current != AssistantState.SPEAKING and not playing:
             return True
         return rms >= settings.barge_in_rms_threshold
 

@@ -34,6 +34,32 @@ MAX_ITER = 5
 _CANVAS_INTENT_RE = re.compile(r"\bcanvas\b|\bshow\s+me\b|\bdisplay\b|\brender\b", re.IGNORECASE)
 
 
+def _fan_out_summary(calls: list, limit: int = 4) -> str:
+    """"open Notepad, open Chrome, open Firefox and 3 more" — spoken aloud.
+
+    Prefers the argument over the tool name: "open app, open app, open app"
+    tells the user nothing about what is going to happen to their desktop.
+    """
+    labels: list[str] = []
+    for call in calls:
+        name = str(call.get("name") or "action").replace("_", " ")
+        args = call.get("args") or {}
+        target = ""
+        if isinstance(args, dict):
+            for key in ("name", "target", "query", "app", "text", "url"):
+                value = args.get(key)
+                if isinstance(value, str) and value.strip():
+                    target = value.strip()
+                    break
+        labels.append(f"{name} {target}".strip() if target else name)
+
+    if len(labels) <= limit:
+        if len(labels) == 1:
+            return labels[0]
+        return ", ".join(labels[:-1]) + f" and {labels[-1]}"
+    return ", ".join(labels[:limit]) + f" and {len(labels) - limit} more"
+
+
 def _pending_tool_calls(content) -> list:
     """Tool calls carried in a planner 'final' envelope, or [].
 
@@ -158,6 +184,17 @@ class CommanderChunk:
         self.metadata = metadata or {}
 
 
+# Sentinel closing the pump queue. A private object rather than None, which is
+# a legitimate CommanderChunk payload.
+_PUMP_DONE = object()
+
+# Chunk type meaning "the user interrupted this turn". Consumers must end the
+# turn WITHOUT speaking: there is no answer to give, and the fallback text is
+# an accusation of mishearing. Exported so brain.py and tests name the same
+# thing rather than matching on a string literal in two places.
+INTERRUPTED = "interrupted"
+
+
 class CommanderAgent:
     """The central orchestrator of the specialized internal agents."""
 
@@ -165,13 +202,32 @@ class CommanderAgent:
         self.planner = PlannerAgent()
         self.guardian = GuardianAgent()
         self.operator = OperatorAgent()
+        # The task running THIS commander's reasoning loop, and the loop it
+        # belongs to. Never the caller's task — see run_stream.
         self._current_task: Optional[asyncio.Task] = None
+        self._current_loop: Optional[asyncio.AbstractEventLoop] = None
 
     def interrupt(self):
-        """Stop the current reasoning/execution loop."""
-        if self._current_task and not self._current_task.done():
-            self._current_task.cancel()
-            log.info("Commander: Interrupted by user.")
+        """Abort the in-flight reasoning/execution loop.
+
+        Called from the WAKE-WORD LISTENER THREAD (on_wake_detected and
+        on_barge_in both call it), so it must not touch the task directly:
+        Task.cancel() reaches into the owning loop's callback queue and is not
+        thread-safe. It appeared to work because the loop was usually running,
+        which is what a race looks like right up until it isn't.
+
+        A closed loop means the turn it belonged to is already over, so a
+        RuntimeError here is the no-op it should be.
+        """
+        task = self._current_task
+        loop = self._current_loop
+        if task is None or loop is None or task.done():
+            return
+        try:
+            loop.call_soon_threadsafe(task.cancel)
+        except RuntimeError:
+            return
+        log.info("Commander: Interrupted by user.")
 
     async def run(self, text: str, context: ConversationContext, user_id: str | None = None) -> Tuple[str, List[dict]]:
         """Non-streaming entry point — collects all chunks and returns final result."""
@@ -185,15 +241,82 @@ class CommanderAgent:
         return spoken, tool_records
 
     async def run_stream(self, text: str, context: ConversationContext, user_id: str | None = None) -> AsyncGenerator[CommanderChunk, None]:
-        """Streaming entry point — yields chunks as they're ready."""
-        self._current_task = asyncio.current_task()
+        """Streaming entry point — yields chunks as they're ready.
+
+        The reasoning loop runs in its OWN task, feeding a queue this generator
+        drains. That indirection is the whole point: `interrupt()` cancels
+        `_current_task`, and this used to be `asyncio.current_task()` — which
+        on the voice path is the main task of `asyncio.run(_handle_wake_async)`,
+        i.e. the entire turn. Cancelling it aborted whatever the turn happened
+        to be doing, and live that was TTS playback:
+
+            File "backend/daemon/trigger.py", line 449, in _process_and_execute
+                await _speak_selective(reply, device_id)
+              File "backend/ai_modules/speech/tts_piper.py", line 410, in speak_stream
+                await session.player
+            asyncio.exceptions.CancelledError
+
+        CancelledError is a BaseException, so trigger's and wake_word's
+        `except Exception` guards both missed it: the wake-turn thread died and
+        the state machine stayed in SPEAKING.
+
+        The `except asyncio.CancelledError` that used to sit here only covered
+        the case where the cancel landed WHILE the loop was running. It could
+        not cover the one that actually bit — a consumer that stops iterating
+        early (brain.run() returns the moment it sees a `final` chunk) leaves
+        this generator suspended at a `yield` with `_current_task` still set,
+        so the next wake word cancelled a turn that had moved on to speaking.
+        A task that only ever runs `_run_loop_stream` cannot have that problem
+        regardless of when the cancel arrives.
+
+        The queue is unbounded and fed with put_nowait so neither side can
+        deadlock the other; run-ahead is bounded by MAX_ITER anyway.
+        """
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _pump() -> None:
+            try:
+                async for chunk in self._run_loop_stream(text, context, user_id):
+                    queue.put_nowait(chunk)
+            finally:
+                # Always closes the queue, including on cancellation, so the
+                # drain below can never park on a producer that is gone.
+                queue.put_nowait(_PUMP_DONE)
+
+        pump = asyncio.create_task(_pump())
+        self._current_task = pump
+        self._current_loop = asyncio.get_running_loop()
         try:
-            async for chunk in self._run_loop_stream(text, context, user_id):
-                yield chunk
-        except asyncio.CancelledError:
-            yield CommanderChunk("error", "Interrupted")
+            while True:
+                item = await queue.get()
+                if item is _PUMP_DONE:
+                    break
+                yield item
+            # _PUMP_DONE came from the pump's own finally, so it is finishing;
+            # wait so cancelled()/exception() below are meaningful. wait() does
+            # not re-raise, which is what we want — the outcome is inspected.
+            await asyncio.wait({pump})
         finally:
-            self._current_task = None
+            if not pump.done():
+                pump.cancel()
+            # Only clear if still ours: an overlapping turn may already have
+            # taken the slot, and nulling shared state we no longer own is the
+            # bug pattern T-tts-loop-globals documents.
+            if self._current_task is pump:
+                self._current_task = None
+                self._current_loop = None
+
+        if pump.cancelled():
+            # Its own chunk type, not "error". Brain has no branch for chunks
+            # it does not know, so an interrupted turn used to fall out of the
+            # loop and answer with summarize_outcome([]) — "I'm not sure what
+            # to do with that — could you say it again?". The user cut us off
+            # and got told they were misheard.
+            yield CommanderChunk(INTERRUPTED, "Interrupted")
+            return
+        exc = pump.exception()
+        if exc is not None:
+            raise exc
 
     async def _run_loop_stream(self, text: str, context: ConversationContext, user_id: str | None) -> AsyncGenerator[CommanderChunk, None]:
         t0 = time.perf_counter()
@@ -343,12 +466,21 @@ class CommanderAgent:
                         first_pending = pending_calls[0]
                         tool_name = first_pending.get("name", "action").replace("_", " ")
                         is_critical = first_pending.get("is_critical", False)
-                        
+
                         if is_critical:
                             spoken = f"⚠️ CRITICAL ACTION: I need your explicit permission to {tool_name}. This is a high-risk operation. Should I proceed?"
+                        elif any(c.get("fan_out") for c in pending_calls):
+                            # Naming only the first of six app launches would
+                            # ask "permission to open app" and hide the scale,
+                            # which is the whole reason this prompt exists.
+                            spoken = (
+                                f"That's {len(pending_calls)} actions from one "
+                                f"request — {_fan_out_summary(pending_calls)}. "
+                                f"Should I do all of them?"
+                            )
                         else:
                             spoken = f"I need your permission to {tool_name}. Should I proceed?"
-                        
+
                         # Remember what we are asking about. Without this the
                         # question was unanswerable: the prompt was spoken and
                         # `first_pending` died with the frame, so "yes" arrived

@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Optional, List
 
-from backend.core.agents.commander import commander
+from backend.core.agents.commander import INTERRUPTED, commander
 from backend.core.agent.context import ConversationContext
 from backend.core.context.builder import context_builder
 from backend.core.context.types import RequestContext
@@ -187,6 +187,21 @@ class Brain:
                 tool_records.append(chunk.content)
                 yield BrainChunk(type="tool_end", content=chunk.content, metadata=chunk.metadata)
             
+            elif chunk.type == INTERRUPTED:
+                # The user cut this turn off. End it with nothing to say, and
+                # do NOT flush sentence_buffer — a half-finished sentence from
+                # the abandoned answer is not something to speak either.
+                #
+                # Falling through instead (there was no branch here) is what
+                # made an interrupted turn answer with summarize_outcome([]):
+                # "I'm not sure what to do with that — could you say it
+                # again?", the most repeated line in both dogfooding logs.
+                # Being interrupted and being misheard are different things
+                # and must not sound the same.
+                yield BrainChunk(type="final", content=self._build_response(
+                    "", tool_records, t0, request_id, request))
+                return
+
             elif chunk.type == "final_response":
                 # Final response from planner
                 if sentence_buffer.strip():

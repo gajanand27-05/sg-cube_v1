@@ -46,6 +46,10 @@ class SentenceQueue:
         self._task: Optional[asyncio.Task] = None
         self._interrupted: bool = False
         self._spoke_anything: bool = False
+        # The loop `_queue` and `_task` belong to, captured in start(). Needed
+        # because interrupt() is called from the wake-word listener THREAD and
+        # must not touch either of them directly — see interrupt().
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     @property
     def depth(self) -> int:
@@ -74,6 +78,7 @@ class SentenceQueue:
         # how Brain failed mid-turn. Constructing it here binds it to the loop
         # that will actually consume it. See T-tts-loop-globals.
         self._queue = asyncio.Queue()
+        self._loop = asyncio.get_running_loop()
         self._task = asyncio.create_task(self._consumer())
 
     async def enqueue(self, sentence: str) -> None:
@@ -98,24 +103,70 @@ class SentenceQueue:
     def interrupt(self) -> None:
         """Stop current playback and cancel every queued sentence.
 
-        Safe to call from any task. Idempotent.
+        Safe to call from any task OR THREAD. Idempotent.
+
+        The queue work is deliberately not done inline. interrupt() is called
+        from the wake-word listener thread (on_wake_detected / on_barge_in),
+        and asyncio.Queue is not thread-safe: put_nowait wakes a parked getter
+        by completing that getter's future, which posts the wakeup with
+        `call_soon`. Unlike `call_soon_threadsafe`, call_soon does not write to
+        the loop's self-pipe — so a loop asleep in select() never learns about
+        it and the consumer stays parked until some unrelated timer fires.
+
+        Measured in tests/test_interrupted_turn_ends_quietly.py: an interrupt
+        raised at t=0.2s was not noticed until t=3.0s, when the next timer
+        happened to come due. That latency is paid by the NEXT turn, which
+        sits in wake_word._start_turn's handover join until it gives up:
+
+            [wake] previous turn still running after 15s; starting anyway
+
+        `_interrupted` is set here rather than in the callback so enqueue()
+        starts refusing late sentences immediately, whenever the loop gets
+        around to running.
         """
         if self._interrupted:
             return
         self._interrupted = True
-        # Kill Piper's current playback synchronously.
+        # Kill Piper's current playback synchronously. This one IS thread-safe
+        # (a threading.Event plus sd.stop) and it is the part that has to be
+        # immediate — it is what actually stops audio coming out of the
+        # speaker while the user is talking over it.
         try:
             stop_speech()
         except Exception as e:
             log.warning(f"stop_speech raised during interrupt: {e}")
-        # Drain remaining sentences.
+
+        loop = self._loop
+        if loop is None:
+            # start() was never called, so there is no queue anyone is waiting
+            # on and nothing to schedule onto.
+            self._drain_and_close()
+            return
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            # Already on the owning loop — run it inline so callers that
+            # interrupt and immediately assert on the queue still see it
+            # drained, rather than one loop iteration later.
+            self._drain_and_close()
+            return
+        try:
+            loop.call_soon_threadsafe(self._drain_and_close)
+        except RuntimeError:
+            # Loop already closed — the turn that owned this queue is over,
+            # which is the outcome interrupt() wanted anyway.
+            pass
+
+    def _drain_and_close(self) -> None:
+        """Discard pending sentences and poke the consumer. Owning loop only."""
         while not self._queue.empty():
             try:
                 self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
-        # Poke the consumer with a sentinel so it exits even if it's
-        # currently blocked on queue.get().
+        # Sentinel so the consumer exits even if it is parked on queue.get().
         try:
             self._queue.put_nowait(None)
         except asyncio.QueueFull:
