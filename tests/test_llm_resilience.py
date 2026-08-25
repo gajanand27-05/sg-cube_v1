@@ -119,8 +119,23 @@ def _speccd_client():
 
 def _make_backend(client):
     from backend.ai_modules.llm.backends.gemini_backend import GeminiBackend
+    from backend.ai_modules.llm.key_pool import pool
+
     with patch("google.genai.Client", return_value=client):
-        return GeminiBackend()
+        be = GeminiBackend()
+    # Task 3: GeminiBackend no longer builds its client in __init__ — it
+    # draws a (slot, client) pair from the shared key pool lazily, per call,
+    # inside generate()/chat_stream(). The `with patch(...)` above is already
+    # closed by the time that happens, so an unpatched genai.Client() would
+    # be constructed for real. Seed the per-slot cache directly so
+    # _client_for_call() reuses this mock instead — otherwise these tests
+    # would fire a real network call against whatever key is in .env,
+    # against a free-tier quota of 20 requests/day.
+    got = pool.acquire()
+    assert got is not None, "no Gemini key configured for this test run"
+    slot, _key = got
+    be._clients[slot] = client
+    return be
 
 
 def test_gemini_generate_calls_a_real_sdk_method():

@@ -9,6 +9,7 @@ from google import genai
 from google.genai import errors as genai_errors
 
 from backend.ai_modules.llm.provider import LLMBackend
+from backend.ai_modules.llm.key_pool import pool
 from backend.core.events import get_bus
 from backend.daemon.ui_events import ProviderDegradedEvent
 from backend.server.config import settings
@@ -74,8 +75,25 @@ class GeminiBackend(LLMBackend):
     """Gemini backend for reasoning, coding, chat."""
 
     def __init__(self):
-        self.client = genai.Client(api_key=settings.gemini_api_key)
         self.default_model = settings.gemini_model
+        # Clients are built per call from the shared pool rather than pinned
+        # here. A client constructed once in __init__ holds slot 1's key for
+        # the life of the process, so a key parked by STT is still used by the
+        # planner and vice versa — the two consumers each rediscover the same
+        # dead key independently.
+        self._clients: dict[int, genai.Client] = {}
+
+    def _client_for_call(self) -> tuple[int, genai.Client] | None:
+        """(slot, client) for the highest-priority unparked key, or None."""
+        got = pool.acquire()
+        if got is None:
+            return None
+        slot, key = got
+        client = self._clients.get(slot)
+        if client is None:
+            client = genai.Client(api_key=key)
+            self._clients[slot] = client
+        return slot, client
 
     def _map_messages(self, messages: list[dict]) -> tuple[str | None, list[dict]]:
         """Convert OpenAI-format to Gemini contents."""
@@ -111,6 +129,12 @@ class GeminiBackend(LLMBackend):
 
         max_retries = settings.llm_max_retries
         for attempt in range(1, max_retries + 1):
+            got = self._client_for_call()
+            if got is None:
+                _emit_degraded("all keys parked", "gave_up")
+                log.error("Gemini: every API key is parked; cannot generate")
+                raise RuntimeError("all Gemini API keys are parked")
+            slot, client = got
             try:
                 # `client.aio.models` is the async surface in google-genai.
                 # This used to call `client.models.generate_content_async`,
@@ -120,13 +144,15 @@ class GeminiBackend(LLMBackend):
                 # died outright. The unit tests only covered the retry helpers,
                 # never this call, so it stayed green while dead.
                 resp = await asyncio.wait_for(
-                    self.client.aio.models.generate_content(
+                    client.aio.models.generate_content(
                         model=model, contents=contents, config=config
                     ),
                     timeout=timeout,
                 )
+                pool.report_success(slot)
                 return resp.text.strip()
             except Exception as e:
+                pool.report_failure(slot, e)
                 retryable, reason = _is_gemini_retryable(e)
                 if not retryable or attempt >= max_retries:
                     if retryable:
@@ -163,17 +189,25 @@ class GeminiBackend(LLMBackend):
         # yielded a token to the caller we cannot restart — mid-stream
         # failures propagate up unchanged.
         for attempt in range(1, max_retries + 1):
+            got = self._client_for_call()
+            if got is None:
+                _emit_degraded("all keys parked", "gave_up")
+                log.error("Gemini: every API key is parked; cannot chat_stream")
+                raise RuntimeError("all Gemini API keys are parked")
+            slot, client = got
             queue: asyncio.Queue = asyncio.Queue()
 
-            def _run():
+            def _run(client=client, slot=slot):
                 try:
-                    for chunk in self.client.models.generate_content_stream(
+                    for chunk in client.models.generate_content_stream(
                         model=model, contents=mapped, config=config
                     ):
                         queue.put_nowait(chunk.text or "")
                     queue.put_nowait(None)
+                    pool.report_success(slot)
                 except Exception as e:
                     log.exception("Gemini stream error")
+                    pool.report_failure(slot, e)
                     queue.put_nowait(e)
 
             loop = asyncio.get_running_loop()
