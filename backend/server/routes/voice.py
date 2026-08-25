@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from backend.ai_modules.speech.stt_whisper import transcribe
+from backend.ai_modules.speech.stt import transcribe
 from backend.ai_modules.speech.tts_piper import speak
 from backend.core.auth.deps import get_any_user
 from backend.core.orchestrator.llm_layer import Intent, LLMResolveError

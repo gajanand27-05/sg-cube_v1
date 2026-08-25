@@ -118,6 +118,13 @@ class Settings(BaseSettings):
     gemini_api_key_3: str = ""
     gemini_model: str = "gemini-2.5-flash"
 
+    # Which speech-to-text engine the voice path uses. "gemini" is the
+    # intended end state; "whisper" is kept until the live gate in
+    # docs/superpowers/specs/2026-08-25-gemini-stt-consolidation-design.md
+    # section 7.1 passes, so a bad result is one config flip to revert
+    # rather than a revert commit mid-session.
+    stt_backend: str = "gemini"  # "gemini" | "whisper"
+
     # ── Phase C3: LiveKit optional voice pipeline ──
     voice_pipeline: str = "local"  # "local" | "livekit"
     livekit_url: str = ""

@@ -11,7 +11,7 @@ from typing import Any, Callable, Optional, AsyncGenerator
 import numpy as np
 import sounddevice as sd
 
-from backend.ai_modules.speech.stt_whisper import transcribe_array, transcribe_stream
+from backend.ai_modules.speech.stt import transcribe_array
 from backend.ai_modules.speech.tts_piper import (
     is_speaking,
     speak,
@@ -621,7 +621,10 @@ def _is_dispatchable(command: str) -> bool:
 async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, device_id: Optional[str] = None) -> bool:
     """Main daemon orchestration via async events.
 
-    Phase C1: Uses `transcribe_stream` for streaming STT with partial results.
+    Transcribes the whole captured utterance in one call via
+    backend.ai_modules.speech.stt. The old comment here claimed
+    `transcribe_stream` was used for partial results; it never was — that
+    function had no caller anywhere in the tree.
     Phase C2: TTS is non-blocking — returns to IDLE immediately after dispatching speech.
     Phase 4C: creates a TurnLatency at wake-onset that threads through the
               pipeline so /diagnostics/latency reports a per-stage breakdown.
@@ -641,7 +644,7 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
         rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) if arr.size else 0
 
         if rms < 200:
-            print(f"[trigger] skipping whisper: capture too quiet (rms={rms:.0f})")
+            print(f"[trigger] skipping STT: capture too quiet (rms={rms:.0f})")
             state_manager.transition_to(AssistantState.IDLE)
             latency_ledger().record(turn)
             return False
