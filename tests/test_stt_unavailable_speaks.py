@@ -137,3 +137,47 @@ def test_the_hud_is_told_what_was_said(monkeypatch, spoken):
     texts = [e.text for e in published if isinstance(e, SpokenResponse)]
     assert texts == [trigger._STT_UNAVAILABLE_SPEECH["quota"]], published
     assert [e.text for e in emitted if isinstance(e, SpokenResponse)] == texts
+
+
+def test_the_notice_is_spoken_in_the_speaking_state(monkeypatch, spoken):
+    """Onyx must be in SPEAKING while the notice plays, not THINKING.
+
+    wake_word._followup_trigger_allowed early-returns unless the state is
+    SPEAKING, so a notice delivered from THINKING is one the user cannot
+    interrupt — the Vosk-token barge-in path is inert for its whole duration
+    while Onyx is audibly talking. The HUD also reads "thinking" over speech,
+    which is the stale-pairing that makes dogfooding logs misleading.
+    """
+    seen: list[AssistantState] = []
+
+    async def _fake_stream(text, *a, **k):
+        seen.append(state_manager.current)
+        if False:  # pragma: no cover - keeps this an async generator
+            yield b""
+
+    monkeypatch.setattr(trigger, "speak_stream", _fake_stream)
+    monkeypatch.setattr(trigger, "transcribe_array", _raise("no_network"))
+
+    trigger.handle_wake(_audio())
+
+    assert seen == [AssistantState.SPEAKING], (
+        f"notice was spoken from {seen!r}, not SPEAKING"
+    )
+    assert state_manager.current == AssistantState.IDLE
+
+
+def test_the_failed_turn_records_a_first_audio_mark(monkeypatch, spoken):
+    """Without it the turn carries only `wake` and /diagnostics/latency
+    cannot compare a failed turn against a good one."""
+    recorded: list = []
+    monkeypatch.setattr(trigger, "transcribe_array", _raise("quota"))
+    monkeypatch.setattr(
+        trigger.latency_ledger(), "record", lambda t: recorded.append(t)
+    )
+
+    trigger.handle_wake(_audio())
+
+    assert recorded, "the failed turn was never recorded"
+    assert "first_audio_out" in recorded[0].stages, (
+        f"stages were {list(recorded[0].stages)}"
+    )

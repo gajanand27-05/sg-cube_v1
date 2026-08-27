@@ -15,7 +15,6 @@ from backend.ai_modules.speech.stt import transcribe_array
 from backend.ai_modules.speech.stt_gemini import SttUnavailable
 from backend.ai_modules.speech.tts_piper import (
     is_speaking,
-    speak,
     speak_stream,
     stop_speech,
     was_recently_spoken,
@@ -682,6 +681,19 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
                     e.kind, "Something went wrong with speech recognition.")
                 print(f"[trigger] STT unavailable ({e.kind}): {e}")
                 log.warning("STT unavailable (%s): %s", e.kind, e)
+                # SPEAKING, like every other speak site, before making a sound.
+                # Staying in THINKING leaves wake_word._followup_trigger_allowed
+                # early-returning for the whole notice, so the Vosk-token
+                # barge-in path is inert while Onyx is audibly talking — and the
+                # HUD reads "thinking" over speech.
+                state_manager.transition_to(AssistantState.SPEAKING)
+                try:
+                    # Without this the turn carries only `wake`, and
+                    # /diagnostics/latency shows failed turns as an
+                    # unattributed blob it cannot compare to good ones.
+                    turn.mark("first_audio_out")
+                except Exception:
+                    pass
                 try:
                     # AWAIT, and through _speak_selective — not speak().
                     # tts_piper.speak is fire-and-forget when a loop is already
