@@ -59,8 +59,14 @@ ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
 # the confusion 59eb62f fixed between being interrupted and being misheard.
 _STT_UNAVAILABLE_SPEECH = {
     "no_network": "I can't reach the network right now.",
-    "quota": "I've hit my daily limit — it resets tonight.",
-    "no_key": "My API key isn't set up.",
+    # NOT "it resets tonight": Google's free-tier daily quota rolls over at
+    # midnight Pacific, which is the middle of the day in +0530 and some other
+    # hour again in every other timezone. Naming the actual instant is the only
+    # wording that stays true wherever the machine is.
+    "quota": "I've hit my daily limit — it resets at midnight Pacific time.",
+    # Names the variable and the file, because "isn't set up" leaves the user
+    # with nothing to do about it.
+    "no_key": "My Gemini API key isn't set — check GEMINI_API_KEY in your .env file.",
 }
 
 
@@ -677,9 +683,31 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
                 print(f"[trigger] STT unavailable ({e.kind}): {e}")
                 log.warning("STT unavailable (%s): %s", e.kind, e)
                 try:
-                    speak(line)
+                    # AWAIT, and through _speak_selective — not speak().
+                    # tts_piper.speak is fire-and-forget when a loop is already
+                    # running (it does loop.create_task and returns), and
+                    # handle_wake is `return asyncio.run(...)`, which cancels
+                    # pending tasks the instant this coroutine returns. The
+                    # playback task was destroyed before it made a sound: the
+                    # notice this whole branch exists to deliver was silent in
+                    # production. _speak_selective also routes to the remote
+                    # device when device_id is set, so a turn driven from a
+                    # phone hears it on the phone rather than on a desktop
+                    # speaker the user is not next to.
+                    await _speak_selective(line, device_id)
                 except Exception:
                     log.exception("could not speak the STT failure notice")
+                # The HUD renders the last SpokenResponse. Without one here it
+                # keeps showing the previous turn's answer while Onyx says it
+                # cannot reach the network — a successful answer paired with a
+                # failed turn, which is exactly the mis-pairing that produces
+                # wrong diagnoses when reading dogfooding logs.
+                try:
+                    failure_event = SpokenResponse(text=line)
+                    get_bus().publish(failure_event, priority=Priority.NORMAL)
+                    _emit(emit, failure_event)
+                except Exception:
+                    log.exception("could not publish the STT failure notice")
                 state_manager.transition_to(AssistantState.IDLE)
                 latency_ledger().record(turn)
                 return False
