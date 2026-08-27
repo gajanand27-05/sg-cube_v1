@@ -131,6 +131,68 @@ def test_connection_error_raises_no_network(monkeypatch):
     assert exc.value.kind == "no_network"
 
 
+def _three_keys(monkeypatch):
+    for name in ("gemini_api_key", "gemini_api_key_2", "gemini_api_key_3"):
+        monkeypatch.setattr(kp.settings, name, name[-1] * 20)
+    fresh = kp.KeyPool()
+    monkeypatch.setattr(stt_gemini, "pool", fresh)
+    return fresh
+
+
+def _bad_key_error():
+    err = genai_errors.ClientError.__new__(genai_errors.ClientError)
+    Exception.__init__(err, "API key not valid")
+    err.code = 400
+    return err
+
+
+def _daily_quota_error():
+    err = genai_errors.ClientError.__new__(genai_errors.ClientError)
+    Exception.__init__(err, "RESOURCE_EXHAUSTED PerDay")
+    err.code = 429
+    return err
+
+
+@pytest.mark.parametrize("exc_factory,expected", [
+    (lambda: ConnectionError("getaddrinfo failed"), "no_network"),
+    (_bad_key_error, "no_key"),
+    (_daily_quota_error, "quota"),
+])
+def test_an_empty_pool_reports_why_it_is_empty(monkeypatch, exc_factory, expected):
+    """The kind must come from why the keys are parked, not a hardcoded guess.
+
+    With the network down, three offline turns park all three keys, and the
+    FOURTH turn never reaches the network — it dies in _client_for. That used
+    to raise "quota", so Onyx said "I've hit my daily limit" while the real
+    problem was the router, and the user stopped troubleshooting it. For an
+    invalid key the park is permanent, so every turn after the first said
+    "daily limit" forever. Two situations, one sentence — the shape 59eb62f
+    fixed, reintroduced a layer up from SttUnavailable.kind.
+    """
+    fresh = _three_keys(monkeypatch)
+    for slot in (1, 2, 3):
+        fresh.report_failure(slot, exc_factory())
+    assert fresh.acquire() is None, "pool should be empty for this test to mean anything"
+
+    with pytest.raises(stt_gemini.SttUnavailable) as exc:
+        stt_gemini.transcribe_array(_tone(), 16000)
+    assert exc.value.kind == expected
+
+
+def test_an_empty_pool_names_the_soonest_recovery(monkeypatch):
+    """Mixed parks: report the key recovery actually hinges on — the one that
+    frees up first — rather than whichever slot happens to be lowest."""
+    fresh = _three_keys(monkeypatch)
+    fresh.report_failure(1, _bad_key_error())        # permanent
+    fresh.report_failure(2, _daily_quota_error())    # midnight Pacific
+    fresh.report_failure(3, ConnectionError("connection reset"))  # 60s
+    assert fresh.acquire() is None
+
+    with pytest.raises(stt_gemini.SttUnavailable) as exc:
+        stt_gemini.transcribe_array(_tone(), 16000)
+    assert exc.value.kind == "no_network"
+
+
 def test_uses_a_real_sdk_method_name():
     """Both this repo and the camera module shipped calls to the OLD
     google-generativeai SDK and stayed green because the tests mocked the

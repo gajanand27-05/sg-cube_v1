@@ -85,6 +85,43 @@ _EMPTY: dict = {
 _clients: dict[int, genai.Client] = {}
 
 
+# Park reason (key_pool.classify) -> SttUnavailable.kind. Substring match
+# because classify() embeds detail: "transient (ConnectionError)".
+_PARK_REASON_KINDS: tuple[tuple[str, str], ...] = (
+    ("daily quota", "quota"),
+    ("rate limit", "quota"),
+    ("invalid or unauthorised", "no_key"),
+    ("transient", "no_network"),
+)
+
+
+def _kind_from_parks(statuses) -> str:
+    """Why the pool is empty, in the vocabulary the assistant speaks in.
+
+    Hardcoding "quota" here was a two-situations-one-sentence bug — the exact
+    shape 59eb62f fixed — one layer above the one SttUnavailable.kind exists
+    to prevent. With the network down, three offline turns park all three keys
+    as `transient`; the fourth turn never reaches the network at all and the
+    user was told they had spent a daily quota. Worse for a bad key: the park
+    is permanent, so turn 1 said "API key isn't set" and every turn after it
+    said "daily limit", forever. The user stops fixing the real problem.
+
+    The pool already knows: report the reason of the key that frees up
+    SOONEST, since that key is the one recovery actually hinges on.
+    """
+    parked = [s for s in statuses if s.configured and s.parked_until is not None]
+    if not parked:
+        # Unreachable via acquire() — configured and unparked means acquire()
+        # would have returned it. Keep the historical answer for a racing read.
+        return "quota"
+    soonest = min(parked, key=lambda s: s.parked_until)
+    reason = (soonest.reason or "").lower()
+    for needle, kind in _PARK_REASON_KINDS:
+        if needle in reason:
+            return kind
+    return "no_network"
+
+
 def _client_for() -> tuple[int, genai.Client]:
     """(slot, client) from the shared pool. Raises SttUnavailable if none."""
     got = pool.acquire()
@@ -92,8 +129,11 @@ def _client_for() -> tuple[int, genai.Client]:
         statuses = pool.status()
         if not any(s.configured for s in statuses):
             raise SttUnavailable("no_key", "no Gemini API key is configured")
+        kind = _kind_from_parks(statuses)
+        reasons = ", ".join(
+            f"{s.slot}:{s.reason or 'parked'}" for s in statuses if s.configured)
         raise SttUnavailable(
-            "quota", "every Gemini API key is parked (quota or auth)")
+            kind, f"every Gemini API key is parked ({reasons})")
     slot, key = got
     client = _clients.get(slot)
     if client is None:
