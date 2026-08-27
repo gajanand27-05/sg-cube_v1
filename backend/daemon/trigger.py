@@ -12,6 +12,7 @@ import numpy as np
 import sounddevice as sd
 
 from backend.ai_modules.speech.stt import transcribe_array
+from backend.ai_modules.speech.stt_gemini import SttUnavailable
 from backend.ai_modules.speech.tts_piper import (
     is_speaking,
     speak,
@@ -50,6 +51,17 @@ DEFAULT_DAEMON_USER_ID = "21c19bf1-b73f-4001-80de-789b93c8d703"
 
 SAMPLE_RATE = 16000
 ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
+
+# What Onyx says when speech-to-text cannot run at all. Three distinct lines,
+# because they are three distinct situations and a user who cannot tell them
+# apart cannot act on them: one is "check your wifi", one is "wait until
+# tomorrow", one is "fix your .env". Sharing wording here would reintroduce
+# the confusion 59eb62f fixed between being interrupted and being misheard.
+_STT_UNAVAILABLE_SPEECH = {
+    "no_network": "I can't reach the network right now.",
+    "quota": "I've hit my daily limit — it resets tonight.",
+    "no_key": "My API key isn't set up.",
+}
 
 
 def _play_chime() -> None:
@@ -655,7 +667,22 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
         try:
             # Use streaming STT - audio_float is already the full captured audio
             # For true streaming, we'd need to refactor wake_word to yield chunks
-            stt = transcribe_array(audio_float, SAMPLE_RATE)
+            try:
+                stt = transcribe_array(audio_float, SAMPLE_RATE)
+            except SttUnavailable as e:
+                # Speak, then end the turn. Piper is local, so this is the one
+                # part of the pipeline that still works with no network.
+                line = _STT_UNAVAILABLE_SPEECH.get(
+                    e.kind, "Something went wrong with speech recognition.")
+                print(f"[trigger] STT unavailable ({e.kind}): {e}")
+                log.warning("STT unavailable (%s): %s", e.kind, e)
+                try:
+                    speak(line)
+                except Exception:
+                    log.exception("could not speak the STT failure notice")
+                state_manager.transition_to(AssistantState.IDLE)
+                latency_ledger().record(turn)
+                return False
             turn.mark("stt_done")
             command = (stt.get("text") or "").strip()
             print(f"[command] {command!r}")
