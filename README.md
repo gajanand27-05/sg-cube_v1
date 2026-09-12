@@ -1,35 +1,63 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.12+-blue?style=for-the-badge&logo=python&logoColor=white" />
-  <img src="https://img.shields.io/badge/platform-windows-lightgrey?style=for-the-badge&logo=windows&logoColor=white" />
-  <img src="https://img.shields.io/badge/LLM-Gemini-4285F4?style=for-the-badge&logo=google&logoColor=white" />
-  <img src="https://img.shields.io/badge/local-Ollama-777?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/STT-faster--whisper-9cf?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/TTS-Piper-ff69b4?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=white" />
-  <img src="https://img.shields.io/badge/state-Zustand-593D88?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/vector-ChromaDB-9b59b6?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" />
+  <img src="frontend/public/sg-cube-logo.png" alt="SG CUBE" width="320"/>
 </p>
 
-<h1 align="center">
-  ⬡ SG CUBE ⬢
-</h1>
-
-<h3 align="center">
-  <i>local-first · voice-first · vision-aware</i>
-</h3>
+<h3 align="center"><i>local-first · voice-first · vision-aware</i></h3>
 
 <p align="center">
-  <b>Your AI assistant that sees your screen, hears your voice, remembers everything — cloud-powered agent, local privacy for voice &amp; vision.</b>
+  <b>An AI assistant that sees your screen, hears your voice, remembers what happened,<br/>
+  and acts on it — cloud agent, with voice, vision and memory kept on the machine.</b>
 </p>
 
-<br/>
+<p align="center">
+  <sub>
+    <b>1,071 tests passing</b> &nbsp;·&nbsp;
+    109 tools &nbsp;·&nbsp;
+    5-stage agent pipeline &nbsp;·&nbsp;
+    MCP server + client &nbsp;·&nbsp;
+    Python 3.12 · FastAPI · React 18 · three.js
+  </sub>
+</p>
 
 ---
 
-<br/>
+<!--  SCREENSHOT 1 of 4 — MAIN DASHBOARD.  Capture the whole window, backend running
+      so the panels hold live values (not zeros/placeholders). Save as
+      docs/screenshots/dashboard.png, then delete these comment markers.
 
-## ▸ System Architecture
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="SG-CUBE dashboard" width="900"/>
+</p>
+<p align="center">
+  <sub><b>SG-CUBE Command Center</b> — live view of the AI core, memory, voice,
+  architecture and system telemetry, streamed over WebSocket.</sub>
+</p>
+-->
+
+## ▸ What it is
+
+SG-CUBE is a desktop AI assistant built around one idea: **the assistant should do things, not
+just say things.** You speak to it, it can look at your screen, it remembers the conversation
+across sessions, and it executes real actions through a registry of 109 tools — files, shell,
+browser, media, OCR, reminders, notes, even a few games.
+
+The agent model runs in the cloud (Gemini 2.5 Flash, with a local Ollama fallback). Everything
+that would be uncomfortable to stream — **your microphone, your screen, your memory** — is
+processed locally by Vosk, faster-whisper, Piper, Qwen2.5-VL and ChromaDB.
+
+## ▸ Why I built it
+
+Most assistant projects stop at "wrap an API in a chat box". The interesting problems are the
+ones that only show up afterwards: what happens when the model hallucinates a plan, when the
+user interrupts mid-sentence, when the network dies halfway through a turn, when a rule fires on
+a mistranscription and takes the *wrong* action silently.
+
+SG-CUBE is where I work on those. A good chunk of this repo is not features — it's routing,
+guardrails, recovery, telemetry and tests around the features.
+
+---
+
+## ▸ System architecture
 
 ```mermaid
 flowchart TB
@@ -44,13 +72,13 @@ flowchart TB
 
     subgraph ROUTER["🔀 3-Tier Router"]
         direction LR
-        CACHE[Cache] --> RULE[Rules] -->         LLM[Gemini / Ollama]
+        CACHE[Cache] --> RULE[Rules] --> LLM[Gemini / Ollama]
     end
 
     LLM --> SCH --> PLA --> GUA --> OPR --> HLR
     HLR -.->|retry| PLA
 
-    OPR --> TOOLS["🔧 70+ Tools\nsys · files · web · media · AI · games"]
+    OPR --> TOOLS["🔧 109 Tools\nsys · files · web · media · AI · games"]
     OPR --> MCP["🔌 MCP\nSSE + Client"]
     TOOLS --> TTS["Piper TTS"] -.-> V
 
@@ -59,9 +87,7 @@ flowchart TB
     CLIP["📋 Clipboard"] -.-> MEM
 ```
 
----
-
-## ▸ Voice Pipeline
+### How a request flows
 
 ```mermaid
 flowchart LR
@@ -74,9 +100,12 @@ flowchart LR
     TTS[Piper TTS] --> SP[🔊 Speaker]
 ```
 
----
+**The router is the part worth looking at.** A cache hit or a matched rule (~40 of them) never
+reaches the model at all. The LLM is the fallback, not the front door — so common commands stay
+fast and, more importantly, stay *deterministic*. A rule that matches cannot be talked out of its
+behaviour by a hallucinated plan.
 
-## ▸ Agent Pipeline
+### The agent pipeline
 
 ```mermaid
 flowchart TB
@@ -89,35 +118,126 @@ flowchart TB
     RES -->|ok| DONE[Done]
 ```
 
+Guardian sits between planning and execution, and can bounce a plan back before anything runs.
+Healer catches execution failures and re-plans instead of surfacing a stack trace.
+
+<!--  SCREENSHOT 2 of 4 — AGENT PIPELINE.  ArchitecturePanel / ArchitectureMapOverlay,
+      captured mid-request so the stages are lit rather than idle. This is the shot that
+      says "not a chatbot". Save as docs/screenshots/agents.png.
+
+<p align="center">
+  <img src="docs/screenshots/agents.png" alt="Agent pipeline" width="800"/>
+</p>
+<p align="center">
+  <sub><b>Agent pipeline in flight</b> — a request moving through
+  Commander → Planner → Guardian → Operator → Healer.</sub>
+</p>
+-->
+
 ---
 
-## ▸ Features
+## ▸ Capabilities
 
 | Layer | Stack | Status |
 |-------|-------|--------|
-| **Wake Word** | Whisper (int16→float32) / Vosk | ✅ |
-| **Speech-to-Text** | faster-whisper + silero-VAD | ✅ |
-| **Text-to-Speech** | Piper neural TTS | ✅ |
+| **Wake Word** | Vosk (always-on) / Whisper | ✅ |
+| **Speech-to-Text** | faster-whisper + silero-VAD · selectable backend | ✅ |
+| **Text-to-Speech** | Piper neural TTS, with barge-in | ✅ |
 | **Voice Pipeline** | Local (default) or LiveKit streaming | ✅ |
 | **Intent Routing** | 3-tier: Cache → Regex Rules (~40) → LLM | ✅ |
-| **Agent LLM** | Gemini 2.5 Flash (cloud) / Ollama (local fallback) — DeepSeek V3 via OpenRouter is the recommended migration target | ✅ |
+| **Agent LLM** | Gemini 2.5 Flash (cloud) / Ollama (local fallback) | ✅ |
 | **Intent Classifier** | Ollama — phi3 (local, lightweight) | ✅ |
 | **Vision** | Periodic screen capture + Qwen2.5-VL | ✅ |
-| **Memory** | ChromaDB (long-term/episodic) + in-memory (short-term/timeline/screen) | ✅ |
+| **Memory** | ChromaDB (long-term/episodic) + in-memory (working/timeline/screen) | ✅ |
 | **Agent Pipeline** | Commander → Planner → Guardian → Operator → Healer | ✅ |
-| **Tool System** | 70+ built-in tools (system, files, web, media, AI, games) | ✅ |
-| **Games** | Blackjack · Hangman · Wordle · TicTacToe · Connect4 · RPS | ✅ |
+| **Tool System** | 109 registered tools (system, files, web, media, AI, games) | ✅ |
 | **MCP Protocol** | FastMCP SSE server + external MCP client | ✅ |
 | **Observability** | Reliability metrics · tool-usage heatmap · agent telemetry | ✅ |
 | **Plugins** | Auto-discovered from `backend/plugins/` | ✅ |
 | **Auth** | Supabase JWT (optional — local mode works without it) | ✅ |
-| **Frontend** | React 19 · TypeScript 6 · Vite · Tailwind · shadcn/ui · Framer Motion · Zustand | ✅ |
+| **Frontend** | React 18 · TypeScript 5.7 · Vite 6 · Tailwind · three.js / React Three Fiber | ✅ |
 
-> WebSocket live feed of agent state, mic levels, routing decisions, and memory queries served to the dashboard in real-time.
+> The dashboard gets a live WebSocket feed of agent state, mic levels, routing decisions and
+> memory queries — so you can watch *which tier answered* and *why*, per turn.
 
 ---
 
-## ▸ Quick Start
+## ▸ Engineering decisions
+
+The decisions I'm most willing to be judged on are the ones where measurement beat intuition.
+
+**I falsified my own migration plan.** The proposal was to drop faster-whisper for cloud STT and
+keep offline commands alive by having Vosk feed the rule engine. Probed against a 30-clip
+real-voice corpus with the real matcher, Vosk scored **4/30** rule matches against Whisper's
+12/30. `"stop"` — the one command that most needs to be instant and offline — transcribed as
+`'top'` on every take of both model sizes. The larger 128MB model was *worse and slower*. Plan
+discarded on the evidence.
+
+**The first measurement was wrong, and that's recorded too.** The initial probe scored 1/30.
+The corpus clips hold two takes each, and concatenating them produced `"what time is it what
+time is it"` — which no `^...$`-anchored rule can match even on a perfect transcription. Fixed by
+draining the recognizer per utterance and scoring takes separately. The trap is written down so
+it doesn't get walked into twice.
+
+**Deleting code is gated, and the gates don't trade against each other.** Latency must beat the
+measured 2,614ms cold baseline on median *and* p95; recognition must match or beat Whisper's
+12/30; safety allows **zero** wrong rule executions as an automatic fail. A row that cannot be
+measured counts as FAIL, not pass-by-default. Standing instruction to myself, carried into the
+plan verbatim: *do not optimise the results to justify the migration.*
+
+**Evidence against my own choice stays visible.** Profiling showed `stt_idle_unload_s = 180.0`
+is what makes the common case slow — setting it to 0 collapses 2,614ms to ~350ms. One line,
+~7.5x, and it beats any network round-trip. That undercuts the migration I'd already committed
+to, so it's logged rather than quietly dropped.
+
+<!--  SCREENSHOT 3 of 4 — MEMORY.  MemoryEnginePanel showing a real retrieval — an actual
+      remembered item coming back, not an empty store. Save as docs/screenshots/memory.png.
+
+<p align="center">
+  <img src="docs/screenshots/memory.png" alt="Memory engine" width="800"/>
+</p>
+<p align="center">
+  <sub><b>Memory engine</b> — ChromaDB long-term recall surfacing prior context,
+  alongside the in-memory working/timeline stores.</sub>
+</p>
+-->
+
+<!--  SCREENSHOT 4 of 4 — VOICE.  LiveTranscriptionPanel + VoiceModulePanel mid-utterance,
+      with the transcript populated and the routing tier visible. Save as
+      docs/screenshots/voice.png.
+
+      NOTE: there is no dedicated Vision panel in the frontend today — vision surfaces
+      through Architecture/ModuleStatus. So this slot is voice, not vision.
+
+<p align="center">
+  <img src="docs/screenshots/voice.png" alt="Voice pipeline" width="800"/>
+</p>
+<p align="center">
+  <sub><b>Voice pipeline</b> — live transcription, and which of the three routing
+  tiers answered the turn.</sub>
+</p>
+-->
+
+---
+
+## ▸ Tech stack
+
+| | |
+|---|---|
+| **Core** | Python 3.12 · FastAPI · Pydantic-settings · asyncio |
+| **Agent** | Gemini 2.5 Flash · Ollama (phi3) · custom 5-stage pipeline |
+| **Voice** | Vosk · faster-whisper · silero-VAD · Piper · LiveKit (optional) |
+| **Vision** | Qwen2.5-VL · Tesseract OCR |
+| **Memory** | ChromaDB · nomic-embed-text |
+| **Protocol** | FastMCP (SSE server + client) |
+| **Frontend** | React 18 · TypeScript 5.7 · Vite 6 · Tailwind · lucide-react |
+| **3D / WebGL** | three.js · React Three Fiber · drei · postprocessing |
+| **Data** | Supabase (optional) · SQLite |
+| **Testing** | pytest — 1,071 tests |
+
+---
+
+## ▸ Quick start
 
 ### Prerequisites
 
@@ -165,9 +285,9 @@ Open **http://localhost:5173** — API at `http://127.0.0.1:8001`.
 
 > **PowerShell users:** type `.\sg_cube` instead of `sg_cube`.
 
-Every background service is toggleable via `.env` — see the **Configuration** table below.
+Every background service is toggleable via `.env` — see **Configuration** below.
 
-### Production Build
+### Production build
 
 ```bash
 cd frontend && npm run build
@@ -181,11 +301,12 @@ python -m uvicorn backend.server.main:app --host 0.0.0.0 --port 8001   # auto-se
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `APP_HOST` / `APP_PORT` | `127.0.0.1` / `8001` | Web server bind address |
-| `GEMINI_API_KEY` | — | Primary cloud LLM key (get at aistudio.google.com/apikey) |
+| `GEMINI_API_KEY` | — | Primary cloud LLM key |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Agent model |
-| `OPENROUTER_API_KEY` | — | Alternative cloud LLM key — DeepSeek V3 is the recommended migration target |
+| `OPENROUTER_API_KEY` | — | Alternative cloud LLM key |
 | `OPENROUTER_MODEL` | `deepseek/deepseek-chat` | Model used when OpenRouter key is set |
 | `OLLAMA_MODEL` | `phi3` | Local intent classifier (lightweight) |
+| `STT_BACKEND` | `whisper` | Speech-to-text backend |
 | `WHISPER_MODEL` | `base` | STT model size (tiny/base/small) |
 | `VOICE_PIPELINE` | `local` | `local` or `livekit` |
 | `ENABLE_VISION` | `true` | Passive screen glance every 5 min (fills memory) |
@@ -194,21 +315,20 @@ python -m uvicorn backend.server.main:app --host 0.0.0.0 --port 8001   # auto-se
 | `ENABLE_TELEMETRY` | `true` | CPU/mem/disk broadcast to UI |
 | `ENABLE_WATCHER` | `true` | Proactive agent triggers (battery, folder watches) |
 | `WAKE_PHRASE` | `onyx` | Word that wakes the assistant |
-| `WAKE_CAPTURE_SECONDS` | `2.5` | Legacy capture window (VAD is authoritative) |
 | `WAKE_DEVICE` | — | Mic device index (blank = system default) |
 
-Set `ENABLE_VISION=false` to skip passive screen glances — the on-demand `describe_screen` tool still works (it captures fresh). Set `ENABLE_WAKE_WORD=false` on headless / no-mic machines to disable the listener without touching code.
+Set `ENABLE_VISION=false` to skip passive screen glances — the on-demand `describe_screen` tool
+still captures fresh. Set `ENABLE_WAKE_WORD=false` on headless / no-mic machines.
 
 ---
 
-## ▸ Project Map
+## ▸ Project map
 
 ```text
 backend/
 ├── daemon/           # Background services (booted from server/main.py's lifespan)
-│   ├── main.py       # Thin CLI wrapper — prefer `uvicorn backend.server.main:app`
 │   ├── trigger.py    # Wake word → STT → Router → Execute → TTS
-│   ├── wake_word.py  # Whisper/Vosk listener
+│   ├── wake_word.py  # Vosk/Whisper listener
 │   ├── vision_loop.py
 │   ├── clipboard_watcher.py
 │   └── telemetry.py
@@ -217,37 +337,41 @@ backend/
 │   ├── config.py     # Pydantic-settings
 │   ├── ws_ui.py      # WebSocket manager
 │   └── routes/       # admin, agents, auth, execute, files,
-│                      # memory, orchestrate, system, vision, voice
+│                     # memory, orchestrate, system, vision, voice
 ├── core/             # Intelligence layer
 │   ├── agents/       # Commander, Planner, Guardian, Operator, Watcher
-│   ├── tools/        # 70+ tools + registry + builtins (+ 6 games)
+│   ├── tools/        # 109 tools + registry + builtins (+ 6 games)
 │   ├── memory/       # ChromaDB, episodic, timeline, working, screen
 │   ├── orchestrator/ # Cache → Rules → LLM router
 │   ├── mcp_server.py # MCP protocol (SSE + client)
-│   └── plugins/      # User-plugins (auto-discovered)
-├── ai_modules/       # LLM (OpenRouter client + Ollama), STT, TTS, LiveKit worker
+│   └── plugins/      # User plugins (auto-discovered)
+├── ai_modules/       # LLM clients, STT, TTS, LiveKit worker
 └── database/         # ChromaDB + Supabase + migrations
 frontend/
-├── src/
-│   ├── components/   # Dashboard, Header, Sidebar, StatusPanel
-│   ├── hooks/        # useWebSocket
-│   ├── stores/       # Zustand stores
-│   └── pages/        # Dashboard, Chat, Vision, Memory, Agents, Files
-└── package.json
-tools/                # 30+ scripts (downloads, diagnostics, demos)
-tests/                # pytest — 342 tests across all phases
+└── src/
+    ├── components/   # 13 dashboard panels — AICore, Memory, Voice,
+    │                 # Architecture, Confidence, Latency, Telemetry,
+    │                 # LiveTranscription + CubeVisualization (three.js)
+    ├── hooks/        # useUiEvents — live WebSocket event stream
+    └── lib/          # uiEvents, transcriptTurn, cn
+tools/                # 30+ scripts (downloads, diagnostics, probes, demos)
+tests/                # pytest — 1,071 tests (+ vitest on the frontend)
 ```
 
 ---
 
-## ▸ Test
+## ▸ Testing
 
 ```bash
 .venv\Scripts\python.exe -m pytest tests -q
 ```
 
-Use the venv interpreter — it is the only one with `cv2` + `ultralytics`, which
-the vision tests need. All phases A–G covered (342 tests passing).
+Use the venv interpreter — it is the only one with `cv2` + `ultralytics`, which the vision tests
+need.
+
+```
+1071 passed, 3 deselected in 119.46s
+```
 
 | Phase | Feature | Status |
 |-------|---------|--------|
@@ -259,6 +383,15 @@ the vision tests need. All phases A–G covered (342 tests passing).
 | **E** | MCP protocol integration | ✅ |
 | **F** | 6 CLI games + personality | ✅ |
 | **G** | Observability + dev docs | ✅ |
+
+---
+
+## ▸ Roadmap
+
+- **STT backend migration** — `STT_BACKEND` is now selectable; the Whisper → Gemini switch is
+  gated on latency, recognition and safety criteria that have not yet been run live
+- **Spoken failure modes** — the assistant now says *why* recognition failed instead of going quiet
+- **Vision memory** — richer screen-history retrieval
 
 ---
 
