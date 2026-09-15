@@ -212,11 +212,46 @@ def transcribe_stream(
     return {"text": "", "language": "en", "language_probability": 1.0, "duration_sec": 0.0}
 
 
+# ── Segment quality gate ────────────────────────────────────────────────
+#
+# These were one condition: `no_speech_prob > 0.6 or avg_logprob < -1.5`.
+# The `or` let no_speech_prob veto on its own, and that silently ate "stop".
+#
+# Measured over the 30-clip real-voice corpus (36 segments, medium/cuda/fp16):
+#
+#     no_speech_prob   min 0.098   median 0.282   max 0.616
+#     avg_logprob      min -0.868  median -0.460  max -0.293
+#
+# The single segment the old gate dropped was stop_1 -> 'Stop.', at
+# no_speech_prob 0.616 with avg_logprob -0.644. Whisper heard the word and was
+# confident about it; it lost by 0.016. One-word utterances score high
+# no_speech_prob however clearly they are spoken — stop_2 ("Onyx. Stop.")
+# survived at 0.542 only because the wake word made it longer — so every short
+# command was exposed and "stop", the abort control, is the shortest.
+#
+# And no_speech_prob was never the thing guarding against silence: with
+# vad_filter=True, three seconds of pure silence yields ZERO segments before
+# this code runs. What is left for this gate to catch is confident-sounding
+# garbage decoded from noise, and that shows up in BOTH signals at once —
+# hence `and`.
+#
+# _LOW_CONFIDENCE sits below every real-speech observation (worst -0.868) and
+# above stop's -0.644, so the combined gate still bites without eating valid
+# short commands. _INCOHERENT keeps its independent veto: text that scores
+# that badly is not a transcript whatever no_speech_prob says.
+_HIGH_NO_SPEECH = 0.6
+_LOW_CONFIDENCE = -1.0
+_INCOHERENT = -1.5
+
+
 def _collect_segments(segments, info) -> dict:
     """Filter and collect Whisper segments into a result dict."""
     valid_segments = []
     for seg in segments:
-        if seg.no_speech_prob > 0.6 or seg.avg_logprob < -1.5:
+        # Both signals must agree before a segment is discarded.
+        if seg.no_speech_prob > _HIGH_NO_SPEECH and seg.avg_logprob < _LOW_CONFIDENCE:
+            continue
+        if seg.avg_logprob < _INCOHERENT:
             continue
 
         cleaned = seg.text.strip()
