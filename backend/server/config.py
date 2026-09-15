@@ -1,4 +1,5 @@
 from pathlib import Path
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -191,6 +192,70 @@ class Settings(BaseSettings):
     wake_phrase: str = "onyx"
     wake_capture_seconds: float = 2.5
     wake_device: int | None = None  # mic device index; None = system default
+
+    # ── Mic calibration (measured, not guessed) ────────────────────────────
+    #
+    # Both of these were hardcoded constants chosen against an ASSUMED near-zero
+    # noise floor. Measured on this machine, frame-level, 30ms frames, mic array:
+    #
+    #   Realtek enhancements ON : floor p50 0.5, p99 471 — but speech is gated
+    #                             down to rms 1-80, i.e. BELOW both thresholds
+    #   Realtek enhancements OFF: speech rms 2568-6742 (healthy) but floor
+    #                             p50 814, p99 6369 — 100% of "silent" frames
+    #                             sit above vad_rms_threshold's old value of 50
+    #
+    # Neither default works on this hardware, and the right numbers depend on
+    # the room: a bedroom and a demo hall with 30 people are different acoustic
+    # environments. So they are settings, and tools/calibrate_mic.py measures
+    # your floor and speech and prints the values to paste here.
+    #
+    # Defaults below are the historical constants, so behaviour is unchanged
+    # until someone deliberately calibrates.
+    #
+    # vad_rms_threshold: per-FRAME gate deciding which audio reaches the
+    # recognizer, and when a capture ends (800ms below it = end of speech).
+    # See wake_word.py for why raising it blindly is dangerous: it drops the
+    # quiet gaps BETWEEN words and splices loud fragments into a discontinuous
+    # stream, and Vosk then hallucinates the wake phrase out of ordinary
+    # speech (measured: 70 -> false wake on plain speech). Raise it only as
+    # far as your measured floor demands, never "to be safe".
+    vad_rms_threshold: float = 50.0
+    # capture_silence_threshold: the "has the user STOPPED talking" gate, used
+    # only for trailing-silence detection inside a capture. Split out of
+    # vad_rms_threshold because the two want opposite things and one constant
+    # could not serve both. Measured in a real room (Voice Clarity on, two
+    # people talking 2m away):
+    #
+    #     floor   p50  384   p90 1161      0.0% of frames below 50
+    #     speech  p25 4753   p50 6080      4.09x headroom
+    #
+    # At 50, not one frame of 30s of silence fell below the gate, so the
+    # 800ms trailing-silence rule could never fire and EVERY capture ran to
+    # the 10s hard cap — ~15s per command. Raising the shared constant was not
+    # available: tests/test_barge_in_real_audio.py fails at 100 and above.
+    # Hence a second threshold that only governs end-of-capture.
+    #
+    # Set it above your room's p90 and well under your speech p25;
+    # tools/calibrate_mic.py prints a value. Defaults to vad_rms_threshold so
+    # behaviour is unchanged until deliberately calibrated.
+    capture_silence_threshold: float | None = None
+
+    @model_validator(mode="after")
+    def _default_capture_threshold_to_vad(self):
+        """Unset means "same as before" — the old single-threshold behaviour.
+
+        Resolved here rather than left as None so every caller reads a float
+        and nobody has to remember the fallback. An explicit 0 is honoured.
+        """
+        if self.capture_silence_threshold is None:
+            object.__setattr__(self, "capture_silence_threshold",
+                               self.vad_rms_threshold)
+        return self
+    # capture_min_rms: whole-capture mean below which the capture is discarded
+    # before STT runs ("capture too quiet"). A mean over the whole capture, so
+    # silence padding dilutes a loud short command — keep it well under your
+    # measured speech level, not just over your floor.
+    capture_min_rms: float = 200.0
 
     # ── Phase 4A: barge-in (interrupt TTS by speaking) ──
     # Uses RMS thresholding not full VAD because Silero can't distinguish

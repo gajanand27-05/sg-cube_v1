@@ -43,7 +43,31 @@ DEFAULT_MODEL = "vosk-model-small-en-us-0.15"
 # handled downstream: capture rejects it ("skipping whisper: capture too
 # quiet") and it counts toward the empty-capture close. Trading a handled
 # nuisance for false wakes on real speech is a bad deal.
-_VAD_RMS_THRESHOLD = 50
+# Now settings-driven (VAD_RMS_THRESHOLD in .env), defaulting to the measured
+# 50 below. Everything in the comment above still holds — this is a knob for
+# rooms whose noise floor makes 50 unusable, not an invitation to raise it.
+# Measure with tools/calibrate_mic.py; do not guess.
+_VAD_RMS_THRESHOLD = settings.vad_rms_threshold
+
+# The "has the user STOPPED talking" gate. Separate from _VAD_RMS_THRESHOLD
+# because the two want opposite things:
+#
+#   _VAD_RMS_THRESHOLD        must stay LOW  — it decides which frames reach
+#                             the Vosk recognizer, and raising it splices
+#                             loud fragments together until Vosk hallucinates
+#                             the wake phrase (see the comment above it).
+#   _CAPTURE_SILENCE_THRESHOLD must sit ABOVE the room floor — it decides when
+#                             800ms of trailing silence has accumulated.
+#
+# Measured in a real room (Voice Clarity on, two people talking 2m away):
+# floor p50 384 / p90 1161, speech p25 4753. At a shared threshold of 50,
+# ZERO frames of 30s of silence fell below the gate, so trailing silence never
+# accumulated and every capture ran to the 10s hard cap. Raising the shared
+# constant was not available — test_barge_in_real_audio fails at 100+.
+#
+# Defaults to _VAD_RMS_THRESHOLD, so this changes nothing until calibrated
+# with tools/calibrate_mic.py.
+_CAPTURE_SILENCE_THRESHOLD = settings.capture_silence_threshold
 _VAD_TRAILING_SILENCE_MS = 800  # stop after this much silence post-speech
 _VAD_MAX_CAPTURE_S = 10.0  # hard cap so a stuck mic doesn't hang forever
 _VAD_INITIAL_WAIT_S = 3.0  # how long to wait for the user to start speaking
@@ -525,7 +549,7 @@ class WakeWordListener:
         # True, because there the triggering frame really IS the command.
         for c in (chunks if initial_is_speech else []):
             arr = np.frombuffer(c, dtype=np.int16)
-            if arr.size and float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) > _VAD_RMS_THRESHOLD:
+            if arr.size and float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) > _CAPTURE_SILENCE_THRESHOLD:
                 speech_seen = True
                 break
 
@@ -539,7 +563,8 @@ class WakeWordListener:
             if arr.size == 0:
                 continue
             rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
-            is_speech = rms > _VAD_RMS_THRESHOLD
+            # Capture gate, not the wake gate — see _CAPTURE_SILENCE_THRESHOLD.
+            is_speech = rms > _CAPTURE_SILENCE_THRESHOLD
 
             chunks.append(chunk)
             total_bytes += len(chunk)
@@ -579,7 +604,7 @@ class WakeWordListener:
         # Account for any speech in the initial chunks already.
         for c in chunks:
             arr = np.frombuffer(c, dtype=np.int16)
-            if arr.size and float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) > _VAD_RMS_THRESHOLD:
+            if arr.size and float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) > _CAPTURE_SILENCE_THRESHOLD:
                 speech_seen = True
                 break
 
@@ -593,7 +618,8 @@ class WakeWordListener:
             if arr.size == 0:
                 continue
             rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
-            is_speech = rms > _VAD_RMS_THRESHOLD
+            # Capture gate, not the wake gate — see _CAPTURE_SILENCE_THRESHOLD.
+            is_speech = rms > _CAPTURE_SILENCE_THRESHOLD
 
             chunks.append(chunk)
             total_bytes += len(chunk)

@@ -660,8 +660,13 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
         peak = int(np.max(np.abs(arr))) if arr.size else 0
         rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) if arr.size else 0
 
-        if rms < 200:
-            print(f"[trigger] skipping STT: capture too quiet (rms={rms:.0f})")
+        # Was a bare `200` with no justification, in a file whose sibling
+        # threshold carries twenty lines of measurement. It fired 6 times in a
+        # single live session. Now settings-driven; see config.capture_min_rms.
+        if rms < settings.capture_min_rms:
+            print(f"[trigger] skipping STT: capture too quiet "
+                  f"(rms={rms:.0f} < {settings.capture_min_rms:.0f}; "
+                  f"run tools/calibrate_mic.py if this is wrong)")
             state_manager.transition_to(AssistantState.IDLE)
             latency_ledger().record(turn)
             return False
