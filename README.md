@@ -41,9 +41,14 @@ just say things.** You speak to it, it can look at your screen, it remembers the
 across sessions, and it executes real actions through a registry of 109 tools — files, shell,
 browser, media, OCR, reminders, notes, even a few games.
 
-The agent model runs in the cloud (Gemini 2.5 Flash, with a local Ollama fallback). Everything
-that would be uncomfortable to stream — **your microphone, your screen, your memory** — is
-processed locally by Vosk, faster-whisper, Piper, Qwen2.5-VL and ChromaDB.
+The agent model runs in the cloud (Gemini 2.5 Flash, with a local Ollama fallback). **Your screen
+and your memory** never leave the machine — Qwen2.5-VL and ChromaDB both run locally, and so do
+the always-on wake-word listener (Vosk) and the voice (Piper).
+
+Your microphone is the honest exception. The wake word is matched locally, so nothing is uploaded
+until you address the assistant — but the command utterance that follows is transcribed by Gemini
+under the current default (`STT_BACKEND=gemini`). `STT_BACKEND=whisper` keeps the whole audio path
+on-device via faster-whisper. The switch is still gated — see the roadmap note at the end.
 
 ## ▸ Why I built it
 
@@ -61,8 +66,8 @@ guardrails, recovery, telemetry and tests around the features.
 
 ```mermaid
 flowchart TB
-    V["🎤 Voice"] --> WW["Wake Word\nWhisper/Vosk"]
-    WW --> STT["STT\nfaster-whisper"]
+    V["🎤 Voice"] --> WW["Wake Word\nVosk (local)"]
+    WW --> STT["STT\nGemini / faster-whisper"]
     STT --> ROUTER
 
     T["⌨️ Text"] --> UI["Web Dashboard\nReact + Tailwind"]
@@ -91,7 +96,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    MIC[🎤 Mic] --> VAD[VAD] --> WW[Wake Word] --> STT[Whisper]
+    MIC[🎤 Mic] --> VAD[VAD] --> WW[Wake Word] --> STT[STT]
     STT --> CACHE{Match?}
     CACHE -->|miss| RULE[Rules] --> LLM[LLM]
     CACHE -->|hit| TTS
@@ -140,8 +145,8 @@ Healer catches execution failures and re-plans instead of surfacing a stack trac
 
 | Layer | Stack | Status |
 |-------|-------|--------|
-| **Wake Word** | Vosk (always-on) / Whisper | ✅ |
-| **Speech-to-Text** | faster-whisper + silero-VAD · selectable backend | ✅ |
+| **Wake Word** | Vosk (always-on, local) | ✅ |
+| **Speech-to-Text** | Gemini (default) or faster-whisper, + silero-VAD · `STT_BACKEND` | ✅ |
 | **Text-to-Speech** | Piper neural TTS, with barge-in | ✅ |
 | **Voice Pipeline** | Local (default) or LiveKit streaming | ✅ |
 | **Intent Routing** | 3-tier: Cache → Regex Rules (~40) → LLM | ✅ |
@@ -168,20 +173,52 @@ The decisions I'm most willing to be judged on are the ones where measurement be
 
 **I falsified my own migration plan.** The proposal was to drop faster-whisper for cloud STT and
 keep offline commands alive by having Vosk feed the rule engine. Probed against a 30-clip
-real-voice corpus with the real matcher, Vosk scored **4/30** rule matches against Whisper's
-12/30. `"stop"` — the one command that most needs to be instant and offline — transcribed as
-`'top'` on every take of both model sizes. The larger 128MB model was *worse and slower*. Plan
-discarded on the evidence.
+real-voice corpus with the real matcher, Vosk scored **4/30** rule matches. `"stop"` — the one
+command that most needs to be instant and offline — transcribed as `'top'` on every take of both
+model sizes, and the larger 128MB model was *worse and slower*. The cause is structural: Vosk runs
+a **restricted grammar**, so anything outside it decodes to `[unk]`. Plan discarded on the
+evidence.
 
-**The first measurement was wrong, and that's recorded too.** The initial probe scored 1/30.
-The corpus clips hold two takes each, and concatenating them produced `"what time is it what
-time is it"` — which no `^...$`-anchored rule can match even on a perfect transcription. Fixed by
-draining the recognizer per utterance and scoring takes separately. The trap is written down so
-it doesn't get walked into twice.
+**The same measurement understated the incumbent by 27 points, and it took three tries to see
+it.** Whisper's score in that comparison was first recorded as 12/30 — a number that reads as "the
+recogniser mishears me" and nearly got a working component replaced. Two scoring bugs were
+stacked underneath it:
+
+- *The corpus holds two takes per clip*, so a perfect transcription arrived doubled —
+  `"what time is it what time is it"` — which no `^...$`-anchored rule can match. The very first
+  probe scored **1/30** for this reason before the recognizer was drained per utterance.
+- *The reference text spells numbers out.* `corpus.json` says `"what is fifteen times four"`;
+  Whisper returns `"What is 15 times 4?"`. That is a correct transcription — arguably a better
+  one, and the router accepts it — but the scorer counted it as two word errors and a routing
+  miss.
+
+Re-measured on the same 30 clips with both artifacts removed, on this machine, `medium` on CUDA:
+
+| config | CMD (right action) | EXACT | WER | p50 |
+|---|---|---|---|---|
+| **medium / cuda fp16** | **100.0%** | 90.0% | 6.6% | **483ms** |
+| large-v3 / cuda fp16 | 100.0% | 90.0% | 7.4% | 699ms |
+| small / cuda fp16 | 96.7% | 86.7% | 9.0% | 279ms |
+| small / cpu int8 | 96.7% | 86.7% | 9.0% | 1748ms |
+
+**30/30, not 12/30**, and `large-v3` buys nothing over `medium` — which is why `medium` is the
+pinned default. Both corrections are now on by default in `tools/stt_bench.py`, because a
+benchmark whose honest-looking default understates the system by 27 points is worse than no
+benchmark: it gets believed. The repetition-collapse count is printed alongside every result so
+the failure mode it could mask — a genuine Whisper repetition loop — stays visible.
+
+**What that number still does not prove.** The corpus is clean read-aloud audio sitting near a
+ceiling; it measures the *model*. Live sessions have produced `'Next voice is cuo of nvd.'`, and
+every mishearing traced to root cause so far has been the *capture path* — a discarded first
+500ms, a VAD threshold below the room floor, Whisper reciting its own prompt — not the
+recognizer. Capture archiving (`STT_ARCHIVE_CAPTURES`) exists to accumulate those real failures,
+because the knobs were never the bottleneck; the measurement was.
 
 **Deleting code is gated, and the gates don't trade against each other.** Latency must beat the
 measured 2,614ms cold baseline on median *and* p95; recognition must match or beat Whisper's
-12/30; safety allows **zero** wrong rule executions as an automatic fail. A row that cannot be
+**100% CMD / 6.6% WER** (revised up from the 12/30 the gate was originally written against —
+the bar for replacing Whisper is now much higher, and the migration correspondingly harder to
+justify); safety allows **zero** wrong rule executions as an automatic fail. A row that cannot be
 measured counts as FAIL, not pass-by-default. Standing instruction to myself, carried into the
 plan verbatim: *do not optimise the results to justify the migration.*
 
@@ -298,19 +335,21 @@ python -m uvicorn backend.server.main:app --host 0.0.0.0 --port 8001   # auto-se
 
 ## ▸ Configuration
 
+Defaults below are the **code** defaults in `backend/server/config.py` — what you get if the
+variable is absent from `.env`. They are not what `.env.example` sets.
+
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `APP_HOST` / `APP_PORT` | `127.0.0.1` / `8001` | Web server bind address |
+| `APP_HOST` / `APP_PORT` | `127.0.0.1` / `8000` | Web server bind address |
 | `GEMINI_API_KEY` | — | Primary cloud LLM key |
+| `GEMINI_API_KEY_2` / `_3` | — | Extra pool slots. The free tier is metered per day, so one key exhausts in a session; the pool parks an exhausted key until reset and rotates to the next |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Agent model |
-| `OPENROUTER_API_KEY` | — | Alternative cloud LLM key |
-| `OPENROUTER_MODEL` | `deepseek/deepseek-chat` | Model used when OpenRouter key is set |
-| `OLLAMA_MODEL` | `phi3` | Local intent classifier (lightweight) |
-| `STT_BACKEND` | `whisper` | Speech-to-text backend |
-| `WHISPER_MODEL` | `base` | STT model size (tiny/base/small) |
+| `FAST_MODEL` | `phi3` | Local intent classifier / verifier (lightweight) |
+| `STT_BACKEND` | `gemini` | Speech-to-text backend — `gemini` or `whisper` |
+| `WHISPER_MODEL` | `small` | STT model size; only read when `STT_BACKEND=whisper` |
 | `VOICE_PIPELINE` | `local` | `local` or `livekit` |
 | `ENABLE_VISION` | `true` | Passive screen glance every 5 min (fills memory) |
-| `ENABLE_WAKE_WORD` | `true` | Mic listener for the wake phrase |
+| `ENABLE_WAKE_WORD` | `false` | Mic listener for the wake phrase |
 | `ENABLE_CLIPBOARD` | `true` | Clipboard change tracking |
 | `ENABLE_TELEMETRY` | `true` | CPU/mem/disk broadcast to UI |
 | `ENABLE_WATCHER` | `true` | Proactive agent triggers (battery, folder watches) |
@@ -388,8 +427,14 @@ need.
 
 ## ▸ Roadmap
 
-- **STT backend migration** — `STT_BACKEND` is now selectable; the Whisper → Gemini switch is
-  gated on latency, recognition and safety criteria that have not yet been run live
+- **STT backend migration — on hold, and the evidence is why.** `STT_BACKEND` is selectable, but
+  the case for switching weakened once Whisper was re-measured honestly: 100% CMD at 483ms,
+  on-device, with no per-turn quota. Gemini STT costs a second request per turn against a
+  metered pool and stops working when the network does. The gate stands; nothing currently
+  clears it
+- **Live-voice capture path** — the corpus is clean read-aloud audio near a ceiling. Real
+  mishearing has consistently traced to capture, not recognition; archived captures
+  (`STT_ARCHIVE_CAPTURES`) are the corpus that would actually move this
 - **Spoken failure modes** — the assistant now says *why* recognition failed instead of going quiet
 - **Vision memory** — richer screen-history retrieval
 
