@@ -42,15 +42,23 @@ def test_acquire_skips_unconfigured_slots(monkeypatch):
     assert p.acquire() == (2, "j" * 20)
 
 
-def test_daily_quota_parks_for_hours_not_seconds(pool):
-    """The whole point of this class. 60s would thrash."""
+def test_daily_quota_parks_until_the_reset_not_seconds(pool):
+    """The whole point of this class. 60s would thrash.
+
+    Asserts the park lands ON the next quota reset rather than merely
+    exceeding some duration. The earlier `> 3600` form was clock-dependent:
+    the reset is a fixed wall-clock instant (midnight UTC-8), so within the
+    final hour before it the correct park is legitimately under an hour and
+    the test failed on working code — daily, for an hour, around 12:30 IST.
+    Anchoring to _next_quota_reset() still distinguishes the daily park from
+    the 60s transient park, which is the behaviour actually under test.
+    """
     pool.report_failure(1, _client_error(
         429, "RESOURCE_EXHAUSTED: Quota exceeded for quota metric "
              "'generate_content_free_tier_requests' PerDay"))
     status = {s.slot: s for s in pool.status()}[1]
     assert status.parked_until is not None
-    parked_for = status.parked_until - time.time()
-    assert parked_for > 3600, f"daily quota parked only {parked_for:.0f}s"
+    assert status.parked_until == pytest.approx(kp._next_quota_reset(), abs=2)
     assert pool.acquire() == (2, "j" * 20)
 
 
@@ -71,8 +79,9 @@ def test_ambiguous_429_defaults_to_daily_park(pool):
              "'generate_content_free_tier_requests'"))
     status = {s.slot: s for s in pool.status()}[1]
     assert status.parked_until is not None
-    parked_for = status.parked_until - time.time()
-    assert parked_for > 3600, f"ambiguous 429 parked only {parked_for:.0f}s"
+    # Anchored to the reset instant, not a duration — see the sibling daily
+    # test for why `> 3600` was clock-dependent and failed on working code.
+    assert status.parked_until == pytest.approx(kp._next_quota_reset(), abs=2)
     assert status.reason == "daily quota exhausted"
 
 
