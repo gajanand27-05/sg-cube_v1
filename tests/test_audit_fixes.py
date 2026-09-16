@@ -135,17 +135,6 @@ def test_confirmation_tokens_are_high_entropy():
         assert len(tok) >= 20, f"token {tok!r} is only {len(tok)} chars — too little entropy"
 
 
-# ── replay.py: parents[2] / "backend" → backend/backend/database/replays ────
-
-def test_replay_routes_and_recorder_agree_on_the_directory():
-    from backend.core.replay.recorder import REPLAY_DIR as recorder_dir
-    from backend.server.routes.replay import REPLAY_DIR as routes_dir
-
-    assert routes_dir.resolve() == recorder_dir.resolve()
-    # The old value was .../backend/backend/database/replays.
-    assert routes_dir.resolve().parts.count("backend") == 1, f"doubled segment in {routes_dir}"
-
-
 # ── runtime.py: _tasks never cleaned + unguarded task.result in finally ─────
 
 class _Boom(BaseException):

@@ -105,24 +105,6 @@ def test_phase_c2_trigger_wired():
     print("  [PASS] Phase C2: trigger.on_wake_detected importable")
 
 
-# ── Phase C3: LiveKit ────────────────────────────────────────────────
-
-def test_phase_c3_livekit_worker_importable():
-    """LiveKit worker module should be importable."""
-    from backend.ai_modules.speech.livekit_worker import start_worker, is_available
-    assert callable(start_worker)
-    assert callable(is_available)
-    print("  [PASS] Phase C3: LiveKit worker importable")
-
-
-def test_phase_c3_settings():
-    """Settings should have voice_pipeline field."""
-    from backend.server.config import settings
-    assert hasattr(settings, "voice_pipeline")
-    assert settings.voice_pipeline in ("local", "livekit")
-    print(f"  [PASS] Phase C3: voice_pipeline={settings.voice_pipeline}")
-
-
 # ── Phase D: Fast-Path Command Routing ───────────────────────────────
 
 def _check_rule(text, expected_action):
@@ -514,8 +496,6 @@ def main():
         ("Phase C1: silero-vad", test_phase_c1_silero_vad_importable),
         ("Phase C2: TTS functions", test_phase_c2_tts_stop_speech),
         ("Phase C2: Trigger wired", test_phase_c2_trigger_wired),
-        ("Phase C3: LiveKit worker", test_phase_c3_livekit_worker_importable),
-        ("Phase C3: Settings", test_phase_c3_settings),
         ("Phase D1: Volume", test_phase_d1_volume_patterns),
         ("Phase D1: Brightness", test_phase_d1_brightness_patterns),
         ("Phase D1: Weather", test_phase_d1_weather_patterns),

@@ -148,7 +148,6 @@ Healer catches execution failures and re-plans instead of surfacing a stack trac
 | **Wake Word** | Vosk (always-on, local) | ✅ |
 | **Speech-to-Text** | Gemini (default) or faster-whisper, + silero-VAD · `STT_BACKEND` | ✅ |
 | **Text-to-Speech** | Piper neural TTS, with barge-in | ✅ |
-| **Voice Pipeline** | Local (default) or LiveKit streaming | ✅ |
 | **Intent Routing** | 3-tier: Cache → Regex Rules (~40) → LLM | ✅ |
 | **Agent LLM** | Gemini 2.5 Flash (cloud) / Ollama (local fallback) | ✅ |
 | **Intent Classifier** | Ollama — phi3 (local, lightweight) | ✅ |
@@ -263,7 +262,7 @@ to, so it's logged rather than quietly dropped.
 |---|---|
 | **Core** | Python 3.12 · FastAPI · Pydantic-settings · asyncio |
 | **Agent** | Gemini 2.5 Flash · Ollama (phi3) · custom 5-stage pipeline |
-| **Voice** | Vosk · faster-whisper · silero-VAD · Piper · LiveKit (optional) |
+| **Voice** | Vosk · faster-whisper · silero-VAD · Piper |
 | **Vision** | Qwen2.5-VL · Tesseract OCR |
 | **Memory** | ChromaDB · nomic-embed-text |
 | **Protocol** | FastMCP (SSE server + client) |
@@ -347,7 +346,6 @@ variable is absent from `.env`. They are not what `.env.example` sets.
 | `FAST_MODEL` | `phi3` | Local intent classifier / verifier (lightweight) |
 | `STT_BACKEND` | `gemini` | Speech-to-text backend — `gemini` or `whisper` |
 | `WHISPER_MODEL` | `small` | STT model size; only read when `STT_BACKEND=whisper` |
-| `VOICE_PIPELINE` | `local` | `local` or `livekit` |
 | `ENABLE_VISION` | `true` | Passive screen glance every 5 min (fills memory) |
 | `ENABLE_WAKE_WORD` | `false` | Mic listener for the wake phrase |
 | `ENABLE_CLIPBOARD` | `true` | Clipboard change tracking |
@@ -384,7 +382,7 @@ backend/
 │   ├── orchestrator/ # Cache → Rules → LLM router
 │   ├── mcp_server.py # MCP protocol (SSE + client)
 │   └── plugins/      # User plugins (auto-discovered)
-├── ai_modules/       # LLM clients, STT, TTS, LiveKit worker
+├── ai_modules/       # LLM clients, STT, TTS
 └── database/         # ChromaDB + Supabase + migrations
 frontend/
 └── src/
@@ -405,8 +403,7 @@ tests/                # pytest — 1,071 tests (+ vitest on the frontend)
 .venv\Scripts\python.exe -m pytest tests -q
 ```
 
-Use the venv interpreter — it is the only one with `cv2` + `ultralytics`, which the vision tests
-need.
+Use the venv interpreter — it is the only one with `cv2`, which the vision tests need.
 
 ```
 1071 passed, 3 deselected in 119.46s
@@ -417,7 +414,6 @@ need.
 | **A** | Tool registry bootstrap | ✅ |
 | **B** | Plugin auto-discovery | ✅ |
 | **C1–C2** | Streaming ASR + TTS + interrupt | ✅ |
-| **C3** | LiveKit optional pipeline | ✅ |
 | **D** | 3-tier routing (Cache → Rules → LLM) | ✅ |
 | **E** | MCP protocol integration | ✅ |
 | **F** | 6 CLI games + personality | ✅ |

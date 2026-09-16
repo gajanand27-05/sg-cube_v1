@@ -35,13 +35,6 @@ class Settings(BaseSettings):
     # 6GB card leaves ~1.8GB headroom. Local only; the cloud has no concept
     # of residency.
     ollama_keep_alive: str = "30m"
-    
-    # Reasoning / coding models (served by Ollama Cloud — see below)
-    reasoning_model: str = "gpt-oss:120b"  # planner, complex logic
-    coding_model: str = "gpt-oss:120b"     # code generation
-
-    # General conversation
-    chat_model: str = "gpt-oss:120b"       # aspirational — not currently read
 
     # Vision
     vision_model: str = "qwen2.5vl:3b"          # local VLM
@@ -125,12 +118,6 @@ class Settings(BaseSettings):
     # section 7.1 passes, so a bad result is one config flip to revert
     # rather than a revert commit mid-session.
     stt_backend: str = "gemini"  # "gemini" | "whisper"
-
-    # ── Phase C3: LiveKit optional voice pipeline ──
-    voice_pipeline: str = "local"  # "local" | "livekit"
-    livekit_url: str = ""
-    livekit_api_key: str = ""
-    livekit_api_secret: str = ""
 
     # ── Background services (toggle each independently) ──
     # How long an action that asked "should I proceed?" stays answerable.
@@ -355,7 +342,6 @@ class Settings(BaseSettings):
     finnhub_api_key: str = ""
     weather_provider: str = "open-meteo"  # "open-meteo" (no key) | "openweather"
     openweather_api_key: str = ""
-    news_api_key: str = ""             # optional; RSS default needs no key
 
 
 settings = Settings()

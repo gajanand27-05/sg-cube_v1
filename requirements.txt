@@ -26,29 +26,18 @@ requests==2.32.3
 # ── Phase C1: silero-vad for accurate streaming VAD ──
 silero-vad>=4.0.0
 
-# ── Phase C3: LiveKit optional voice pipeline ──
-# Install separately if using LiveKit:
-#   pip install livekit livekit-agents livekit-plugins-deepgram livekit-plugins-openai livekit-plugins-silero
-
 # ── Phase 7: Text-to-Speech (Piper — offline neural TTS) ──
 # Voice models live in backend/ai_modules/speech/piper_voices/ (gitignored).
 # Fetch with: python tools/download_piper_voice.py [voice-name]
 piper-tts==1.4.2
 
+# ── Screen capture + change detection (backend/core/vision/) ──
+Pillow==11.0.0
+
 # ── Phase 9: Wake-word listener (Vosk — offline, grammar-restricted) ──
 # Model lives in backend/ai_modules/speech/vosk_models/ (gitignored).
 # Fetch with: python tools/download_vosk_model.py
 vosk==0.3.45
-
-# ── Phase 9b: System tray icon (legacy — kept in repo, no longer wired in main.py) ──
-pystray==0.19.5
-Pillow==11.0.0
-
-# ── VisionClaw Phase 1: phone-connect QR (renders via Pillow above) ──
-qrcode==8.2
-
-# ── VisionClaw Phase 2: YOLOv8n obstacle detection on phone frames (CPU) ──
-ultralytics==8.4.115
 
 # ── Phase 10c: in-app actions (YouTube first-result resolver) ──
 yt-dlp==2026.3.3
@@ -107,6 +96,10 @@ fastmcp>=0.5.0
 # a perfectly good install — vision/ocr_reader.py probes the standard install
 # directories itself and honours TESSERACT_CMD. `preflight.check_ocr` reports
 # whether it was found.
+# cv2 decodes/downscales the frame before Tesseract sees it (ocr_reader.py
+# imports it at call time). It used to arrive as an `ultralytics` transitive;
+# ultralytics is gone, so declare the real dependency. Headless: no GUI calls.
+opencv-python-headless==4.10.0.84
 pypdf==5.1.0
 beautifulsoup4==4.12.3
 pytesseract==0.3.13

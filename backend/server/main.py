@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.server.config import settings
-from backend.server.routes import admin, agents, auth, diagnostics, execute, files, memory, orchestrate, remote, system, ui, vision, voice, replay
+from backend.server.routes import admin, agents, auth, diagnostics, execute, files, memory, orchestrate, remote, system, ui, vision, voice
 
 # Bootstrap tool registry — triggers all @tool decorators before any agent runs.
 import backend.core.tools  # noqa: F401
@@ -101,7 +101,6 @@ app.include_router(agents.router)
 app.include_router(system.router)
 app.include_router(files.router)
 app.include_router(diagnostics.router)
-app.include_router(replay.router)
 
 # Phase E: Optionally mount MCP server at /mcp
 try:
