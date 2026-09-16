@@ -170,7 +170,7 @@ async def run_case(planner, case: dict, context) -> tuple[list[dict], float, flo
     return [c for c in calls if isinstance(c, dict)], (ttft or total), total
 
 
-def _select_provider(name: str) -> str:
+def _select_provider(name: str, model: str | None = None) -> str:
     """Pin PLANNING to one backend, bypassing _cloud_or's key-presence logic.
 
     The bench must test the backend it was ASKED for, not the one the current
@@ -180,6 +180,18 @@ def _select_provider(name: str) -> str:
     from backend.ai_modules.llm import create_llm_provider
     from backend.ai_modules.llm.provider import get_llm
     from backend.ai_modules.llm.routing import TaskType
+    from backend.server.config import settings
+
+    # Backends read their default model from settings AT CONSTRUCTION, so this
+    # has to land before create_llm_provider() or the run silently benches
+    # whatever .env names while reporting the model that was asked for.
+    if model:
+        if name == "ollama_cloud":
+            settings.ollama_cloud_model = model
+        elif name == "gemini":
+            settings.gemini_model = model
+        else:
+            settings.fast_model = model
 
     create_llm_provider()
     llm = get_llm()
@@ -232,7 +244,7 @@ async def main_async(args) -> int:
     if not cases:
         raise SystemExit("no cases selected")
 
-    model = _select_provider(args.provider)
+    model = _select_provider(args.provider, args.model)
     schemas = {n: t.schema for n, t in REGISTRY.items() if hasattr(t, "schema")}
 
     from backend.core.agents.planner import PlannerAgent
@@ -296,7 +308,7 @@ def main() -> int:
                    help="backend name to pin PLANNING to (gemini, ollama_cloud, ollama)")
     p.add_argument("--only", help="run one group only (baseline, siblings, multistep, compound, argnames, destructive, no_action)")
     p.add_argument("--case", help="run a single case id")
-    p.add_argument("--model", help="override the model for --check-access")
+    p.add_argument("--model", help="pin a specific model (e.g. gpt-oss:20b, gemma4:31b)")
     p.add_argument("--check-access", action="store_true",
                    help="one real POST to prove entitlement, then exit")
     p.add_argument("--json-out", help="write per-case results to this path")
