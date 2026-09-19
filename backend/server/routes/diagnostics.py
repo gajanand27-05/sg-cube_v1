@@ -189,6 +189,36 @@ def get_latency(n: int = 20):
     return {"turns": turns, "count": len(turns)}
 
 
+def _planner_identity() -> dict:
+    """Which model is ACTUALLY planning, resolved from the live routing policy.
+
+    This used to be the hardcoded string "gemma4". It had been wrong since
+    OLLAMA_API_KEY was commented out in August — routing has been picking
+    `gemini` ever since, while the HUD and this endpoint both reported gemma4.
+    A dashboard that names the wrong model is how a demo gets misdiagnosed;
+    it cost a debugging session on 2026-09-15.
+
+    Resolved, never assumed: ask RoutingPolicy which backend serves PLANNING,
+    then name the concrete model that backend will call.
+    """
+    from backend.ai_modules.llm.routing import TaskType, build_default_policy
+    from backend.server.config import settings
+
+    try:
+        backend = build_default_policy().select(TaskType.PLANNING)
+    except Exception:
+        return {"planner": "unknown", "operator": "tool-executor"}
+
+    model = {
+        "gemini": settings.gemini_model,
+        "ollama_cloud": settings.ollama_cloud_model,
+        "ollama": settings.fast_model,
+        "ollama_fallback": settings.llm_fallback_model,
+    }.get(backend, backend)
+    return {"planner": model, "planner_backend": backend,
+            "operator": "tool-executor"}
+
+
 @router.get("/inspect")
 def agent_inspector():
     """Agent Inspector — current tool registry state with usage.
@@ -209,7 +239,7 @@ def agent_inspector():
             "usage": usage,
             "category": category,
         })
-    return {"agents": {"planner": "gemma4", "operator": "tool-executor"}, "tools": tools}
+    return {"agents": _planner_identity(), "tools": tools}
 
 
 _start_time = time.time()
