@@ -191,10 +191,27 @@ def _parse(raw: str | None) -> str:
     except (ValueError, TypeError):
         log.warning("stt_gemini: unparseable response body %r", raw[:200])
         return ""
-    if not isinstance(data, dict) or not data.get("speech_detected"):
+    # Every empty outcome leaves a trace. Measured on the archived captures:
+    # Gemini returned "" for three clips that local Whisper decodes cleanly at
+    # no_speech_prob 0.36-0.40 — real, loud speech. Because the ONLY empty path
+    # that logged was the unparseable one, those losses were invisible; the
+    # capture archive recorded an empty transcript identical to the ones where
+    # the room was genuinely just noise. Two very different failures wearing
+    # the same face is how the wake word got blamed for all of them.
+    if not isinstance(data, dict):
+        log.warning("stt_gemini: response was not an object: %r", raw[:200])
+        return ""
+    if not data.get("speech_detected"):
+        log.info("stt_gemini: speech_detected=false; raw=%r", raw[:200])
         return ""
     transcript = data.get("transcript")
-    return transcript.strip() if isinstance(transcript, str) else ""
+    if not isinstance(transcript, str):
+        log.warning("stt_gemini: speech_detected but transcript is %s; raw=%r",
+                    type(transcript).__name__, raw[:200])
+        return ""
+    if not transcript.strip():
+        log.info("stt_gemini: speech_detected but transcript empty; raw=%r", raw[:200])
+    return transcript.strip()
 
 
 def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:
@@ -240,6 +257,14 @@ def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:
         raise SttUnavailable(last_kind, str(last_error)) from last_error
 
     pool.report_success(slot)
+
+    # NO local-Whisper fallback here, deliberately — it was written, measured
+    # and removed. Replayed against the archived captures, local Whisper
+    # (medium/cuda) returns "" for 'Onyx open notepad' and 'What time is it?'
+    # under EVERY decode combination — vad on/off, command prompt on/off —
+    # while Gemini transcribed both correctly in production. On this machine's
+    # real room audio Whisper is the weaker engine, so a fallback would have
+    # added a GPU decode to every false wake and recovered nothing.
     return {
         "text": _parse(getattr(resp, "text", None)),
         "language": "en",
