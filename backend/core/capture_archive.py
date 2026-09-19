@@ -57,7 +57,8 @@ def _prune(directory: Path) -> None:
 
 
 def archive(audio: np.ndarray | bytes, transcript: str, *,
-            trigger: str = "", dispatched: bool = True) -> Path | None:
+            trigger: str = "", dispatched: bool = True,
+            extra: dict | None = None) -> Path | None:
     """Save one capture and its transcript. Returns the wav path, or None.
 
     Never raises: this runs inside the voice turn, and losing a recording is
@@ -96,6 +97,12 @@ def archive(audio: np.ndarray | bytes, transcript: str, *,
             "dispatched": dispatched,
             "seconds": round(pcm.size / SAMPLE_RATE, 2),
             "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            # Whatever the caller needs to explain THIS capture — e.g. the
+            # speech gate's score for one it dropped. A dropped capture never
+            # gets a transcript, so without the score and the audio side by
+            # side there is no way to audit later whether the gate ate a real
+            # command.
+            **(extra or {}),
         }, indent=2), encoding="utf-8")
 
         _prune(_ARCHIVE_DIR)

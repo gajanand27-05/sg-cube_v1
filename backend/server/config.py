@@ -119,6 +119,19 @@ class Settings(BaseSettings):
     # rather than a revert commit mid-session.
     stt_backend: str = "gemini"  # "gemini" | "whisper"
 
+    # ── Post-wake speech gate (backend/ai_modules/speech/speech_gate.py) ──
+    # Drops a capture before STT when silero finds NO speech in it. Deliberately
+    # zero rather than a ratio: measured on the archived captures, the noise and
+    # real-command speech-ratio distributions overlap, and 'Onyx open notepad'
+    # carries only 0.40s of speech — less than most noise clips. A proportional
+    # threshold eats commands before it eats noise.
+    #
+    # Worth having because every false wake currently costs a Gemini
+    # generate_content call on the SAME quota the planner uses (stt_gemini.py
+    # passes settings.gemini_model), so ~30 false wakes is half a day's budget.
+    enable_speech_gate: bool = True
+    speech_gate_min_seconds: float = 0.0
+
     # ── Background services (toggle each independently) ──
     # How long an action that asked "should I proceed?" stays answerable.
     # Short on purpose: the pending call is also popped by the very next turn

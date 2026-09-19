@@ -20,6 +20,21 @@ from backend.core.state import AssistantState, manager as state_manager
 from backend.daemon import trigger
 
 
+@pytest.fixture(autouse=True)
+def _no_speech_gate(monkeypatch):
+    """These tests are about what Onyx SAYS when STT cannot run, so the audio
+    has to reach STT.
+
+    `_audio()` below is a DC constant, not speech — silero scores it at zero
+    seconds and the post-wake speech gate drops it before STT is ever called,
+    which is the gate behaving correctly. Turning the gate off here keeps each
+    test pointed at its own subject instead of silently re-testing the gate.
+    """
+    from backend.server.config import settings
+
+    monkeypatch.setattr(settings, "enable_speech_gate", False)
+
+
 def _audio():
     return (np.ones(16000, dtype=np.int16) * 4000).tobytes()
 

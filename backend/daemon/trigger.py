@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional, AsyncGenerator
 import numpy as np
 import sounddevice as sd
 
+from backend.ai_modules.speech import speech_gate
 from backend.ai_modules.speech.stt import transcribe_array
 from backend.ai_modules.speech.stt_gemini import SttUnavailable
 from backend.ai_modules.speech.tts_piper import (
@@ -673,6 +674,40 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
 
         # Normalize int16 → float32 for Whisper
         audio_float = arr.astype(np.float32) / 32768.0
+
+        # ── Speech gate ──────────────────────────────────────────────────
+        # BEFORE STT on purpose. The RMS floor above measures loudness, which
+        # a television satisfies; this asks whether anyone spoke. Every capture
+        # that gets past here costs a Gemini generate_content call on the SAME
+        # quota the planner uses, so dropping a silent one is not just tidiness.
+        #
+        # Conservative by construction — it fires only when silero finds ZERO
+        # speech — and it fails OPEN, so an unavailable VAD cannot mute Onyx.
+        # The dropped audio is archived WITH its score, because a dropped
+        # capture has no transcript and the recording is the only way to audit
+        # later whether this ever ate a real command.
+        keep, speech_s = speech_gate.has_speech(audio_float, SAMPLE_RATE)
+        if not keep:
+            print(f"[gate] dropped: no speech detected "
+                  f"(speech={speech_s:.2f}s, rms={rms:.0f}, {len(arr)/SAMPLE_RATE:.1f}s)")
+            log.info("speech gate dropped capture: speech=%.2fs rms=%.0f dur=%.1fs trigger=%s",
+                     speech_s, rms, len(arr) / SAMPLE_RATE,
+                     getattr(state_manager, "_voice_trigger_source", ""))
+            try:
+                from backend.core import capture_archive
+
+                capture_archive.archive(
+                    audio_float, "",
+                    trigger=getattr(state_manager, "_voice_trigger_source", ""),
+                    dispatched=False,
+                    extra={"dropped_by": "speech_gate",
+                           "speech_seconds": round(speech_s, 3)},
+                )
+            except Exception:
+                pass
+            state_manager.transition_to(AssistantState.IDLE)
+            latency_ledger().record(turn)
+            return False
 
         try:
             # Use streaming STT - audio_float is already the full captured audio
