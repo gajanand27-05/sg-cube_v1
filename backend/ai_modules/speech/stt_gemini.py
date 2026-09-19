@@ -204,26 +204,40 @@ def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:
         return dict(_EMPTY)
     duration = round(len(arr) / float(sample_rate), 3)
 
-    slot, client = _client_for()
     wav_bytes = encode_wav(arr, sample_rate)
-    try:
-        resp = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=[
-                types.Part.from_bytes(data=wav_bytes, mime_type="audio/wav"),
-            ],
-            config=types.GenerateContentConfig(
-                system_instruction=_SYSTEM_INSTRUCTION,
-                response_mime_type="application/json",
-                response_schema=_RESPONSE_SCHEMA,
-                temperature=0.0,
-            ),
-        )
-    except Exception as e:
-        pool.report_failure(slot, e)
-        kind = _classify_transport(e)
-        log.warning("stt_gemini: %s on key %d: %s", kind, slot, e)
-        raise SttUnavailable(kind, str(e)) from e
+
+    # One attempt per key. report_failure parks the spent slot, so the next
+    # _client_for() hands back a different one and the loop rotates; when all
+    # are parked _client_for raises SttUnavailable with the real reason.
+    # Bounded by the pool size — three keys, three tries, no retry of a key
+    # that just failed.
+    #
+    # This used to acquire once and give up, so a 429 on key 1 ended the turn
+    # while keys 2 and 3 sat healthy. GeminiBackend re-acquires on every retry
+    # attempt; this path did not, and STT_BACKEND=gemini puts it on every turn.
+    for _ in range(3):
+        slot, client = _client_for()
+        try:
+            resp = client.models.generate_content(
+                model=settings.gemini_model,
+                contents=[
+                    types.Part.from_bytes(data=wav_bytes, mime_type="audio/wav"),
+                ],
+                config=types.GenerateContentConfig(
+                    system_instruction=_SYSTEM_INSTRUCTION,
+                    response_mime_type="application/json",
+                    response_schema=_RESPONSE_SCHEMA,
+                    temperature=0.0,
+                ),
+            )
+            break
+        except Exception as e:
+            pool.report_failure(slot, e)
+            kind = _classify_transport(e)
+            log.warning("stt_gemini: %s on key %d: %s", kind, slot, e)
+            last_error, last_kind = e, kind
+    else:
+        raise SttUnavailable(last_kind, str(last_error)) from last_error
 
     pool.report_success(slot)
     return {

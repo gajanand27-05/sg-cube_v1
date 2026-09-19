@@ -193,6 +193,36 @@ def test_an_empty_pool_names_the_soonest_recovery(monkeypatch):
     assert exc.value.kind == "no_network"
 
 
+def test_a_spent_key_rotates_to_the_next_one(monkeypatch):
+    """STT asked the pool once and gave up, so a 429 on key 1 ended the turn
+    while keys 2 and 3 sat healthy and unused. GeminiBackend re-acquires per
+    retry; this path did not, and cloud STT put it on every single turn.
+    """
+    fresh = _three_keys(monkeypatch)
+    good = _FakeClient(payload='{"speech_detected": true, "transcript": "hello"}')
+    seen = []
+
+    def fake_client_for():
+        slot, _ = fresh.acquire()
+        seen.append(slot)
+        # Slot 1 is spent; anything else works.
+        return slot, (_FakeClient(raises=_daily_quota_error()) if slot == 1 else good)
+
+    monkeypatch.setattr(stt_gemini, "_client_for", fake_client_for)
+    assert stt_gemini.transcribe_array(_tone(), 16000)["text"] == "hello"
+    assert seen == [1, 2], f"expected rotation 1 -> 2, got {seen}"
+
+
+def test_rotation_stops_when_every_key_is_spent(monkeypatch):
+    """Must not loop forever, and must still report WHY it failed."""
+    _three_keys(monkeypatch)
+    monkeypatch.setattr(stt_gemini, "_client_for",
+                        lambda: (1, _FakeClient(raises=_daily_quota_error())))
+    with pytest.raises(stt_gemini.SttUnavailable) as exc:
+        stt_gemini.transcribe_array(_tone(), 16000)
+    assert exc.value.kind == "quota"
+
+
 def test_uses_a_real_sdk_method_name():
     """Both this repo and the camera module shipped calls to the OLD
     google-generativeai SDK and stayed green because the tests mocked the
