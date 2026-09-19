@@ -56,6 +56,16 @@ _MAX_DROPPED = 500
 _DROPPED_MAX_AGE_S = 7 * 24 * 3600
 _DROPPED_PREFIX = "drop-"
 
+# High-volume buckets, each with its OWN budget so one cannot starve another
+# or the real captures. `bucket` in archive()'s `extra` selects one.
+#   speech_gate  - captures the gate threw away
+#   wake_trigger - the pre-roll that fired the wake word, recorded so a
+#                  false-fire rate can be measured instead of guessed
+_BUCKET_PREFIX = {
+    "speech_gate": _DROPPED_PREFIX,
+    "wake_trigger": "wake-",
+}
+
 
 def enabled() -> bool:
     from backend.server.config import settings
@@ -68,24 +78,34 @@ def _delete(wav: Path) -> None:
 
 
 def _prune(directory: Path) -> None:
-    """Two independent budgets: gate-dropped captures, and everything else."""
+    """Independent budgets per bucket, so noise cannot evict real captures.
+
+    Real captures are the only reason the archive exists; gated audio and wake
+    triggers are both high-volume (a fifth of wakes are gated, and every wake
+    including the false ones records a trigger). On one shared FIFO the volume
+    buckets would steadily push the real commands out.
+    """
     everything = sorted(directory.glob("*.wav"), key=lambda p: p.stat().st_mtime)
-    dropped = [p for p in everything if p.name.startswith(_DROPPED_PREFIX)]
-    kept = [p for p in everything if not p.name.startswith(_DROPPED_PREFIX)]
+    prefixes = tuple(_BUCKET_PREFIX.values())
 
-    for stale in kept[:-_MAX_CAPTURES]:
+    real = [p for p in everything if not p.name.startswith(prefixes)]
+    for stale in real[:-_MAX_CAPTURES]:
         _delete(stale)
 
-    # Count first, then age. Both apply, so the stricter one decides.
-    for stale in dropped[:-_MAX_DROPPED]:
-        _delete(stale)
     cutoff = time.time() - _DROPPED_MAX_AGE_S
-    for p in dropped[-_MAX_DROPPED:]:
-        try:
-            if p.stat().st_mtime < cutoff:
-                _delete(p)
-        except OSError:
-            continue
+    for prefix in prefixes:
+        bucket = [p for p in everything if p.name.startswith(prefix)]
+        # Count first, then age. BOTH apply, so the stricter one decides — an
+        # audio log of someone's living room should expire on its own even if
+        # the count never fills up.
+        for stale in bucket[:-_MAX_DROPPED]:
+            _delete(stale)
+        for p in bucket[-_MAX_DROPPED:]:
+            try:
+                if p.stat().st_mtime < cutoff:
+                    _delete(p)
+            except OSError:
+                continue
 
 
 def archive(audio: np.ndarray | bytes, transcript: str, *,
@@ -115,7 +135,9 @@ def archive(audio: np.ndarray | bytes, transcript: str, *,
         # The prefix is what lets _prune give these their own budget without
         # opening every sidecar. `drop-*.wav` still matches `*.wav`, so every
         # existing replay tool picks them up unchanged.
-        prefix = _DROPPED_PREFIX if (extra or {}).get("dropped_by") else ""
+        bucket = (extra or {}).get("bucket") or (
+            "speech_gate" if (extra or {}).get("dropped_by") else "")
+        prefix = _BUCKET_PREFIX.get(bucket, "")
         wav_path = _ARCHIVE_DIR / f"{prefix}{stamp}.wav"
 
         with wave.open(str(wav_path), "wb") as w:

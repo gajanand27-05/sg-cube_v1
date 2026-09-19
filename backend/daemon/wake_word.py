@@ -144,6 +144,39 @@ def _has_followup_content(partial: str) -> bool:
     return any(len(w) >= 2 and w.isalpha() for w in partial.split())
 
 
+# 2000 samples = 125ms at 16kHz — the live stream's blocksize, and the cadence
+# PartialResult updates at. Exported so an offline replay feeds Vosk in exactly
+# the sized bites the microphone does; chunk size changes where token
+# boundaries fall, so a bench using a different one measures a different
+# recognizer.
+WAKE_BLOCKSIZE = 2000
+
+
+def feed_wake_chunk(recognizer, data: bytes) -> str:
+    """Feed ONE chunk to the wake recognizer; return its cumulative partial.
+
+    Extracted so the live listener and tools/wake_bench.py run the SAME
+    decision. A bench that re-implements this measures the re-implementation —
+    which is worthless for a before/after comparison, since the thing being
+    compared is production behaviour.
+
+    The caller owns the RMS gate (_VAD_RMS_THRESHOLD) and Reset(), because
+    both are part of the surrounding state machine rather than this step.
+    """
+    recognizer.AcceptWaveform(data)
+    return (json.loads(recognizer.PartialResult()).get("partial") or "").lower()
+
+
+def wake_phrase_present(partial: str, wake_phrase: str) -> bool:
+    """The live trigger test: a bare token match, with no confidence check.
+
+    Vosk's grammar here is [wake_phrase, "[unk]"], so every sound must decode
+    to one or the other — which is structurally prone to accepting ambient
+    speech as the wake word.
+    """
+    return wake_phrase in partial.split()
+
+
 def _partial_token_count(partial: str) -> int:
     """Tokens Vosk has decoded so far in the current utterance."""
     return len(partial.split())
@@ -691,17 +724,34 @@ class WakeWordListener:
 
                 try:
                     if rms > _VAD_RMS_THRESHOLD:
-                        self.recognizer.AcceptWaveform(data)
-                        partial_json = json.loads(self.recognizer.PartialResult())
-                        partial = (partial_json.get("partial") or "").lower()
+                        partial = feed_wake_chunk(self.recognizer, data)
 
-                        if (self.wake_phrase in partial.split()
+                        if (wake_phrase_present(partial, self.wake_phrase)
                                 and self._wake_trigger_allowed(rms)):
                             trigger = True
                             # Everything the recognizer consumed getting here.
                             initial_audio = list(self._preroll)
                             is_wake_preroll = True
                             trigger_label = f"wake: {partial!r} (rms={rms:.0f})"
+                            # Archive the audio that FIRED the wake, separately
+                            # from the command capture. Replaying the command
+                            # captures re-detected 'onyx' in only 1 of 41, so
+                            # there was no way to measure a false-fire rate —
+                            # the evidence for the decision was never kept.
+                            # Same directory, same gitignore, own retention
+                            # budget (see capture_archive._BUCKET_PREFIX).
+                            try:
+                                from backend.core import capture_archive
+
+                                capture_archive.archive(
+                                    b"".join(initial_audio), "",
+                                    trigger="wake", dispatched=True,
+                                    extra={"bucket": "wake_trigger",
+                                           "partial": partial,
+                                           "rms": round(rms)},
+                                )
+                            except Exception:
+                                pass
                             self.recognizer.Reset()
                             partial = ""
                             self._partial_tokens = 0
