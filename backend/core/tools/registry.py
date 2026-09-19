@@ -439,6 +439,12 @@ async def call(name: str, args: dict, request_id: Optional[str] = None) -> ToolR
     return await REGISTRY[resolved](request_id=request_id, **args)
 
 
+# tool name -> how many times its args needed repairing this process. Read it
+# from a probe or a diagnostics route; a climbing count means the planner is
+# drifting on argument names (a model swap is the usual cause).
+ARG_REPAIRS: dict[str, int] = {}
+
+
 def _coerce_args(tool_name: str, args: dict) -> dict:
     """Remap argument names when the LLM hallucinates parameter aliases.
 
@@ -491,6 +497,18 @@ def _coerce_args(tool_name: str, args: dict) -> dict:
     else:
         # Ambiguous or no match — keep the original keys (will TypeError).
         out.update(dict(unmatched))
+
+    # A silent repair hides how often the planner misnames arguments, and the
+    # repair is NOT unconditional: it remaps exactly ONE unknown key. With two
+    # unknowns the branch above keeps the original names and the call
+    # TypeErrors — so read_file({'file':.., 'limit':..}) fails even though
+    # 'file' alone would have been fixed. Without a record there is no way to
+    # notice the rate climbing toward that cliff, or to tell a model swap made
+    # naming worse. Same reasoning as FAILED_TOOL_MODULES in tools/__init__.py:
+    # swallowing a failure is fine, leaving no trace of it is not.
+    if out != args:
+        ARG_REPAIRS[tool_name] = ARG_REPAIRS.get(tool_name, 0) + 1
+        log.info("arg repair: %s %s -> %s", tool_name, sorted(args), sorted(out))
     return out
 
 
