@@ -587,6 +587,12 @@ _STT_HALLUCINATIONS = frozenset({
     "don't forget to subscribe", "dont forget to subscribe",
     "like and subscribe", "subscribe to my channel",
     "thanks for listening", "thank you for listening",
+    # Matching is exact-after-normalise, so the long form of an entry already
+    # here still got through. Pulled verbatim from this install's captures on
+    # 2026-09-13, where it was dispatched:
+    #     'Like, comment, share and subscribe.'
+    "like, comment, share and subscribe", "like comment share and subscribe",
+    "please like and subscribe", "like share and subscribe",
 })
 
 # Sentence splitter for the compound case. Kept simple deliberately: STT
@@ -597,6 +603,23 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 def _normalize_fragment(text: str) -> str:
     return text.strip().lower().rstrip(".!?").strip()
+
+# Onyx's OWN stock lines. If the microphone hears one of these it is the
+# assistant, not the user — nobody says "I can't reach the network right now"
+# to a voice assistant. Archived on 2026-09-15 as a transcript:
+#     "I'm sorry I didn't quite understand that"
+#
+# was_recently_spoken() already breaks the TTS feedback loop, but only inside
+# its time window; a stock line arriving later is still unambiguously echo.
+# Derived from the constant rather than retyped, so the two cannot drift apart
+# when a line is reworded.
+_STT_HALLUCINATIONS = _STT_HALLUCINATIONS | {
+    _normalize_fragment(line) for line in _STT_UNAVAILABLE_SPEECH.values()
+} | {
+    "i'm sorry i didn't quite understand that",
+    "im sorry i didn't quite understand that",
+    "sorry i didn't quite understand that",
+}
 
 
 def strip_hallucinated_sentences(command: str) -> str:
