@@ -89,7 +89,11 @@ const NODES: MapNode[] = [
   { id: "tools", label: "Tools", sub: "87 registered", x: 1050, y: 380, group: "agents", event: "tool_finished",
     desc: "Windowing, browser (Playwright), canvas, data sources, files, shell, games… Tier system: readonly / system_write / destructive (default destructive, fail-closed).",
     files: ["backend/core/tools/"] },
-  { id: "llm", label: "LLM Provider", sub: "gpt-oss:120b cloud", x: 710, y: 200, group: "route", event: "ai_metrics",
+  // `sub` is deliberately NOT a model name. It was hardcoded "gpt-oss:120b
+  // cloud" and went stale the moment OLLAMA_CLOUD_MODEL changed — the same
+  // class of bug as the hardcoded "gemma4" in /diagnostics/inspect (e10b79b).
+  // The live model comes from the ai_metrics payload; see LIVE_SUB below.
+  { id: "llm", label: "LLM Provider", sub: "resolving…", x: 710, y: 200, group: "route", event: "ai_metrics",
     desc: "Task-routed provider with fallback: Ollama Cloud for reasoning/planning, local Ollama for embeddings and vision.",
     files: ["backend/ai_modules/llm/provider.py", "backend/ai_modules/llm/routing.py"] },
 
@@ -182,6 +186,11 @@ function useEventTimestamps(): Map<UiEventType, number> {
 export function ArchitectureMapOverlay({ onClose }: { onClose: () => void }) {
   const [selected, setSelected] = useState<MapNode | null>(null);
   const stamps = useEventTimestamps();
+  // Live model name for the LLM node. A map that names the wrong model is how
+  // a demo gets misdiagnosed, so this reports what the backend says it is
+  // actually calling rather than what someone typed here months ago.
+  const aiMetrics = useUiEventEnvelope("ai_metrics");
+  const liveModel = aiMetrics?.payload?.active_model;
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -312,7 +321,7 @@ export function ArchitectureMapOverlay({ onClose }: { onClose: () => void }) {
                     {n.label}
                   </text>
                   <text x={10} y={35} fontSize={9} fontFamily="JetBrains Mono, monospace" fill="#7ea3b8">
-                    {n.sub}
+                    {n.id === "llm" && liveModel ? liveModel : n.sub}
                   </text>
                   {n.event && (
                     <circle
