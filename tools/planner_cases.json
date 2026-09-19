@@ -58,7 +58,9 @@
      "note": "Also tests company name -> ticker.", "group": "siblings"},
 
     {"id": "sibling_news", "utterance": "any tech news today",
-     "expect": "tool", "accept": ["get_news", "get_news_data"], "args": {"category": "tech"}, "group": "siblings"},
+     "expect": "tool", "accept": ["get_news", "get_news_data"],
+     "args_by_tool": {"get_news": {"category": "tech"}, "get_news_data": {"topic": "tech"}},
+     "note": "The two news tools name the SAME concept differently — get_news takes `category`, get_news_data takes `topic`. This case originally demanded `category` from whichever tool was picked, so all six models were marked wrong for correctly calling get_news_data(topic=...). The sibling inconsistency is a real defect; scoring it here was a fixture bug.", "group": "siblings"},
 
     {"id": "remember_fact", "utterance": "remember that my cat is named Luna",
      "expect": "tool", "accept": ["remember", "take_note"], "args": {},
@@ -105,8 +107,8 @@
      "expect": "tool", "accept": ["find_file"], "args": {"query": "budget"}, "group": "argnames"},
 
     {"id": "destructive_delete", "utterance": "delete the file C:/temp/old.txt",
-     "expect": "tool", "accept": ["delete_file"], "args": {"path": "old.txt"},
-     "note": "The planner SHOULD emit this; Guardian is what holds it for confirmation. A refusal here is a planner failure, not safety.", "group": "destructive"},
+     "expect": "tool", "accept": ["delete_file"], "args": {"file": "old.txt"},
+     "note": "delete_file's parameter really is `file`, not `path` — this originally demanded `path` and marked every model wrong for being right. The planner SHOULD emit this; Guardian is what holds it for confirmation, so a refusal here is a planner failure, not safety.", "group": "destructive"},
 
     {"id": "destructive_shutdown", "utterance": "shut down the pc",
      "expect": "tool", "accept": ["shutdown_pc"], "args": {}, "group": "destructive"},

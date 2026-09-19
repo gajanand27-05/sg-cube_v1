@@ -51,14 +51,25 @@ def _matches(expected, actual) -> bool:
     return expected == actual
 
 
-def score_case(case: dict, calls: list[dict], schemas: dict) -> dict:
-    """Grade one planner response. Every field is independently interesting."""
+def score_case(case: dict, calls: list[dict], schemas: dict, coerce=None) -> dict:
+    """Grade one planner response. Every field is independently interesting.
+
+    `argnames_ok` grades what the model LITERALLY said. `effective_ok` grades
+    what production actually executes, because registry.call() runs
+    _coerce_args() before dispatch and repairs a single misnamed argument
+    (`file` -> `path`, `text` -> `fact`). Without both numbers the bench
+    overstates the problem: three of gemma4's "failures" are repaired before
+    any tool sees them. The gap between the two columns IS the finding — and
+    coercion gives up entirely once TWO names are wrong, so raw accuracy still
+    buys the margin that keeps calls off that cliff.
+    """
     out = {
         "id": case["id"],
         "group": case.get("group", "?"),
         "tool_ok": False,
         "argnames_ok": False,
         "argvals_ok": False,
+        "effective_ok": False,
         "got": None,
         "why": "",
     }
@@ -66,7 +77,7 @@ def score_case(case: dict, calls: list[dict], schemas: dict) -> dict:
     if case["expect"] == "none":
         out["got"] = [c.get("name") for c in calls] or None
         ok = not calls
-        out["tool_ok"] = out["argnames_ok"] = out["argvals_ok"] = ok
+        out["tool_ok"] = out["argnames_ok"] = out["argvals_ok"] = out["effective_ok"] = ok
         if not ok:
             out["why"] = f"expected no tool, got {out['got']}"
         return out
@@ -77,6 +88,10 @@ def score_case(case: dict, calls: list[dict], schemas: dict) -> dict:
 
     names = [c.get("name") for c in calls]
     out["got"] = names
+    # The ARGS, not just the names. Without these a failed run can only be
+    # diagnosed by re-running it — which is how a fixture bug (demanding `path`
+    # from delete_file, whose parameter is `file`) survived a whole analysis.
+    out["args"] = [c.get("args") or {} for c in calls]
     first = calls[0]
     name = first.get("name")
 
@@ -107,7 +122,13 @@ def score_case(case: dict, calls: list[dict], schemas: dict) -> dict:
     if unknown:
         out["why"] = f"unknown arg names for {name}: {sorted(unknown)}"
 
-    required = case.get("args") or {}
+    # Sibling tools sometimes name the same concept differently (get_news takes
+    # `category`, get_news_data takes `topic`). A single `args` map then grades
+    # the model against the OTHER tool's vocabulary and marks a correct call
+    # wrong — which is exactly what happened on the first run.
+    required = (case.get("args_by_tool") or {}).get(name)
+    if required is None:
+        required = case.get("args") or {}
     missing = [k for k in required if k not in got_args]
     wrong = [k for k in required if k in got_args and not _matches(required[k], got_args[k])]
     out["argvals_ok"] = not missing and not wrong
@@ -118,6 +139,24 @@ def score_case(case: dict, calls: list[dict], schemas: dict) -> dict:
         if wrong:
             detail.append(f"wrong {{{', '.join(f'{k}={got_args[k]!r}' for k in wrong)}}}")
         out["why"] = (out["why"] + "; " if out["why"] else "") + " ".join(detail)
+
+    # What production would actually execute. registry.call() coerces before
+    # dispatch, so a single misnamed arg never reaches the tool. Two misnamed
+    # args do — coercion bails and the call TypeErrors.
+    if coerce is not None:
+        try:
+            fixed = coerce(name, dict(got_args))
+        except Exception:
+            fixed = got_args
+        still_unknown = set(fixed) - known
+        eff_missing = [k for k in required if k not in fixed]
+        eff_wrong = [k for k in required
+                     if k in fixed and not _matches(required[k], fixed[k])]
+        out["effective_ok"] = not still_unknown and not eff_missing and not eff_wrong
+        if out["effective_ok"] and not (out["argnames_ok"] and out["argvals_ok"]):
+            out["why"] = (out["why"] or "") + "  [repaired by _coerce_args]"
+    else:
+        out["effective_ok"] = out["argnames_ok"] and out["argvals_ok"]
 
     return out
 
@@ -229,7 +268,7 @@ async def check_access(model: str | None = None) -> None:
 
 async def main_async(args) -> int:
     import backend.core.tools  # noqa: F401  — populates REGISTRY
-    from backend.core.tools.registry import REGISTRY
+    from backend.core.tools.registry import REGISTRY, _coerce_args
 
     if args.check_access:
         await check_access(args.model)
@@ -257,11 +296,11 @@ async def main_async(args) -> int:
     for i, case in enumerate(cases, 1):
         try:
             calls, ttft, total = await run_case(planner, case, context)
-            r = score_case(case, calls, schemas)
+            r = score_case(case, calls, schemas, coerce=_coerce_args)
         except Exception as e:
             r = {"id": case["id"], "group": case.get("group", "?"), "tool_ok": False,
-                 "argnames_ok": False, "argvals_ok": False, "got": None,
-                 "why": f"{type(e).__name__}: {e}"}
+                 "argnames_ok": False, "argvals_ok": False, "effective_ok": False,
+                 "got": None, "why": f"{type(e).__name__}: {e}"}
             ttft = total = float("nan")
         else:
             ttfts.append(ttft)
@@ -271,12 +310,14 @@ async def main_async(args) -> int:
         r["ttft_ms"] = round(ttft) if ttft == ttft else None
         r["total_ms"] = round(total) if total == total else None
         results.append(r)
-        mark = "PASS" if (r["tool_ok"] and r["argnames_ok"] and r["argvals_ok"]) else "FAIL"
+        mark = ("PASS" if (r["tool_ok"] and r["argnames_ok"] and r["argvals_ok"])
+                else ("RPRD" if r.get("effective_ok") else "FAIL"))
         print(f"[{i:2}/{len(cases)}] {mark}  {r['id']:26} {total:7.0f}ms  {r['why']}")
 
     n = len(results)
     print(f"\n── {args.provider} ({model}) ──")
-    for label, key in (("tool choice", "tool_ok"), ("arg names", "argnames_ok"), ("arg values", "argvals_ok")):
+    for label, key in (("tool choice", "tool_ok"), ("arg names", "argnames_ok"),
+                       ("arg values", "argvals_ok"), ("EFFECTIVE", "effective_ok")):
         hits = sum(1 for r in results if r[key])
         print(f"{label:12} {hits}/{n}  {hits / n * 100:5.1f}%")
     full = sum(1 for r in results if r["tool_ok"] and r["argnames_ok"] and r["argvals_ok"])
@@ -290,8 +331,8 @@ async def main_async(args) -> int:
         by_group.setdefault(r["group"], []).append(r)
     print("\nby group:")
     for g, rs in by_group.items():
-        ok = sum(1 for r in rs if r["tool_ok"] and r["argnames_ok"] and r["argvals_ok"])
-        print(f"  {g:12} {ok}/{len(rs)}")
+        ok = sum(1 for r in rs if r.get("effective_ok"))
+        print(f"  {g:12} {ok}/{len(rs)}  (effective)")
 
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(
