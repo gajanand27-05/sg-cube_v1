@@ -28,9 +28,34 @@ log = logging.getLogger(__name__)
 
 def _warm() -> None:
     from backend.ai_modules.llm import ollama_client
+    from backend.core import local_llm_health
+
+    # Before warming anything: is the service even up? Every warm-up below
+    # talks to local Ollama, and with it down they all "skip" into the log and
+    # the first real symptom is the verifier rejecting commands — which sounds
+    # to the user exactly like being misheard. Start it if we can.
+    if not local_llm_health.ensure_running():
+        line = local_llm_health.take_announcement()
+        if line:
+            try:
+                # speak(), not speak_stream(): this thread has no running loop,
+                # so speak() takes its asyncio.run branch and actually blocks
+                # until the audio is out. Under a live loop it would be
+                # fire-and-forget and silent — the trap trigger.py documents.
+                from backend.ai_modules.speech import tts_piper
+
+                tts_piper.speak(line)
+            except Exception as e:
+                log.warning("could not speak the local-models notice: %s", e)
+        log.error("local models are offline; skipping the Ollama warm-ups")
+        ollama_up = False
+    else:
+        ollama_up = True
 
     t0 = time.perf_counter()
     try:
+        if not ollama_up:
+            raise RuntimeError("local Ollama is not running")
         # A one-token reply: the point is to make Ollama load the weights, not
         # to get an answer. keep_alive is applied by the client, so the model
         # stays resident afterwards.
@@ -44,6 +69,8 @@ def _warm() -> None:
 
     t0 = time.perf_counter()
     try:
+        if not ollama_up:
+            raise RuntimeError("local Ollama is not running")
         ollama_client.embed("ok", model=settings.embedding_model)
         log.info("preloaded %s in %.1fs", settings.embedding_model,
                  time.perf_counter() - t0)

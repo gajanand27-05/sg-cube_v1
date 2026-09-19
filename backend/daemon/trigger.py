@@ -466,6 +466,21 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
 
     reply = response.spoken_text
 
+    # A notice owed to the user about local models, spoken once per transition.
+    # Prefixed rather than spoken separately because the rejection it explains
+    # ("Action rejected by secondary verifier") is about to be said anyway, and
+    # hearing the cause first is the difference between "it misheard me again"
+    # and "Ollama is down". take_announcement() self-clears, so a long outage
+    # is announced once, not on every turn.
+    try:
+        from backend.core import local_llm_health
+
+        _notice = local_llm_health.take_announcement()
+        if _notice:
+            reply = f"{_notice} {reply}".strip()
+    except Exception:
+        pass
+
     # For remote device or non-streaming paths, still call _speak_selective.
     # For local streaming, run_brain_streaming already dispatched the reply
     # sentence-by-sentence — but if the response never yielded any tts_ready

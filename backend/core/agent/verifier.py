@@ -74,9 +74,33 @@ Reply with a single JSON object: {{"verified": true}} or {{"verified": false, "r
             json_mode=True,
             temperature=0.0,
         )
+        # A successful local call IS the recovery signal. Without marking it
+        # here the "back online" notice could never fire: the only other place
+        # that probes is the failure path, which by definition stops running
+        # once things work again. note_reachable() just flips a flag — no
+        # probe, no network — so this is free on the hot path.
+        try:
+            from backend.core import local_llm_health
+
+            local_llm_health.note_reachable()
+        except Exception:
+            pass
         res = json.loads(response)
         return bool(res.get("verified"))
     except Exception as e:
+        # Fail-closed is the right call, but silently rejecting because a
+        # service is down is how "Ollama is off" ends up sounding like "you
+        # were misheard". Probe, and if local models really are down, queue a
+        # notice the turn can speak. Never let the probe itself break the
+        # rejection path.
+        try:
+            from backend.core import local_llm_health
+
+            if local_llm_health.note_failure_if_local_is_down():
+                log.warning("Secondary check failed and local Ollama is "
+                            "unreachable — rejecting, and telling the user why")
+        except Exception:
+            pass
         log.warning(f"Secondary check failed: {e}")
         return False
 
