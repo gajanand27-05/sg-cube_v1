@@ -88,6 +88,29 @@ def record(duration: int, out: Path, device: int | None = None) -> Path:
     return out
 
 
+def record_batch(count: int, folder: Path, duration: int,
+                 device: int | None = None) -> None:
+    """Record `count` clips into folder/001.wav, 002.wav, ...
+
+    Resumes from the highest number already there, because nobody records
+    thirty takes in one sitting and losing the first twenty to a re-run would
+    be its own small tragedy.
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+    existing = [int(p.stem) for p in folder.glob("*.wav") if p.stem.isdigit()]
+    start = max(existing, default=0) + 1
+    if existing:
+        print(f"{len(existing)} clip(s) already in {folder}; resuming at {start:03d}")
+
+    for i in range(start, start + count):
+        out = folder / f"{i:03d}.wav"
+        print(f"\n═══ clip {i:03d}  ({i - start + 1} of {count}) ═══")
+        record(duration, out, device)
+        if i < start + count - 1:
+            input("  press ENTER for the next clip (Ctrl+C to stop) ... ")
+    print(f"\nDone. {count} clip(s) in {folder}")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--duration", type=int, default=DEFAULT_DURATION)
@@ -95,10 +118,20 @@ if __name__ == "__main__":
     ap.add_argument("--device", type=str, default=None,
                     help="Input device index (int) or substring match")
     ap.add_argument("--list", action="store_true", help="List input devices and exit")
+    ap.add_argument("--count", type=int, default=1,
+                    help="record N clips (requires --folder)")
+    ap.add_argument("--folder", type=Path,
+                    help="save numbered clips here: 001.wav, 002.wav, ...")
     args = ap.parse_args()
 
     if args.list:
         list_input_devices()
         sys.exit(0)
 
-    record(args.duration, args.out, resolve_device(args.device))
+    device = resolve_device(args.device)
+    if args.folder:
+        record_batch(args.count, args.folder, args.duration, device)
+    elif args.count > 1:
+        ap.error("--count needs --folder")
+    else:
+        record(args.duration, args.out, device)
