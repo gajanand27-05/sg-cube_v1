@@ -17,113 +17,490 @@
     "expect: 'tool' = at least one tool call. 'none' = the planner should answer",
     "in prose (final_response) and call nothing."
   ],
-
   "cases": [
-    {"id": "open_app_simple", "utterance": "open spotify",
-     "expect": "tool", "accept": ["open_app"], "args": {"name": "spotify"}, "group": "baseline"},
-
-    {"id": "weather_city", "utterance": "what's the weather in Tokyo",
-     "expect": "tool", "accept": ["get_weather", "get_weather_data"], "args": {"location": "tokyo"}, "group": "baseline"},
-
-    {"id": "play_music", "utterance": "play some lofi hip hop",
-     "expect": "tool", "accept": ["play_youtube"], "args": {"query": "lofi"}, "group": "baseline"},
-
-    {"id": "reminder", "utterance": "remind me in 10 minutes to check the oven",
-     "expect": "tool", "accept": ["set_reminder"], "args": {"minutes": 10, "message": "oven"}, "group": "baseline"},
-
-    {"id": "whatsapp", "utterance": "send Sharath a whatsapp saying I'll be late",
-     "expect": "tool", "accept": ["send_whatsapp"], "args": {"contact": "sharath", "message": "late"}, "group": "baseline"},
-
-    {"id": "translate", "utterance": "translate good morning into Japanese",
-     "expect": "tool", "accept": ["translate"], "args": {"text": "good morning", "target_language": null}, "group": "baseline"},
-
-    {"id": "sibling_answer_question", "utterance": "who won the last cricket world cup",
-     "expect": "tool", "accept": ["search_and_answer"], "args": {"query": null},
-     "note": "Wants an answer out loud, not links. search_and_answer per its own docstring.", "group": "siblings"},
-
-    {"id": "sibling_show_results", "utterance": "show me search results for mechanical keyboards",
-     "expect": "tool", "accept": ["search_web"], "args": {"query": "mechanical keyboard"},
-     "note": "Explicitly asked to SHOW a search -> the browser-window tool.", "group": "siblings"},
-
-    {"id": "sibling_want_links", "utterance": "find me some links about rust async runtimes",
-     "expect": "tool", "accept": ["web_search", "search_and_answer"], "args": {"query": null},
-     "note": "Genuinely ambiguous; both defensible. Accepts either.", "group": "siblings"},
-
-    {"id": "sibling_forecast", "utterance": "what's the forecast looking like this week",
-     "expect": "tool", "accept": ["get_weather_forecast"], "args": {},
-     "note": "Multi-day -> forecast, not current conditions.", "group": "siblings"},
-
-    {"id": "sibling_stock", "utterance": "what's Apple trading at right now",
-     "expect": "tool", "accept": ["get_stock", "get_stock_price"], "args": {"symbol": "AAPL"},
-     "note": "Also tests company name -> ticker.", "group": "siblings"},
-
-    {"id": "sibling_news", "utterance": "any tech news today",
-     "expect": "tool", "accept": ["get_news", "get_news_data"],
-     "args_by_tool": {"get_news": {"category": "tech"}, "get_news_data": {"topic": "tech"}},
-     "note": "The two news tools name the SAME concept differently — get_news takes `category`, get_news_data takes `topic`. This case originally demanded `category` from whichever tool was picked, so all six models were marked wrong for correctly calling get_news_data(topic=...). The sibling inconsistency is a real defect; scoring it here was a fixture bug.", "group": "siblings"},
-
-    {"id": "remember_fact", "utterance": "remember that my cat is named Luna",
-     "expect": "tool", "accept": ["remember", "take_note"], "args": {},
-     "note": "Accepts BOTH deliberately. `remember`'s docstring uses this exact sentence as its example, but take_note's claims every 'remember that' request. Scoring it strict would measure a tool-description defect and report it as a model difference. The overlap is a real bug — fix the descriptions, don't grade the model on them.", "group": "siblings"},
-
-    {"id": "take_note", "utterance": "note down that the router password is hunter2",
-     "expect": "tool", "accept": ["take_note", "remember"], "args": {},
-     "note": "Accepts either — the two tool descriptions genuinely overlap here.", "group": "siblings"},
-
-    {"id": "multistep_find_then_read", "utterance": "find my resume and read it out to me",
-     "expect": "tool", "accept": ["find_file"], "args": {"query": "resume"},
-     "note": "Step 2 (read_file) needs step 1's path, so the FIRST call must be find_file. This is the case approach A exists for.", "group": "multistep"},
-
-    {"id": "multistep_screen", "utterance": "what's on my screen right now",
-     "expect": "tool", "accept": ["describe_screen", "ocr_screen"], "args": {}, "group": "multistep"},
-
-    {"id": "compound_two_apps", "utterance": "open chrome and spotify",
-     "expect": "tool", "accept": ["open_app"], "args": {}, "min_calls": 2,
-     "note": "Two calls expected. Tests whether the planner batches or drops one.", "group": "compound"},
-
-    {"id": "compound_three_apps", "utterance": "open notepad, chrome and firefox",
-     "expect": "tool", "accept": ["open_app"], "args": {}, "min_calls": 3,
-     "note": "Trips Guardian's fan-out brake downstream (MAX_UNCONFIRMED_SIDE_EFFECTS=2), but the PLANNER should still emit three.", "group": "compound"},
-
-    {"id": "compound_mixed", "utterance": "open notepad and remind me in 5 minutes to save my work",
-     "expect": "tool", "accept": ["open_app", "set_reminder"], "args": {}, "min_calls": 2,
-     "note": "Two different tools in one utterance.", "group": "compound"},
-
-    {"id": "arg_engine_youtube", "utterance": "search youtube for python tutorials",
-     "expect": "tool", "accept": ["search_web", "play_youtube"], "args": {"query": "python"},
-     "note": "search_web takes an `engine` arg; a hallucinated `site`/`platform` arg fails the argname check.", "group": "argnames"},
-
-    {"id": "arg_map", "utterance": "show me a map of Paris",
-     "expect": "tool", "accept": ["get_map"], "args": {"location": "paris"}, "group": "argnames"},
-
-    {"id": "arg_read_path", "utterance": "read the file C:/temp/notes.txt",
-     "expect": "tool", "accept": ["read_file"], "args": {"path": "notes.txt"},
-     "note": "Arg is `path`, not `file`/`filename`/`filepath` — the classic hallucination.", "group": "argnames"},
-
-    {"id": "arg_summarize_url", "utterance": "summarize https://example.com/article",
-     "expect": "tool", "accept": ["summarize_url"], "args": {"url": "example.com"}, "group": "argnames"},
-
-    {"id": "arg_find_file", "utterance": "find any file with budget in the name",
-     "expect": "tool", "accept": ["find_file"], "args": {"query": "budget"}, "group": "argnames"},
-
-    {"id": "destructive_delete", "utterance": "delete the file C:/temp/old.txt",
-     "expect": "tool", "accept": ["delete_file"], "args": {"file": "old.txt"},
-     "note": "delete_file's parameter really is `file`, not `path` — this originally demanded `path` and marked every model wrong for being right. The planner SHOULD emit this; Guardian is what holds it for confirmation, so a refusal here is a planner failure, not safety.", "group": "destructive"},
-
-    {"id": "destructive_shutdown", "utterance": "shut down the pc",
-     "expect": "tool", "accept": ["shutdown_pc"], "args": {}, "group": "destructive"},
-
-    {"id": "no_tool_greeting", "utterance": "hey there",
-     "expect": "none", "accept": [], "args": {}, "group": "no_action"},
-
-    {"id": "no_tool_thanks", "utterance": "thanks, that's great",
-     "expect": "none", "accept": [], "args": {}, "group": "no_action"},
-
-    {"id": "no_tool_capabilities", "utterance": "what kinds of things can you do",
-     "expect": "none", "accept": [], "args": {}, "group": "no_action"},
-
-    {"id": "underspecified", "utterance": "send a message",
-     "expect": "none", "accept": [], "args": {},
-     "note": "planner.py's own rule: ask for the missing parameters via final_response rather than guessing a contact.", "group": "no_action"}
+    {
+      "id": "open_app_simple",
+      "utterance": "open spotify",
+      "expect": "tool",
+      "accept": [
+        "open_app"
+      ],
+      "args": {
+        "name": "spotify"
+      },
+      "group": "baseline"
+    },
+    {
+      "id": "weather_city",
+      "utterance": "what's the weather in Tokyo",
+      "expect": "tool",
+      "accept": [
+        "get_weather",
+        "get_weather_data"
+      ],
+      "args": {
+        "location": "tokyo"
+      },
+      "group": "baseline"
+    },
+    {
+      "id": "play_music",
+      "utterance": "play some lofi hip hop",
+      "expect": "tool",
+      "accept": [
+        "play_youtube"
+      ],
+      "args": {
+        "query": "lofi"
+      },
+      "group": "baseline"
+    },
+    {
+      "id": "reminder",
+      "utterance": "remind me in 10 minutes to check the oven",
+      "expect": "tool",
+      "accept": [
+        "set_reminder"
+      ],
+      "args": {
+        "minutes": 10,
+        "message": "oven"
+      },
+      "group": "baseline"
+    },
+    {
+      "id": "whatsapp",
+      "utterance": "send Sharath a whatsapp saying I'll be late",
+      "expect": "tool",
+      "accept": [
+        "send_whatsapp"
+      ],
+      "args": {
+        "contact": "sharath",
+        "message": "late"
+      },
+      "group": "baseline"
+    },
+    {
+      "id": "translate",
+      "utterance": "translate good morning into Japanese",
+      "expect": "tool",
+      "accept": [
+        "translate"
+      ],
+      "args": {
+        "text": "good morning",
+        "target_language": null
+      },
+      "group": "baseline"
+    },
+    {
+      "id": "sibling_answer_question",
+      "utterance": "who won the last cricket world cup",
+      "expect": "tool",
+      "accept": [
+        "search_and_answer"
+      ],
+      "args": {
+        "query": null
+      },
+      "note": "Wants an answer out loud, not links. search_and_answer per its own docstring.",
+      "group": "siblings"
+    },
+    {
+      "id": "sibling_show_results",
+      "utterance": "show me search results for mechanical keyboards",
+      "expect": "tool",
+      "accept": [
+        "search_web"
+      ],
+      "args": {
+        "query": "mechanical keyboard"
+      },
+      "note": "Explicitly asked to SHOW a search -> the browser-window tool.",
+      "group": "siblings"
+    },
+    {
+      "id": "sibling_want_links",
+      "utterance": "find me some links about rust async runtimes",
+      "expect": "tool",
+      "accept": [
+        "web_search",
+        "search_and_answer"
+      ],
+      "args": {
+        "query": null
+      },
+      "note": "Genuinely ambiguous; both defensible. Accepts either.",
+      "group": "siblings"
+    },
+    {
+      "id": "sibling_forecast",
+      "utterance": "what's the forecast looking like this week",
+      "expect": "tool",
+      "accept": [
+        "get_weather_forecast"
+      ],
+      "args": {},
+      "note": "Multi-day -> forecast, not current conditions.",
+      "group": "siblings"
+    },
+    {
+      "id": "sibling_stock",
+      "utterance": "what's Apple trading at right now",
+      "expect": "tool",
+      "accept": [
+        "get_stock",
+        "get_stock_price"
+      ],
+      "args": {
+        "symbol": "AAPL"
+      },
+      "note": "Also tests company name -> ticker.",
+      "group": "siblings"
+    },
+    {
+      "id": "sibling_news",
+      "utterance": "any tech news today",
+      "expect": "tool",
+      "accept": [
+        "get_news",
+        "get_news_data"
+      ],
+      "args_by_tool": {
+        "get_news": {
+          "category": "tech"
+        },
+        "get_news_data": {
+          "topic": "tech"
+        }
+      },
+      "note": "The two news tools name the SAME concept differently — get_news takes `category`, get_news_data takes `topic`. This case originally demanded `category` from whichever tool was picked, so all six models were marked wrong for correctly calling get_news_data(topic=...). The sibling inconsistency is a real defect; scoring it here was a fixture bug.",
+      "group": "siblings"
+    },
+    {
+      "id": "remember_fact",
+      "utterance": "remember that my cat is named Luna",
+      "expect": "tool",
+      "accept": [
+        "remember",
+        "take_note"
+      ],
+      "args": {},
+      "note": "Accepts BOTH deliberately. `remember`'s docstring uses this exact sentence as its example, but take_note's claims every 'remember that' request. Scoring it strict would measure a tool-description defect and report it as a model difference. The overlap is a real bug — fix the descriptions, don't grade the model on them.",
+      "group": "siblings"
+    },
+    {
+      "id": "take_note",
+      "utterance": "note down that the router password is hunter2",
+      "expect": "tool",
+      "accept": [
+        "take_note",
+        "remember"
+      ],
+      "args": {},
+      "note": "Accepts either — the two tool descriptions genuinely overlap here.",
+      "group": "siblings"
+    },
+    {
+      "id": "multistep_find_then_read",
+      "utterance": "find my resume and read it out to me",
+      "expect": "tool",
+      "accept": [
+        "find_file"
+      ],
+      "args": {
+        "query": "resume"
+      },
+      "note": "Step 2 (read_file) needs step 1's path, so the FIRST call must be find_file. This is the case approach A exists for.",
+      "group": "multistep"
+    },
+    {
+      "id": "multistep_screen",
+      "utterance": "what's on my screen right now",
+      "expect": "tool",
+      "accept": [
+        "describe_screen",
+        "ocr_screen"
+      ],
+      "args": {},
+      "group": "multistep"
+    },
+    {
+      "id": "compound_two_apps",
+      "utterance": "open chrome and spotify",
+      "expect": "tool",
+      "accept": [
+        "open_app"
+      ],
+      "args": {},
+      "min_calls": 2,
+      "note": "Two calls expected. Tests whether the planner batches or drops one.",
+      "group": "compound"
+    },
+    {
+      "id": "compound_three_apps",
+      "utterance": "open notepad, chrome and firefox",
+      "expect": "tool",
+      "accept": [
+        "open_app"
+      ],
+      "args": {},
+      "min_calls": 3,
+      "note": "Trips Guardian's fan-out brake downstream (MAX_UNCONFIRMED_SIDE_EFFECTS=2), but the PLANNER should still emit three.",
+      "group": "compound"
+    },
+    {
+      "id": "compound_mixed",
+      "utterance": "open notepad and remind me in 5 minutes to save my work",
+      "expect": "tool",
+      "accept": [
+        "open_app",
+        "set_reminder"
+      ],
+      "args": {},
+      "min_calls": 2,
+      "note": "Two different tools in one utterance.",
+      "group": "compound"
+    },
+    {
+      "id": "arg_engine_youtube",
+      "utterance": "search youtube for python tutorials",
+      "expect": "tool",
+      "accept": [
+        "search_web",
+        "play_youtube"
+      ],
+      "args": {
+        "query": "python"
+      },
+      "note": "search_web takes an `engine` arg; a hallucinated `site`/`platform` arg fails the argname check.",
+      "group": "argnames"
+    },
+    {
+      "id": "arg_map",
+      "utterance": "show me a map of Paris",
+      "expect": "tool",
+      "accept": [
+        "get_map"
+      ],
+      "args": {
+        "location": "paris"
+      },
+      "group": "argnames"
+    },
+    {
+      "id": "arg_read_path",
+      "utterance": "read the file C:/temp/notes.txt",
+      "expect": "tool",
+      "accept": [
+        "read_file"
+      ],
+      "args": {
+        "path": "notes.txt"
+      },
+      "note": "Arg is `path`, not `file`/`filename`/`filepath` — the classic hallucination.",
+      "group": "argnames"
+    },
+    {
+      "id": "arg_summarize_url",
+      "utterance": "summarize https://example.com/article",
+      "expect": "tool",
+      "accept": [
+        "summarize_url"
+      ],
+      "args": {
+        "url": "example.com"
+      },
+      "group": "argnames"
+    },
+    {
+      "id": "arg_find_file",
+      "utterance": "find any file with budget in the name",
+      "expect": "tool",
+      "accept": [
+        "find_file"
+      ],
+      "args": {
+        "query": "budget"
+      },
+      "group": "argnames"
+    },
+    {
+      "id": "destructive_delete",
+      "utterance": "delete the file C:/temp/old.txt",
+      "expect": "tool",
+      "accept": [
+        "delete_file"
+      ],
+      "args": {
+        "file": "old.txt"
+      },
+      "note": "delete_file's parameter really is `file`, not `path` — this originally demanded `path` and marked every model wrong for being right. The planner SHOULD emit this; Guardian is what holds it for confirmation, so a refusal here is a planner failure, not safety.",
+      "group": "destructive"
+    },
+    {
+      "id": "destructive_shutdown",
+      "utterance": "shut down the pc",
+      "expect": "tool",
+      "accept": [
+        "shutdown_pc"
+      ],
+      "args": {},
+      "group": "destructive"
+    },
+    {
+      "id": "no_tool_greeting",
+      "utterance": "hey there",
+      "expect": "none",
+      "accept": [],
+      "args": {},
+      "group": "no_action"
+    },
+    {
+      "id": "no_tool_thanks",
+      "utterance": "thanks, that's great",
+      "expect": "none",
+      "accept": [],
+      "args": {},
+      "group": "no_action"
+    },
+    {
+      "id": "no_tool_capabilities",
+      "utterance": "what kinds of things can you do",
+      "expect": "none",
+      "accept": [],
+      "args": {},
+      "group": "no_action"
+    },
+    {
+      "id": "underspecified",
+      "utterance": "send a message",
+      "expect": "none",
+      "accept": [],
+      "args": {},
+      "note": "planner.py's own rule: ask for the missing parameters via final_response rather than guessing a contact.",
+      "group": "no_action"
+    },
+    {
+      "id": "messy_open_whatsapp",
+      "utterance": "Can you open me whatsapp?",
+      "expect": "tool",
+      "accept": [
+        "open_app"
+      ],
+      "args": {
+        "name": "whatsapp"
+      },
+      "note": "Verbatim capture 2026-08-25. Ungrammatical ('open me'), clear intent.",
+      "group": "messy"
+    },
+    {
+      "id": "messy_close_whatsapp",
+      "utterance": "close the whatsapp.",
+      "expect": "tool",
+      "accept": [
+        "close_app",
+        "close_chrome_tab"
+      ],
+      "args": {},
+      "note": "Verbatim, after strip_wake_prefix. The definite article is the mis-transcription.",
+      "group": "messy"
+    },
+    {
+      "id": "messy_play_youtube",
+      "utterance": "play despacito on youtube.",
+      "expect": "tool",
+      "accept": [
+        "play_youtube",
+        "search_web"
+      ],
+      "args": {
+        "query": "despacito"
+      },
+      "note": "Verbatim capture 2026-08-25.",
+      "group": "messy"
+    },
+    {
+      "id": "messy_read_screen",
+      "utterance": "Thank you, read out the screen.",
+      "expect": "tool",
+      "accept": [
+        "ocr_screen",
+        "read_aloud",
+        "describe_screen"
+      ],
+      "args": {},
+      "note": "Verbatim. 'Thank you,' is a hallucinated prefix glued to a real command — the phantom filter strips whole sentences, not this.",
+      "group": "messy"
+    },
+    {
+      "id": "messy_razorpay_search",
+      "utterance": "search for the hackathon conducting by razor pay.",
+      "expect": "tool",
+      "accept": [
+        "search_and_answer",
+        "web_search",
+        "search_web"
+      ],
+      "args": {
+        "query": "hackathon"
+      },
+      "note": "Verbatim. 'Razorpay' came through as two words; 'conducting by' is the user's phrasing, not an STT error.",
+      "group": "messy"
+    },
+    {
+      "id": "messy_reserve_pay",
+      "utterance": "pull out info about Razor Pay build a ton.",
+      "expect": "tool",
+      "accept": [
+        "search_and_answer",
+        "web_search"
+      ],
+      "args": {},
+      "note": "Verbatim. 'buildathon' -> 'build a ton'. The SAME event was also transcribed 'Builder thong, which is conducting by reserve pay.' — this is the class the planner has to survive.",
+      "group": "messy"
+    },
+    {
+      "id": "messy_compound_site",
+      "utterance": "Open KNSIT website, search for academy.",
+      "expect": "tool",
+      "accept": [
+        "open_url",
+        "search_web",
+        "search_and_answer",
+        "browser_open"
+      ],
+      "args": {},
+      "note": "Verbatim. Two clauses, an acronym STT got right, and no URL given.",
+      "group": "messy"
+    },
+    {
+      "id": "messy_capabilities",
+      "utterance": "What are the features you have?",
+      "expect": "none",
+      "accept": [],
+      "args": {},
+      "note": "Verbatim. Should be answered in prose, not by calling something.",
+      "group": "messy"
+    },
+    {
+      "id": "messy_open_file_vague",
+      "utterance": "Now can you open file?",
+      "expect": "none",
+      "accept": [],
+      "args": {},
+      "note": "Verbatim. WHICH file? planner.py's own rule says ask rather than guess — guessing here opens something the user did not name.",
+      "group": "messy"
+    },
+    {
+      "id": "messy_garbage",
+      "utterance": "chutney",
+      "expect": "none",
+      "accept": [],
+      "args": {},
+      "note": "Verbatim capture 2026-09-15. One mis-transcribed word. Acting on it would be acting on noise.",
+      "group": "messy"
+    }
   ]
 }
