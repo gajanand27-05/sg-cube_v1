@@ -15,29 +15,37 @@ from pathlib import Path
 
 import numpy as np
 
-from backend.ai_modules.speech import stt_gemini, stt_whisper
+from backend.ai_modules.speech import stt_gemini, stt_groq, stt_whisper
 from backend.server.config import settings
 
 log = logging.getLogger(__name__)
 
-_VALID = ("gemini", "whisper")
+_VALID = ("groq", "gemini", "whisper")
 
 
 def active_backend() -> str:
-    choice = (settings.stt_backend or "gemini").strip().lower()
+    choice = (settings.stt_backend or "groq").strip().lower()
     if choice not in _VALID:
-        log.warning("unknown STT_BACKEND %r; using gemini", settings.stt_backend)
-        return "gemini"
+        log.warning("unknown STT_BACKEND %r; using groq", settings.stt_backend)
+        return "groq"
     return choice
 
 
 def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:
-    if active_backend() == "whisper":
+    backend = active_backend()
+    if backend == "whisper":
         return stt_whisper.transcribe_array(audio, sample_rate)
+    if backend == "groq":
+        # stt_groq falls back to Gemini internally on any failure, so this is
+        # the only place the choice is made.
+        return stt_groq.transcribe_array(audio, sample_rate)
     return stt_gemini.transcribe_array(audio, sample_rate)
 
 
 def transcribe(audio_path: str | Path) -> dict:
-    if active_backend() == "whisper":
+    backend = active_backend()
+    if backend == "whisper":
         return stt_whisper.transcribe(audio_path)
+    if backend == "groq":
+        return stt_groq.transcribe(audio_path)
     return stt_gemini.transcribe(audio_path)

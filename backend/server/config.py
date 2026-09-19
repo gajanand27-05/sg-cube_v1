@@ -117,7 +117,24 @@ class Settings(BaseSettings):
     # docs/superpowers/specs/2026-08-25-gemini-stt-consolidation-design.md
     # section 7.1 passes, so a bad result is one config flip to revert
     # rather than a revert commit mid-session.
-    stt_backend: str = "gemini"  # "gemini" | "whisper"
+    stt_backend: str = "groq"  # "groq" | "gemini" | "whisper"
+
+    # ── Groq STT (primary) ──
+    # Free tier is 2,000 requests/day against Gemini's 60 — and Gemini STT
+    # spends the PLANNER's budget, because stt_gemini calls generate_content on
+    # gemini_model. Measured here: mean 49 captures/day, worst day 123 = 205%
+    # of the whole Gemini budget spent on hearing alone.
+    #
+    # turbo over whisper-large-v3 on measurement: better WER and EXACT at the
+    # same CMD, marginally faster, and v3 answered a real 'open whatsapp' with
+    # 'Thank you for watching.' where turbo got 'Can you open WhatsApp?'.
+    groq_api_key: str = ""
+    groq_stt_model: str = "whisper-large-v3-turbo"
+    groq_timeout_s: float = 30.0
+    # EMPTY on measurement — see stt_groq._DEFAULT_PROMPT. The proper nouns it
+    # was meant to fix are already correct without it, and on quiet clips it
+    # derailed the decoder out of English entirely.
+    groq_stt_prompt: str = ""
 
     # ── Post-wake speech gate (backend/ai_modules/speech/speech_gate.py) ──
     # Drops a capture before STT when silero finds NO speech in it. Deliberately
