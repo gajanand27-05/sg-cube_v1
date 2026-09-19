@@ -43,17 +43,49 @@ SAMPLE_RATE = 16000
 # ~64KB, so 500 captures is well under 100MB.
 _MAX_CAPTURES = 500
 
+# Captures the speech gate threw away get their OWN budget, and a `drop-`
+# filename prefix so selecting them is a glob rather than 500 JSON reads.
+#
+# Separate budgets because they are not interchangeable. Roughly a fifth of
+# wakes are gated, and false wakes cluster — one noisy afternoon produced ~30.
+# On a single shared 500-file FIFO that noise evicts the real commands, which
+# are the whole reason the archive exists. Capped by BOTH age and count, the
+# tighter of the two winning, because an audio log of someone's living room
+# should expire on its own even if the count never fills up.
+_MAX_DROPPED = 500
+_DROPPED_MAX_AGE_S = 7 * 24 * 3600
+_DROPPED_PREFIX = "drop-"
+
 
 def enabled() -> bool:
     from backend.server.config import settings
     return bool(getattr(settings, "stt_archive_captures", False))
 
 
+def _delete(wav: Path) -> None:
+    wav.unlink(missing_ok=True)
+    wav.with_suffix(".json").unlink(missing_ok=True)
+
+
 def _prune(directory: Path) -> None:
-    wavs = sorted(directory.glob("*.wav"), key=lambda p: p.stat().st_mtime)
-    for stale in wavs[:-_MAX_CAPTURES]:
-        stale.unlink(missing_ok=True)
-        stale.with_suffix(".json").unlink(missing_ok=True)
+    """Two independent budgets: gate-dropped captures, and everything else."""
+    everything = sorted(directory.glob("*.wav"), key=lambda p: p.stat().st_mtime)
+    dropped = [p for p in everything if p.name.startswith(_DROPPED_PREFIX)]
+    kept = [p for p in everything if not p.name.startswith(_DROPPED_PREFIX)]
+
+    for stale in kept[:-_MAX_CAPTURES]:
+        _delete(stale)
+
+    # Count first, then age. Both apply, so the stricter one decides.
+    for stale in dropped[:-_MAX_DROPPED]:
+        _delete(stale)
+    cutoff = time.time() - _DROPPED_MAX_AGE_S
+    for p in dropped[-_MAX_DROPPED:]:
+        try:
+            if p.stat().st_mtime < cutoff:
+                _delete(p)
+        except OSError:
+            continue
 
 
 def archive(audio: np.ndarray | bytes, transcript: str, *,
@@ -80,7 +112,11 @@ def archive(audio: np.ndarray | bytes, transcript: str, *,
 
         _ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}"
-        wav_path = _ARCHIVE_DIR / f"{stamp}.wav"
+        # The prefix is what lets _prune give these their own budget without
+        # opening every sidecar. `drop-*.wav` still matches `*.wav`, so every
+        # existing replay tool picks them up unchanged.
+        prefix = _DROPPED_PREFIX if (extra or {}).get("dropped_by") else ""
+        wav_path = _ARCHIVE_DIR / f"{prefix}{stamp}.wav"
 
         with wave.open(str(wav_path), "wb") as w:
             w.setnchannels(1)
