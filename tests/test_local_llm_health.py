@@ -111,3 +111,46 @@ def test_start_is_detached(monkeypatch):
 def test_missing_binary_does_not_raise(monkeypatch):
     monkeypatch.setattr(h, "_binary", lambda: None)
     assert h.try_start() is False
+
+
+def test_restart_is_recorded_with_a_timestamp(tmp_path, monkeypatch):
+    """A console log dies with the process. The question is not 'did it
+    restart' but 'does something keep killing it', which needs a ledger."""
+    monkeypatch.setattr(h, "_RESTART_LOG", tmp_path / "restarts.jsonl")
+    calls = {"n": 0}
+
+    def _probe(timeout=2.0):
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    monkeypatch.setattr(h, "is_reachable", _probe)
+    monkeypatch.setattr(h, "try_start", lambda: True)
+
+    assert h.ensure_running(wait_s=5) is True
+    rows = h.restart_history()
+    assert len(rows) == 1
+    assert rows[0]["outcome"] == "restarted"
+    assert rows[0]["came_up_after_s"] is not None
+    # Must be a real, parseable, timezone-aware stamp — "recently" is useless
+    # for spotting a pattern across days.
+    from datetime import datetime
+    assert datetime.fromisoformat(rows[0]["at"]).tzinfo is not None
+
+
+def test_repeated_restarts_accumulate(tmp_path, monkeypatch):
+    monkeypatch.setattr(h, "_RESTART_LOG", tmp_path / "restarts.jsonl")
+    monkeypatch.setattr(h, "is_reachable", lambda timeout=2.0: False)
+    monkeypatch.setattr(h, "try_start", lambda: False)
+
+    for _ in range(3):
+        h._reset_for_tests()
+        h.ensure_running(wait_s=0.1)
+
+    rows = h.restart_history()
+    assert len(rows) == 3, "each attempt must leave its own line"
+    assert all(r["outcome"] == "spawn_failed" for r in rows)
+
+
+def test_history_is_empty_not_an_error_when_never_restarted(tmp_path, monkeypatch):
+    monkeypatch.setattr(h, "_RESTART_LOG", tmp_path / "nope.jsonl")
+    assert h.restart_history() == []

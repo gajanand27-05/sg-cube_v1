@@ -19,12 +19,15 @@ production for exactly that reason. The turn already knows how to speak.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
 import subprocess
 import threading
 import time
+from datetime import datetime
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +40,9 @@ OFFLINE_LINE = (
     "Start Ollama and I'll pick it up."
 )
 RECOVERED_LINE = "Local models are back online."
+
+# Survives the daemon. See _record_restart for why a log line is not enough.
+_RESTART_LOG = Path(__file__).resolve().parents[1] / "logs" / "ollama_restarts.jsonl"
 
 # Where Ollama installs on Windows when it is not on PATH. `where ollama`
 # found it here while the service itself was not running, so PATH absence is
@@ -102,23 +108,74 @@ def try_start() -> bool:
         return False
 
 
-def ensure_running(wait_s: float = 12.0) -> bool:
-    """Probe; start it if down; poll until it answers or `wait_s` elapses."""
+def _record_restart(outcome: str, seconds: float | None = None) -> None:
+    """Append one line to a restart ledger that OUTLIVES the daemon.
+
+    A log.warning would answer "did it restart" but not "does something keep
+    killing it" — nothing configures file logging in this project, so console
+    output dies with the process that wrote it. The pattern is the whole
+    question: one restart after a reboot is normal, six in an afternoon means
+    something is killing Ollama and that is a different bug entirely.
+    """
+    try:
+        _RESTART_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with _RESTART_LOG.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "outcome": outcome,
+                "came_up_after_s": round(seconds, 1) if seconds is not None else None,
+            }) + "\n")
+    except Exception as e:
+        log.debug("could not record ollama restart: %s", e)
+
+
+def restart_history(limit: int = 20) -> list[dict]:
+    """Most recent auto-restarts, newest last. Empty when there were none."""
+    try:
+        lines = _RESTART_LOG.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return []
+    out = []
+    for line in lines[-limit:]:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
+def ensure_running(wait_s: float = 30.0) -> bool:
+    """Probe; start it if down; poll until it answers or `wait_s` elapses.
+
+    30s, not the 12s this shipped with for an hour: a measured cold start on
+    this machine took 18.1s. At 12s the wait expired while Ollama was still
+    coming up, so it announced "local models are offline" about a service that
+    was seconds from answering — a false alarm is worse than no alarm, because
+    it teaches the user to ignore the real one. This runs on a background
+    preload thread, so waiting longer costs nothing.
+    """
     if is_reachable():
         note_reachable()
         return True
-    log.warning("local Ollama unreachable — attempting to start it")
+    log.warning("local Ollama unreachable at %s — attempting to start it",
+                datetime.now().astimezone().isoformat(timespec="seconds"))
     if not try_start():
+        _record_restart("spawn_failed")
         note_unreachable()
         return False
-    deadline = time.monotonic() + wait_s
+    t0 = time.monotonic()
+    deadline = t0 + wait_s
     while time.monotonic() < deadline:
         if is_reachable(timeout=1.5):
-            log.info("local Ollama is up")
+            took = time.monotonic() - t0
+            log.warning("local Ollama AUTO-RESTARTED at %s (up after %.1fs)",
+                        datetime.now().astimezone().isoformat(timespec="seconds"), took)
+            _record_restart("restarted", took)
             note_reachable()
             return True
         time.sleep(0.75)
     log.error("local Ollama did not come up within %.0fs", wait_s)
+    _record_restart("timeout")
     note_unreachable()
     return False
 
