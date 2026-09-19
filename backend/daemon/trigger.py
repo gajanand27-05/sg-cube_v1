@@ -715,7 +715,7 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
                     audio_float, "",
                     trigger=getattr(state_manager, "_voice_trigger_source", ""),
                     dispatched=False,
-                    extra={"dropped_by": "speech_gate",
+                    extra={"bucket": "speech_gate",
                            "speech_seconds": round(speech_s, 3)},
                 )
             except Exception:

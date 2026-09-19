@@ -5,6 +5,7 @@ deep-checked tool. From the outside that is indistinguishable from a bad
 transcription, which is how one dead service turns into an afternoon of
 debugging the microphone.
 """
+import json
 import sys
 from pathlib import Path
 
@@ -17,11 +18,16 @@ if str(_root) not in sys.path:
 from backend.core import local_llm_health as h
 
 
+def _ledger(path) -> list[dict]:
+    """The ledger is a plain JSONL file — reading it needs no API."""
+    return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x]
+
+
 @pytest.fixture(autouse=True)
 def _clean():
-    h._reset_for_tests()
+    h._offline, h._pending = False, None
     yield
-    h._reset_for_tests()
+    h._offline, h._pending = False, None
 
 
 def test_offline_is_announced_exactly_once(monkeypatch):
@@ -127,7 +133,7 @@ def test_restart_is_recorded_with_a_timestamp(tmp_path, monkeypatch):
     monkeypatch.setattr(h, "try_start", lambda: True)
 
     assert h.ensure_running(wait_s=5) is True
-    rows = h.restart_history()
+    rows = _ledger(h._RESTART_LOG)
     assert len(rows) == 1
     assert rows[0]["outcome"] == "restarted"
     assert rows[0]["came_up_after_s"] is not None
@@ -143,14 +149,14 @@ def test_repeated_restarts_accumulate(tmp_path, monkeypatch):
     monkeypatch.setattr(h, "try_start", lambda: False)
 
     for _ in range(3):
-        h._reset_for_tests()
+        h._offline, h._pending = False, None
         h.ensure_running(wait_s=0.1)
 
-    rows = h.restart_history()
+    rows = _ledger(h._RESTART_LOG)
     assert len(rows) == 3, "each attempt must leave its own line"
     assert all(r["outcome"] == "spawn_failed" for r in rows)
 
 
-def test_history_is_empty_not_an_error_when_never_restarted(tmp_path, monkeypatch):
+def test_no_ledger_file_until_something_restarts(tmp_path, monkeypatch):
     monkeypatch.setattr(h, "_RESTART_LOG", tmp_path / "nope.jsonl")
-    assert h.restart_history() == []
+    assert not (tmp_path / "nope.jsonl").exists()

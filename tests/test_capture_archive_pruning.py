@@ -78,13 +78,13 @@ def test_archive_prefixes_only_dropped_captures(tmp_path, monkeypatch):
 
     kept = ca.archive(audio, "open notepad", trigger="wake")
     gated = ca.archive(audio, "", trigger="wake", dispatched=False,
-                       extra={"dropped_by": "speech_gate", "speech_seconds": 0.0})
+                       extra={"bucket": "speech_gate", "speech_seconds": 0.0})
 
     assert kept is not None and not kept.name.startswith(ca._DROPPED_PREFIX)
     assert gated is not None and gated.name.startswith(ca._DROPPED_PREFIX)
 
     import json
     sidecar = json.loads(gated.with_suffix(".json").read_text(encoding="utf-8"))
-    assert sidecar["dropped_by"] == "speech_gate"
+    assert sidecar["bucket"] == "speech_gate"
     assert sidecar["speech_seconds"] == 0.0
     assert sidecar["dispatched"] is False

@@ -129,21 +129,6 @@ def _record_restart(outcome: str, seconds: float | None = None) -> None:
         log.debug("could not record ollama restart: %s", e)
 
 
-def restart_history(limit: int = 20) -> list[dict]:
-    """Most recent auto-restarts, newest last. Empty when there were none."""
-    try:
-        lines = _RESTART_LOG.read_text(encoding="utf-8").splitlines()
-    except Exception:
-        return []
-    out = []
-    for line in lines[-limit:]:
-        try:
-            out.append(json.loads(line))
-        except ValueError:
-            continue
-    return out
-
-
 def ensure_running(wait_s: float = 30.0) -> bool:
     """Probe; start it if down; poll until it answers or `wait_s` elapses.
 
@@ -223,14 +208,3 @@ def take_announcement() -> str | None:
     with _lock:
         line, _pending = _pending, None
         return line
-
-
-def status() -> dict:
-    return {"offline": _offline, "pending_announcement": _pending,
-            "url": _base_url()}
-
-
-def _reset_for_tests() -> None:
-    global _offline, _pending
-    with _lock:
-        _offline, _pending = False, None

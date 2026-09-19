@@ -135,9 +135,7 @@ def archive(audio: np.ndarray | bytes, transcript: str, *,
         # The prefix is what lets _prune give these their own budget without
         # opening every sidecar. `drop-*.wav` still matches `*.wav`, so every
         # existing replay tool picks them up unchanged.
-        bucket = (extra or {}).get("bucket") or (
-            "speech_gate" if (extra or {}).get("dropped_by") else "")
-        prefix = _BUCKET_PREFIX.get(bucket, "")
+        prefix = _BUCKET_PREFIX.get((extra or {}).get("bucket", ""), "")
         wav_path = _ARCHIVE_DIR / f"{prefix}{stamp}.wav"
 
         with wave.open(str(wav_path), "wb") as w:
