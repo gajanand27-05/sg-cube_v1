@@ -105,12 +105,19 @@ class OpenWakeWordEngine:
                 "and supply --oww-model with a trained 'onyx' model — the "
                 "shipped pretrained set does not include it."
             ) from e
+        # Accepts a PRETRAINED NAME ("hey_jarvis") or a path to a trained
+        # model. There is no pretrained "onyx", so a like-for-like comparison
+        # needs training; a pretrained name still measures the ENGINE's
+        # false-accept behaviour on the same audio, which is the half that
+        # does not need recorded positives.
         if not model_path:
-            raise SystemExit("--oww-model is required for the openwakeword engine")
-        self._m = Model(wakeword_models=[model_path])
+            raise SystemExit(
+                "--oww-model is required: a pretrained name (hey_jarvis, "
+                "alexa, hey_mycroft, hey_rhasspy) or a path to a trained model.")
+        self._m = Model(wakeword_models=[model_path], inference_framework="onnx")
         self.wake_phrase = wake_phrase
         self.detail = os.path.basename(model_path)
-        self._threshold = 0.5
+        self._threshold = float(os.environ.get("OWW_THRESHOLD", "0.5"))
 
     def reset(self) -> None:
         try:
