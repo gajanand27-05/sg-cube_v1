@@ -147,6 +147,62 @@ def _offline() -> bool:
     return time.monotonic() < _network_down_until
 
 
+def _reachable(host: str = "api.groq.com", port: int = 443,
+               timeout: float = 1.5) -> bool:
+    """Can we open a socket to the STT host?
+
+    A bare TCP connect — no TLS handshake, no HTTP request, no key, so it
+    costs no quota on either provider. That is the point: a probe that spent
+    requests to find out whether we can spend requests would be self-defeating
+    at 2,880 checks a day.
+    """
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def connectivity_loop(interval_s: float = 30.0) -> None:
+    """Set the offline memo BEFORE a command needs it.
+
+    Without this the first utterance of an outage discovers the problem the
+    expensive way, by waiting out a connect timeout. The probe is cheap and
+    runs on its own thread, so by the time someone says "volume up" the route
+    to local is already chosen.
+    """
+    global _network_down_until
+    while True:
+        try:
+            if _reachable():
+                if _offline():
+                    log.warning("STT: network is back")
+                    _network_down_until = 0.0
+            else:
+                # REFRESH every probe, not only on the transition. The memo
+                # and the probe interval are both 30s, so a memo set once
+                # would lapse just before the next probe and hand the timeout
+                # back to whoever spoke in that gap. Held to twice the
+                # interval so a late probe cannot open a hole either.
+                was_offline = _offline()
+                _network_down_until = time.monotonic() + max(
+                    settings.stt_network_down_memo_s, interval_s * 2)
+                if not was_offline:
+                    log.warning("STT: connectivity probe failed; routing to local")
+        except Exception as e:          # a monitor must never kill the daemon
+            log.debug("connectivity probe error: %s", e)
+        time.sleep(interval_s)
+
+
+def start_connectivity_monitor() -> None:
+    import threading
+
+    threading.Thread(target=connectivity_loop, name="stt-connectivity",
+                     daemon=True).start()
+
+
 def _local(arr: np.ndarray, sample_rate: int) -> dict:
     """Last resort: CPU Whisper. Raises SttUnavailable only if it also fails,
     so "I can't reach the network" is never said over a working transcript."""
@@ -180,7 +236,17 @@ def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:
     import httpx
 
     try:
-        with httpx.Client(timeout=settings.groq_timeout_s) as client:
+        # Split, not one number. CONNECT is the offline case and should give
+        # up almost immediately — a dead link cannot be rescued by waiting.
+        # READ is the slow-upload / busy-server case, where the request is
+        # actually in flight and worth waiting on.
+        timeout = httpx.Timeout(
+            connect=settings.groq_connect_timeout_s,
+            read=settings.groq_timeout_s,
+            write=settings.groq_timeout_s,
+            pool=settings.groq_timeout_s,
+        )
+        with httpx.Client(timeout=timeout) as client:
             r = client.post(
                 _URL,
                 headers={"Authorization": f"Bearer {settings.groq_api_key}"},
@@ -212,14 +278,11 @@ def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:
             return _local(arr, sample_rate)
 
     # A cloud answer means the link is back; stop short-circuiting to local.
+    # The model is NOT released here. It is preloaded at daemon start and kept
+    # resident on purpose: dropping it would make the next outage pay the cold
+    # load again, which is the whole cost this preload exists to remove.
     if _network_down_until:
         _network_down_until = 0.0
-        try:
-            from backend.ai_modules.speech import stt_whisper
-
-            stt_whisper.release_cpu_model()
-        except Exception:
-            pass
 
     if not text:
         log.info("stt_groq: empty transcript")

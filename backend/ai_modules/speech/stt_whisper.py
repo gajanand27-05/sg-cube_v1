@@ -228,12 +228,6 @@ def transcribe_array_cpu(audio: np.ndarray, sample_rate: int = 16000) -> dict:
     return _collect_segments(segments, info)
 
 
-def release_cpu_model() -> None:
-    """Drop the offline model. The network coming back is the usual reason."""
-    global _cpu_model
-    with _cpu_lock:
-        _cpu_model = None
-
 
 def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:
     """Transcribe a numpy audio array directly — no temp file needed."""

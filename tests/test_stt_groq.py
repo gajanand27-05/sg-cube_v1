@@ -214,10 +214,7 @@ def test_a_cloud_success_clears_the_memo(monkeypatch, audio):
     import time as _t
     stt_groq._network_down_until = _t.monotonic() + 999
     monkeypatch.setattr(httpx, "Client", _client(_Resp()))
-    released = []
     from backend.ai_modules.speech import stt_whisper
-    monkeypatch.setattr(stt_whisper, "release_cpu_model",
-                        lambda: released.append("released"))
     monkeypatch.setattr(stt_whisper, "transcribe_array_cpu",
                         lambda a, sr=16000: {"text": "local", "language": "en",
                                              "language_probability": 1.0,
@@ -228,7 +225,6 @@ def test_a_cloud_success_clears_the_memo(monkeypatch, audio):
     stt_groq._network_down_until = 1.0
     assert stt_groq.transcribe_array(audio)["text"] == "open notepad"
     assert stt_groq._network_down_until == 0.0
-    assert released == ["released"]
 
 
 def test_timeout_is_short_enough_for_a_voice_turn():
@@ -247,3 +243,42 @@ def test_stt_facade_does_not_import_whisper_eagerly():
             assert "stt_whisper" not in [a.name for a in node.names], (
                 "stt_whisper must be imported lazily, inside the functions "
                 "that actually use it")
+
+
+def test_connectivity_probe_makes_no_api_call(monkeypatch):
+    """A probe that spent requests to learn whether we can spend requests
+    would be self-defeating at 2,880 checks a day. TCP connect only."""
+    import httpx
+    monkeypatch.setattr(httpx, "Client",
+                        _client(RuntimeError("no HTTP from the probe")))
+    seen = {}
+
+    import socket
+    real = socket.create_connection
+
+    def _fake(addr, timeout=None):
+        seen["addr"] = addr
+        raise OSError("unreachable")
+
+    monkeypatch.setattr(socket, "create_connection", _fake)
+    assert stt_groq._reachable() is False
+    assert seen["addr"][1] == 443
+    socket.create_connection = real
+
+
+def test_the_probe_refreshes_the_memo_so_it_cannot_lapse(monkeypatch):
+    """Memo and probe interval are both 30s. Setting the memo only on the
+    transition would let it expire just before the next probe, handing the
+    timeout back to whoever spoke in that gap."""
+    import time as _t
+    monkeypatch.setattr(stt_groq, "_reachable", lambda *a, **k: False)
+    slept = []
+    monkeypatch.setattr(_t, "sleep", lambda s: slept.append(s) or (_ for _ in ()).throw(StopIteration))
+    stt_groq._network_down_until = _t.monotonic() + 1  # nearly lapsed
+    try:
+        stt_groq.connectivity_loop(interval_s=30.0)
+    except StopIteration:
+        pass
+    assert stt_groq._network_down_until > _t.monotonic() + 30, (
+        "memo must be refreshed to outlast the probe interval")
+    stt_groq._network_down_until = 0.0

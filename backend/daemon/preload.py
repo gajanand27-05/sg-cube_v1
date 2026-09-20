@@ -77,6 +77,25 @@ def _warm() -> None:
     except Exception as e:
         log.info("preload of %s skipped: %s", settings.embedding_model, e)
 
+    # The offline STT model, plus ONE decode on silence.
+    #
+    # Loading alone is not enough: measured, a cold first decode cost ~8s on
+    # top of the 1.6s load, so the first command of an outage waited ~11s.
+    # The warm-up pays that here, on a background thread at boot, where
+    # nobody is listening. Costs ~292 MiB resident for a rare event — a
+    # deliberate trade, gated by ENABLE_MODEL_PRELOAD like everything else here.
+    t0 = time.perf_counter()
+    try:
+        import numpy as np
+
+        from backend.ai_modules.speech import stt_whisper
+
+        stt_whisper.transcribe_array_cpu(np.zeros(16000, dtype=np.float32), 16000)
+        log.info("preloaded offline CPU STT (loaded + warmed) in %.1fs",
+                 time.perf_counter() - t0)
+    except Exception as e:
+        log.info("preload of offline CPU STT skipped: %s", e)
+
     # silero, for the post-wake speech gate. Measured: 1518ms to load, then
     # 25ms median per capture. Without this the load lands on the FIRST wake
     # of the session — the one turn where a delay is most obvious — and buys

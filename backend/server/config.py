@@ -134,6 +134,10 @@ class Settings(BaseSettings):
     # is not answering — and the local CPU fallback behind it needs ~1.6s to
     # load plus ~1.6s to decode, so a long timeout triples the offline wait.
     groq_timeout_s: float = 3.0
+    # Connect separately from read. An unreachable host is the offline case
+    # and waiting cannot help it; a slow response means the request is in
+    # flight and is worth the wait.
+    groq_connect_timeout_s: float = 1.0
     # After a NETWORK failure (dead socket, not a 429), send STT straight to
     # local for this long. Otherwise every utterance during an outage pays the
     # cloud timeout again before local starts.

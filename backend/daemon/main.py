@@ -79,6 +79,7 @@ def start_services(settings) -> dict:
     from backend.daemon.vision_loop import vision_loop
     from backend.daemon.telemetry import telemetry_loop
     from backend.daemon import preload
+    from backend.ai_modules.speech import stt_groq
     from backend.core.agents.watcher import watcher as watcher_agent
 
     SERVICE_STATUS.clear()
@@ -93,6 +94,10 @@ def start_services(settings) -> dict:
     _start_one("vision",    settings.enable_vision,    vision_loop.start)
     _start_one("watcher",   settings.enable_watcher,   watcher_agent.start)
     _start_one("telemetry", settings.enable_telemetry, telemetry_loop.start)
+    # Cheap TCP probe, no API call and no quota. Sets the offline memo BEFORE
+    # a command needs it, so the first utterance of an outage does not
+    # discover the problem by waiting out a connect timeout.
+    _start_one("stt-connectivity", True, stt_groq.start_connectivity_monitor)
 
     # Phase 2 browser: LAZY. We don't launch Chromium here — we just
     # record the availability so /system/services can report "ready"
