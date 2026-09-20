@@ -47,14 +47,15 @@ def resolve_device(spec: str | None) -> int | None:
     raise SystemExit(f"No input device matched '{spec}'. Use --list to see options.")
 
 
-def record(duration: int, out: Path, device: int | None = None) -> Path:
+def record(duration: int, out: Path, device: int | None = None,
+           countdown: int = 5) -> Path:
     if device is None:
         device = sd.default.device[0]
     name = sd.query_devices(device)["name"]
     print(f"Using device [{device}]: {name}")
 
     print("\n>>> GET READY — countdown to recording <<<", flush=True)
-    for n in range(5, 0, -1):
+    for n in range(countdown, 0, -1):
         print(f"    {n}...", flush=True)
         time.sleep(1)
     print(f"\n>>> SPEAK NOW — recording for {duration}s <<<\n", flush=True)
@@ -89,7 +90,7 @@ def record(duration: int, out: Path, device: int | None = None) -> Path:
 
 
 def record_batch(count: int, folder: Path, duration: int,
-                 device: int | None = None) -> None:
+                 device: int | None = None, countdown: int = 5) -> None:
     """Record `count` clips into folder/001.wav, 002.wav, ...
 
     Resumes from the highest number already there, because nobody records
@@ -105,7 +106,7 @@ def record_batch(count: int, folder: Path, duration: int,
     for i in range(start, start + count):
         out = folder / f"{i:03d}.wav"
         print(f"\n═══ clip {i:03d}  ({i - start + 1} of {count}) ═══")
-        record(duration, out, device)
+        record(duration, out, device, countdown)
         if i < start + count - 1:
             input("  press ENTER for the next clip (Ctrl+C to stop) ... ")
     print(f"\nDone. {count} clip(s) in {folder}")
@@ -118,6 +119,8 @@ if __name__ == "__main__":
     ap.add_argument("--device", type=str, default=None,
                     help="Input device index (int) or substring match")
     ap.add_argument("--list", action="store_true", help="List input devices and exit")
+    ap.add_argument("--countdown", type=int, default=5,
+                    help="seconds before each take (use 2 for long batches)")
     ap.add_argument("--count", type=int, default=1,
                     help="record N clips (requires --folder)")
     ap.add_argument("--folder", type=Path,
@@ -130,8 +133,8 @@ if __name__ == "__main__":
 
     device = resolve_device(args.device)
     if args.folder:
-        record_batch(args.count, args.folder, args.duration, device)
+        record_batch(args.count, args.folder, args.duration, device, args.countdown)
     elif args.count > 1:
         ap.error("--count needs --folder")
     else:
-        record(args.duration, args.out, device)
+        record(args.duration, args.out, device, args.countdown)
