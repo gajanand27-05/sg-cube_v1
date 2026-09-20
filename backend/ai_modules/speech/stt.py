@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from backend.ai_modules.speech import stt_gemini, stt_groq, stt_whisper
+from backend.ai_modules.speech import stt_gemini, stt_groq
 from backend.server.config import settings
 
 log = logging.getLogger(__name__)
@@ -34,6 +34,11 @@ def active_backend() -> str:
 def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:
     backend = active_backend()
     if backend == "whisper":
+        # Lazy: importing stt_whisper pulls ctranslate2, ~198 MiB resident,
+        # and STT_BACKEND=groq never touches it. The offline fallback imports
+        # it the same way, so the cost is paid only when it is actually used.
+        from backend.ai_modules.speech import stt_whisper
+
         return stt_whisper.transcribe_array(audio, sample_rate)
     if backend == "groq":
         # stt_groq falls back to Gemini internally on any failure, so this is
@@ -45,6 +50,8 @@ def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:
 def transcribe(audio_path: str | Path) -> dict:
     backend = active_backend()
     if backend == "whisper":
+        from backend.ai_modules.speech import stt_whisper
+
         return stt_whisper.transcribe(audio_path)
     if backend == "groq":
         return stt_groq.transcribe(audio_path)

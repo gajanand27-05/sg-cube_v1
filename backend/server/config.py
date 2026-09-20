@@ -130,7 +130,14 @@ class Settings(BaseSettings):
     # 'Thank you for watching.' where turbo got 'Can you open WhatsApp?'.
     groq_api_key: str = ""
     groq_stt_model: str = "whisper-large-v3-turbo"
-    groq_timeout_s: float = 30.0
+    # 3s, not 30. A voice command must not wait half a minute on a cloud that
+    # is not answering — and the local CPU fallback behind it needs ~1.6s to
+    # load plus ~1.6s to decode, so a long timeout triples the offline wait.
+    groq_timeout_s: float = 3.0
+    # After a NETWORK failure (dead socket, not a 429), send STT straight to
+    # local for this long. Otherwise every utterance during an outage pays the
+    # cloud timeout again before local starts.
+    stt_network_down_memo_s: float = 30.0
     # EMPTY on measurement — see stt_groq._DEFAULT_PROMPT. The proper nouns it
     # was meant to fix are already correct without it, and on quiet clips it
     # derailed the decoder out of English entirely.

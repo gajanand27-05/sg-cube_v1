@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import io
 import logging
+import time
 import wave
 
 import numpy as np
@@ -109,11 +110,69 @@ def _kind_for(status: int) -> str:
     return "no_network"
 
 
+_network_down_until = 0.0
+
+
+def _is_network_error(exc: Exception) -> bool:
+    """Unreachable network, as opposed to the service saying no.
+
+    The distinction decides whether Gemini is worth trying. A 429 or a 502 is
+    Groq's problem and Gemini may well answer; a dead socket means the link is
+    down and Gemini will fail the same way, one full timeout later.
+    """
+    import httpx
+
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout,
+                        httpx.ReadTimeout, httpx.WriteTimeout,
+                        httpx.PoolTimeout, httpx.NetworkError)):
+        return True
+    return isinstance(exc, (ConnectionError, TimeoutError, OSError))
+
+
+def _note_network_down() -> None:
+    """Send the next few commands straight to local.
+
+    Without this, EVERY offline command pays the cloud timeout before local
+    even starts. One utterance paying it is a slow answer; every utterance
+    paying it is a broken assistant during exactly the outage the local path
+    exists for.
+    """
+    global _network_down_until
+    _network_down_until = time.monotonic() + settings.stt_network_down_memo_s
+    log.warning("STT: network looks down; routing to local CPU for %.0fs",
+                settings.stt_network_down_memo_s)
+
+
+def _offline() -> bool:
+    return time.monotonic() < _network_down_until
+
+
+def _local(arr: np.ndarray, sample_rate: int) -> dict:
+    """Last resort: CPU Whisper. Raises SttUnavailable only if it also fails,
+    so "I can't reach the network" is never said over a working transcript."""
+    from backend.ai_modules.speech import stt_whisper
+
+    t0 = time.perf_counter()
+    out = stt_whisper.transcribe_array_cpu(arr, sample_rate)
+    log.warning("STT: answered offline on CPU in %.0fms", (time.perf_counter() - t0) * 1000)
+    return out
+
+
 def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:
-    """Transcribe a captured command. Falls back to Gemini on any failure."""
+    """Groq -> Gemini -> local CPU, skipping rungs that cannot help.
+
+    The ordering matters more than the rungs. A naive chain makes an offline
+    'volume up' wait out BOTH cloud timeouts before the local model starts,
+    which is 10-20s of silence in precisely the situation the local model was
+    added for.
+    """
+    global _network_down_until
     arr = np.asarray(audio)
     if arr.size == 0:
         return dict(_EMPTY)
+
+    if _offline():
+        return _local(arr, sample_rate)
 
     if not settings.groq_api_key:
         raise SttUnavailable("no_key", "GROQ_API_KEY is not set")
@@ -132,14 +191,35 @@ def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:
             raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
         text = (r.json().get("text") or "").strip()
     except Exception as e:
-        # Gemini is the fallback, not the primary, so a Groq outage costs a
-        # slower turn rather than a dead one. Logged at WARNING because a
-        # silent demotion to the 60/day budget is exactly the kind of thing
-        # that reappears later as "why did it stop answering at lunchtime".
+        if _is_network_error(e):
+            # Skip Gemini entirely — same network, same outcome, one more
+            # timeout of silence.
+            log.warning("stt_groq: network error (%s); going straight to local", e)
+            _note_network_down()
+            return _local(arr, sample_rate)
+
         log.warning("stt_groq failed (%s); falling back to Gemini", e)
         from backend.ai_modules.speech import stt_gemini
 
-        return stt_gemini.transcribe_array(arr, sample_rate)
+        try:
+            return stt_gemini.transcribe_array(arr, sample_rate)
+        except SttUnavailable:
+            raise
+        except Exception as ge:
+            if _is_network_error(ge):
+                _note_network_down()
+            log.warning("Gemini fallback also failed (%s); going local", ge)
+            return _local(arr, sample_rate)
+
+    # A cloud answer means the link is back; stop short-circuiting to local.
+    if _network_down_until:
+        _network_down_until = 0.0
+        try:
+            from backend.ai_modules.speech import stt_whisper
+
+            stt_whisper.release_cpu_model()
+        except Exception:
+            pass
 
     if not text:
         log.info("stt_groq: empty transcript")

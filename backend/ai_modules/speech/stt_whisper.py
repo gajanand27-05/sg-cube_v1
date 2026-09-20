@@ -1,5 +1,7 @@
+import logging
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Generator
 
@@ -7,6 +9,8 @@ import numpy as np
 
 from backend.ai_modules.speech.stt_manager import get_model  # noqa: F401
 from backend.server.config import settings
+
+log = logging.getLogger(__name__)
 
 # get_model used to live here as an @lru_cache(maxsize=1) pinned to
 # device="cpu", compute_type="int8" — so the GPU was never used, accuracy was
@@ -182,6 +186,53 @@ def transcribe(audio_path: str | Path) -> dict:
     )
 
     return _collect_segments(segments, info)
+
+
+_cpu_model = None
+_cpu_lock = threading.Lock()
+
+
+def transcribe_array_cpu(audio: np.ndarray, sample_rate: int = 16000) -> dict:
+    """Last-resort offline transcription. CPU ONLY, always.
+
+    Deliberately does NOT go through stt_manager.get_model(): that resolves
+    select_profile(), which under STT_PROFILE=accurate returns medium/cuda —
+    2091 MiB of GPU that the whole move to cloud STT existed to free. A
+    fallback that quietly grabs the GPU would reintroduce the exact
+    out-of-budget crash it is meant to survive, and only when the network is
+    already down.
+
+    Measured: 1.6s to load, ~292 MiB resident, 1626ms median per capture
+    (0.54x realtime). Only good enough for the local rule-tier vocabulary —
+    "volume up", "stop" — which is all it has to reach while offline.
+    """
+    global _cpu_model
+    if _cpu_model is None:
+        with _cpu_lock:
+            if _cpu_model is None:
+                from faster_whisper import WhisperModel
+
+                t0 = time.perf_counter()
+                _cpu_model = WhisperModel(
+                    settings.whisper_model_cpu, device="cpu", compute_type="int8")
+                log.warning("offline STT: loaded %s on CPU in %.1fs",
+                            settings.whisper_model_cpu, time.perf_counter() - t0)
+    segments, info = _cpu_model.transcribe(
+        audio,
+        language="en",
+        beam_size=1,
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 300},
+        initial_prompt=_COMMAND_PROMPT,
+    )
+    return _collect_segments(segments, info)
+
+
+def release_cpu_model() -> None:
+    """Drop the offline model. The network coming back is the usual reason."""
+    global _cpu_model
+    with _cpu_lock:
+        _cpu_model = None
 
 
 def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:

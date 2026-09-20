@@ -38,8 +38,12 @@ def test_groq_is_dispatched_to_when_selected(monkeypatch):
 def test_transcribe_array_dispatches_to_selected_backend(monkeypatch):
     calls = []
     monkeypatch.setattr(stt.settings, "stt_backend", "whisper")
+    # The real module, not stt.stt_whisper: the facade imports it lazily now
+    # (ctranslate2 is ~198 MiB and STT_BACKEND=groq never touches it), so
+    # there is no module attribute to patch.
+    from backend.ai_modules.speech import stt_whisper
     monkeypatch.setattr(
-        stt.stt_whisper, "transcribe_array",
+        stt_whisper, "transcribe_array",
         lambda a, sr=16000: calls.append("whisper") or {"text": "w"})
     monkeypatch.setattr(
         stt.stt_gemini, "transcribe_array",
@@ -53,8 +57,12 @@ def test_transcribe_array_dispatches_to_selected_backend(monkeypatch):
 def test_gemini_selected_dispatches_to_gemini(monkeypatch):
     calls = []
     monkeypatch.setattr(stt.settings, "stt_backend", "gemini")
+    # The real module, not stt.stt_whisper: the facade imports it lazily now
+    # (ctranslate2 is ~198 MiB and STT_BACKEND=groq never touches it), so
+    # there is no module attribute to patch.
+    from backend.ai_modules.speech import stt_whisper
     monkeypatch.setattr(
-        stt.stt_whisper, "transcribe_array",
+        stt_whisper, "transcribe_array",
         lambda a, sr=16000: calls.append("whisper") or {"text": "w"})
     monkeypatch.setattr(
         stt.stt_gemini, "transcribe_array",
