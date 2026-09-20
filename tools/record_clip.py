@@ -10,6 +10,7 @@ Usage:
 Records 16kHz mono int16 PCM (what Whisper wants).
 """
 import argparse
+import json
 import sys
 import time
 import wave
@@ -89,8 +90,16 @@ def record(duration: int, out: Path, device: int | None = None,
     return out
 
 
+def _load_labels(path: Path | None) -> list[str]:
+    if not path:
+        return []
+    return [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.startswith("#")]
+
+
 def record_batch(count: int, folder: Path, duration: int,
-                 device: int | None = None, countdown: int = 5) -> None:
+                 device: int | None = None, countdown: int = 5,
+                 labels: list[str] | None = None) -> None:
     """Record `count` clips into folder/001.wav, 002.wav, ...
 
     Resumes from the highest number already there, because nobody records
@@ -125,6 +134,8 @@ if __name__ == "__main__":
                     help="record N clips (requires --folder)")
     ap.add_argument("--folder", type=Path,
                     help="save numbered clips here: 001.wav, 002.wav, ...")
+    ap.add_argument("--labels", type=Path,
+                    help="text file, one instruction per take (see tools/wake_plan_pos.txt)")
     args = ap.parse_args()
 
     if args.list:
@@ -133,7 +144,8 @@ if __name__ == "__main__":
 
     device = resolve_device(args.device)
     if args.folder:
-        record_batch(args.count, args.folder, args.duration, device, args.countdown)
+        record_batch(args.count, args.folder, args.duration, device,
+                     args.countdown, _load_labels(args.labels))
     elif args.count > 1:
         ap.error("--count needs --folder")
     else:

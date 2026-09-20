@@ -1,0 +1,32 @@
+# One line per take. Blank lines and #comments are skipped.
+# Say ONLY the wake word unless the line says otherwise.
+close, normal volume
+close, normal volume
+close, quiet — as if not wanting to wake someone
+close, quick and clipped
+arm's length, normal
+arm's length, normal
+arm's length, trailing into a command: "Onyx, open notepad"
+arm's length, trailing into a command: "Onyx, what's the weather"
+arm's length, turned 90 degrees away from the laptop
+arm's length, turned fully away
+desk distance (as you normally sit), normal
+desk distance, normal
+desk distance, normal
+desk distance, quiet
+desk distance, loud
+desk distance, said twice: "Onyx... Onyx"
+desk distance, with music or a video playing
+desk distance, with music or a video playing
+desk distance, with music or a video playing
+desk distance, typing while you say it
+across the room, normal
+across the room, normal
+across the room, loud
+across the room, quiet (expect this one to fail — that is useful)
+across the room, with music playing
+standing up / moving while speaking
+head turned away, desk distance
+covering the mic side of the laptop with a hand
+say it mid-sentence: "...anyway Onyx, remind me later"
+however you would most naturally say it right now
