@@ -600,3 +600,28 @@ The distinction matters for the repair: the other two collections can be re-embe
 **Undiagnosed. Not attempted**: no repair, no rebuild, no root-cause work. Unknown whether writes are also silently failing, whether it is one bad segment or the whole index, and when it started. First step is probably to compare `chroma.sqlite3`'s segment/embedding tables against the collection's id list — the old `_check_chroma_sql.py` probe did exactly that kind of dump before being consolidated away, and is recoverable from git history if useful.
 
 > **RESOLVED 2026-08-03** — the collection rebuilt (per `docs/MEMORY_REPAIR_RULES.md`) during the T-memory-duplicate-rows purge. `coll.get(include=["embeddings"])` returns all 917 rows; `tools/memory_health.py` reads `zero_vectors=0/917`. Root cause never isolated — the rebuild cleared it, and the write path (commander/vision) has been appending clean rows since. Recurrence would need the sqlite-segment comparison from the original first step; documented here in case.
+
+## T-corrections-do-not-supersede (opened 2026-09-22)
+
+**Observed live.** Correcting a stored fact APPENDS a new one; it does not retract the old. After the user corrected their name, long-term memory held both:
+
+    "The user's name is Gajanand2"                  (2026-08-14)
+    "The user's name is Gajanan, not Gajanand2"     (2026-09-22)
+
+Both were retrieved from then on, so the correction made recall *more* ambiguous rather than less — and the second entry was itself wrong (see below). Cleaned by hand on 2026-09-22 (both deleted, `"The user's name is Gajanand"` written, OCR entry left); the mechanism is untouched.
+
+`remember(fact)` has no notion of "this replaces that". Needs either a supersede link on write or a contradiction sweep on read.
+
+## T-proper-nouns-are-not-primed (opened 2026-09-22)
+
+**Observed live.** STT dropped the final 'd' from the user's own name twice in one utterance — `"It's not Gajanan 2, it's Gajanan only"` — and the misheard spelling was then written to permanent memory by `remember`, which trusts its input sight-unseen.
+
+The fix for the wake word was to prime Whisper via `_COMMAND_PROMPT`; the same technique applies. Add the user's name and saved contact names (e.g. Sharath, already mis-transcribed as "sharat" in the WhatsApp turn) to the prompt.
+
+**Note the compounding**: an unprimed proper noun plus T-corrections-do-not-supersede means one mishearing becomes a permanent, retrievable, wrong fact. Git config already held `Gajanand Dhayagode` — a reliable source existed and was not consulted.
+
+## T-remember-has-no-post-condition (opened 2026-09-22)
+
+`remember` is `SYSTEM_WRITE` with no declared `verify`, so `runtime.py` caps its confidence at `_UNCONFIRMED_CONFIDENCE` and `_hedge` appends "— though I couldn't confirm it" to a write that succeeded. Observed live; the fact *was* stored.
+
+It writes to Onyx's own store, so reading it back is trivial — this is the cheapest post-condition in the tree and it is missing. Tracked separately from the narration gate (T-planner-narrates-state-it-never-read) because this one is a declarable contract, not a prompting problem.
