@@ -635,9 +635,23 @@ class CommanderAgent:
                     # `len(batch_results) == 1`. Tool FAILURE after a rejection
                     # was a second route to the same write.
                     #
-                    # Only a rejection FOLLOWED BY A QUESTION may write the
-                    # slot, and a question short-circuits above this line, so
-                    # clearing here cannot reach the legitimate case.
+                    # What is actually enforced: a missing-argument rejection
+                    # followed by a reply with NO tool calls. Not "followed by
+                    # a question" — nothing here can tell a question from a
+                    # surrender, and a reply like "Sorry, I couldn't send that
+                    # message." writes the slot too.
+                    #
+                    # Left that way on purpose. Sniffing for a question mark is
+                    # brittle across phrasings, and the behaviour is what you
+                    # want anyway: answering "just say hi to him" after that
+                    # apology should still complete the send. Every backstop
+                    # still applies — the planner decides whether the next
+                    # utterance answers it, the read-back names the recipient
+                    # and content, and the slot pops on the next turn either
+                    # way.
+                    #
+                    # A reply with no tool calls short-circuits above this
+                    # line, so clearing here cannot reach that case.
                     unfilled = None
 
                     if pending_calls:
