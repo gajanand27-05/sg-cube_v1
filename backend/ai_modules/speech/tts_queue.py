@@ -215,15 +215,49 @@ _current_lock = threading.Lock()
 
 
 def new_sentence_queue() -> SentenceQueue:
-    """Build the queue for a new turn and make it the current one.
+    """Build the queue for a new turn, make it current, and silence the old one.
 
-    Call once per turn, from the loop that will consume it. The previous
-    turn's queue is left alone — it is still draining on its own loop.
+    Call once per turn, from the loop that will consume it.
+
+    This used to leave the outgoing queue alone, "still draining on its own
+    loop". Ownership was the only thing on its mind, and ownership alone stops
+    the cross-loop crash while leaving the user listening to two answers:
+
+        [wake] previous turn still running after 15s; starting anyway
+        [ai] response: It sounds like you're thinking out loud... (27032ms)
+        [ai] response: Sounds good! I'll be here whenever you need me. (6408ms)
+
+    Two turn bodies reached the speak stage, and the old turn's consumer was
+    still pulling sentences. tts_piper._activate is "newest wins" per SENTENCE,
+    not per turn, so the two drains interleave — each sentence cutting off the
+    other turn's — and the answers arrive chopped together. Worse, _activate
+    only SETS the previous session's stop Event; `_audio_player` sits inside a
+    blocking `stream.write()` and cannot observe it until that write returns,
+    so a second sd.OutputStream opens while the first is still feeding the
+    device and the mixer plays both at once.
+
+    The handover timeout is not the thing to fix — it is a deliberate safety
+    valve so a wedged turn cannot deafen the listener forever, which keeps
+    overlap reachable by design. So the speaking side has to be correct under
+    overlap, and taking over `_CURRENT` is precisely the moment the outgoing
+    turn stops being the turn that speaks.
+
+    Interrupting OUTSIDE the lock on purpose: interrupt() calls stop_speech()
+    and may hop loops via call_soon_threadsafe, and holding a module lock
+    across that buys nothing and risks everything. `previous` is already safely
+    captured by then.
     """
     global _CURRENT
     q = SentenceQueue()
     with _current_lock:
+        previous = _CURRENT
         _CURRENT = q
+    if previous is not None and previous is not q:
+        # Idempotent, so a turn that already ended cleanly costs nothing here.
+        try:
+            previous.interrupt()
+        except Exception as e:      # a handover must never kill the new turn
+            log.warning(f"could not silence the outgoing turn: {e}")
     return q
 
 

@@ -92,7 +92,17 @@ def test_overlapping_turns_do_not_share_a_queue():
         f"overlapping turns raised {errors} — a turn is still awaiting state "
         "that another turn's loop owns"
     )
-    assert sorted(spoken) == ["A speaking.", "B speaking."], spoken
+    # This used to assert sorted(spoken) == ["A speaking.", "B speaking."].
+    # That was written as a liveness check — "both turns got through their body
+    # without dying" — but what it actually pinned was the double-voice bug:
+    # A enqueues AFTER B has taken over, and asserting A still speaks requires
+    # the superseded turn to keep talking over the new one. Reported live as
+    # "I'm hearing double voice". See test_no_double_voice_across_turns.py.
+    #
+    # The liveness this test wants is "A completed its body", which `errors`
+    # already proves. B is the current turn, so B is the one that must be
+    # audible.
+    assert "B speaking." in spoken, f"the current turn went silent: {spoken!r}"
 
 
 def test_each_turn_gets_a_distinct_queue():
@@ -117,9 +127,17 @@ def test_interrupt_reaches_the_current_turn():
     tts_queue.get_sentence_queue().interrupt()
 
     assert live._interrupted, "interrupt() missed the current turn"
-    assert not stale._interrupted, (
-        "interrupt() hit a finished turn's queue — the pointer must track the "
-        "newest turn, not the first one built"
+    # `stale` is now interrupted too, but by the HANDOVER rather than by this
+    # call — building `live` is what silenced it, which is the double-voice
+    # fix. So the old `assert not stale._interrupted` no longer states
+    # anything about where interrupt() landed.
+    #
+    # What this test is actually for is that the pointer tracks the newest
+    # turn, so assert that directly instead of inferring it from a flag that
+    # two different things can now set.
+    assert tts_queue.get_sentence_queue() is live, (
+        "the current-turn pointer is not the newest turn built; barge-in, wake "
+        "and 'stop' would all land on a turn that is no longer speaking"
     )
 
 
