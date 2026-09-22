@@ -12,6 +12,8 @@ import vosk
 
 from backend.ai_modules.speech.tts_piper import is_speaking
 from backend.core.agents.pending_confirmation import store as _pending_store
+from backend.core.events import get_bus, Priority
+from backend.daemon.ui_events import FollowUpExpired
 from backend.core.dogfooding import ledger as dogfooding_ledger
 from backend.core.state import AssistantState, manager as state_manager
 from backend.server.config import settings
@@ -167,6 +169,36 @@ def feed_wake_chunk(recognizer, data: bytes) -> str:
     return (json.loads(recognizer.PartialResult()).get("partial") or "").lower()
 
 
+def _speak_cue(text: str) -> None:
+    """Say one short line through the existing TTS path.
+
+    Module-level rather than a method so tests can replace it without a
+    speaker, and so the import stays lazy — wake_word is imported by tooling
+    that has no audio device.
+
+    Uses tts_piper.speak (the blocking wrapper) because the caller is already
+    on the wake worker thread with no running loop, which is the same reason
+    the turn body itself uses asyncio.run.
+    """
+    from backend.ai_modules.speech.tts_piper import speak
+
+    speak(text)
+
+
+def clean_preroll(frames, boundary: float) -> list[bytes]:
+    """Pre-roll frames that cannot contain Onyx's own speech.
+
+    `frames` is (frame_start_monotonic, pcm) as stamped by _cb; `boundary` is
+    tts_piper.speech_boundary(). Comparing STARTS is what makes a frame
+    straddling the end of playback drop rather than survive: its first samples
+    are still our voice however late it finishes.
+
+    Pure and total — the infinities in speech_boundary() mean there is no
+    "still speaking" or "never spoke" branch to get wrong here.
+    """
+    return [data for start, data in frames if start > boundary]
+
+
 def wake_phrase_present(partial: str, wake_phrase: str) -> bool:
     """The live trigger test: a bare token match, with no confidence check.
 
@@ -227,6 +259,10 @@ class WakeWordListener:
     _followup_until: float = 0.0
     _followup_hard_until: float = 0.0
     _empty_in_a_row: int = 0
+    # Same reason: _cb reads it to stamp every frame, and the tests that feed
+    # frames through _cb build the listener with object.__new__. The real
+    # value is set in __init__ and refined in listen() from the open stream.
+    _frame_lead_s: float = WAKE_BLOCKSIZE / 16000.0
 
     def __init__(
         self,
@@ -260,6 +296,10 @@ class WakeWordListener:
         self.queue: queue.Queue = queue.Queue()
         self._running = False
         self._capturing = False
+        # How far before the callback a frame's audio actually STARTED.
+        # Provisional: one blocksize. listen() adds the stream's reported
+        # input latency once the device exists. See _cb.
+        self._frame_lead_s = WAKE_BLOCKSIZE / float(sample_rate)
         # Phase 4A: consecutive high-RMS chunks while state == SPEAKING;
         # resets to 0 on any low-RMS chunk. When it reaches
         # settings.barge_in_debounce_frames, we fire barge-in.
@@ -367,6 +407,90 @@ class WakeWordListener:
         self._followup_until = min(now + window, self._followup_hard_until)
         self._empty_in_a_row = 0
 
+    def _question_pending(self) -> bool:
+        """Is Onyx owed an answer — of either kind?
+
+        A yes/no confirmation, or a half-built call waiting on a missing
+        argument. The second is the one that cost a WhatsApp message: it was
+        not represented anywhere, so nothing could ask this question about it.
+        """
+        from backend.core.agents.pending_clarification import (
+            store as _clarification_store,
+        )
+
+        try:
+            return bool(_pending_store.awaiting_answer()
+                        or _clarification_store.awaiting_answer())
+        except Exception:
+            return False
+
+    def _announce_followup(self, window: float) -> None:
+        """Tell the user where the chain stands, on every channel that fits.
+
+        Three audiences, three costs:
+          * the log — always;
+          * a UI event — on every expiry. Silent, and the HUD had no way to
+            know the window had shut;
+          * SPEECH — only when the chain is dead AND an answer is owed.
+
+        The speech condition is the whole design. Announcing every expiry
+        would append a sentence to the end of every exchange and train the
+        user to talk over Onyx, which is the behaviour this is meant to
+        prevent. A dead chain with nothing outstanding is unremarkable; a dead
+        chain with a question on the table is the bug from the log.
+
+        Deliberately not _play_chime(): that chime means "I am listening", so
+        reusing it to announce the opposite is worse than silence.
+        """
+        print(self._followup_notice(window))
+        if self._followup_open():
+            return
+
+        owed = self._question_pending()
+        # Never let a notice kill the turn thread. This runs on the wake
+        # worker, and an exception here would look like a dead assistant.
+        try:
+            get_bus().publish(
+                FollowUpExpired(question_pending=owed,
+                                wake_phrase=self.wake_phrase),
+                priority=Priority.NORMAL,
+            )
+        except Exception as e:
+            print(f"[wake] could not publish FollowUpExpired: {e}")
+
+        if not owed:
+            return
+        try:
+            _speak_cue(f"Say {self.wake_phrase} to answer.")
+        except Exception as e:
+            print(f"[wake] could not speak the expiry cue: {e}")
+
+    def _followup_notice(self, window: float) -> str:
+        """What to tell the user after a handled turn.
+
+        Asks `_followup_open()` rather than assuming. `_open_followup` clamps
+        the idle window to the hard ceiling, and an EXPIRED ceiling is still a
+        positive timestamp — so the `new_chain=False` reset is skipped and the
+        window opens ALREADY CLOSED. Live, after Onyx asked a question:
+
+            [ai] response: What would you like the message to say?
+            [wake] listening — 8s idle, -1s left in this chain
+
+        The microphone was shut. The user answered into it anyway, and the
+        answer only landed because Vosk hallucinated the wake word — which
+        started a fresh chain that knew nothing about the pending question.
+
+        The ceiling itself is correct and deliberately untouched: it is the
+        brake against ambient audio driving the assistant. Only the claim was
+        wrong.
+        """
+        if not self._followup_open():
+            return (f"[wake] chain expired — say {self.wake_phrase!r} "
+                    f"to keep going")
+        remaining = self._followup_hard_until - time.monotonic()
+        return (f"[wake] listening — {window:.0f}s idle, "
+                f"{remaining:.0f}s left in this chain")
+
     def _note_empty_capture(self) -> None:
         """A capture produced nothing usable.
 
@@ -390,7 +514,23 @@ class WakeWordListener:
         return now < self._followup_until and now < self._followup_hard_until
 
     def _cb(self, indata, _frames, _time, _status):
-        self.queue.put(bytes(indata))
+        # Stamp the frame's START, here in the callback.
+        #
+        # Stamping at dequeue would mark the END of the frame's 125ms plus
+        # however long it sat in the queue, so a frame that looks safely after
+        # `ended_at` could still begin inside the TTS tail — which is exactly
+        # the frame the trim exists to drop.
+        #
+        # PortAudio hands the callback an `inputBufferAdcTime` that would be
+        # this value exactly. Measured on this machine it is ZERO on every
+        # callback (MME host API reports no timing), so it is derived instead:
+        # the buffer covers blocksize/samplerate of audio and was captured
+        # `latency` ago. Both are reported values, not a tuned constant.
+        #
+        # Error direction is deliberate: subtracting the latency biases the
+        # start EARLIER, so `start > boundary` gets harder to satisfy and the
+        # mistake is always "dropped a clean frame", never "kept a dirty one".
+        self.queue.put((time.monotonic() - self._frame_lead_s, bytes(indata)))
 
     def _check_barge_in(self, rms: float, partial: str = "") -> bool:
         """Return True iff, during SPEAKING, loud audio that Vosk actually
@@ -520,14 +660,21 @@ class WakeWordListener:
                     # because nothing was listening. Asking a question and
                     # then not waiting for the answer is its own bug.
                     try:
-                        if _pending_store.awaiting_answer():
+                        # Either kind of outstanding question. A clarification
+                        # ("what would you like the message to say?") needs the
+                        # same thinking room as a confirmation, and used to get
+                        # none — it was not represented anywhere.
+                        from backend.core.agents.pending_clarification import (
+                            store as _clarification_store,
+                        )
+
+                        if (_pending_store.awaiting_answer()
+                                or _clarification_store.awaiting_answer()):
                             window = settings.confirmation_followup_window_s
                     except Exception:
                         pass
                     self._open_followup(window, new_chain=new_chain)
-                    remaining = self._followup_hard_until - time.monotonic()
-                    print(f"[wake] listening — {window:.0f}s idle, "
-                          f"{remaining:.0f}s left in this chain")
+                    self._announce_followup(window)
                 else:
                     self._note_empty_capture()
                     if self._followup_open():
@@ -588,7 +735,9 @@ class WakeWordListener:
 
         while total_bytes < max_total_bytes:
             try:
-                chunk = self.queue.get(timeout=2.0)
+                # The queue carries (frame_start, pcm) since the pre-roll trim
+                # needed callback-time stamps; capture only wants the audio.
+                _frame_start, chunk = self.queue.get(timeout=2.0)
             except queue.Empty:
                 break
 
@@ -643,7 +792,9 @@ class WakeWordListener:
 
         while total_bytes < max_total_bytes:
             try:
-                chunk = self.queue.get(timeout=2.0)
+                # The queue carries (frame_start, pcm) since the pre-roll trim
+                # needed callback-time stamps; capture only wants the audio.
+                _frame_start, chunk = self.queue.get(timeout=2.0)
             except queue.Empty:
                 break
 
@@ -682,10 +833,19 @@ class WakeWordListener:
             samplerate=self.sample_rate,
             channels=1,
             dtype="int16",
-            blocksize=2000,
+            blocksize=WAKE_BLOCKSIZE,
             device=self.device,
             callback=self._cb,
-        ):
+        ) as stream:
+            # Now that the device is open, its reported latency completes the
+            # frame-start estimate _cb needs. Measured 125ms on MME here,
+            # exactly one blocksize. Guarded: `latency` is host-API dependent
+            # and a missing value must not stop the listener from running.
+            try:
+                self._frame_lead_s = (WAKE_BLOCKSIZE / float(self.sample_rate)
+                                      + float(stream.latency))
+            except Exception:
+                pass
             # Persists ACROSS frames on purpose: PartialResult is cumulative,
             # so the token-growth gates need the previous frame's string as a
             # baseline. Re-initialising it per frame would make every loud
@@ -694,7 +854,7 @@ class WakeWordListener:
 
             while self._running:
                 try:
-                    data = self.queue.get(timeout=0.5)
+                    frame_start, data = self.queue.get(timeout=0.5)
                 except queue.Empty:
                     continue
                 if self._capturing:
@@ -717,7 +877,7 @@ class WakeWordListener:
                 # frames before it will say "onyx", and by then the user is
                 # already partway through the command -- those frames ARE the
                 # command, not preamble.
-                self._preroll.append(data)
+                self._preroll.append((frame_start, data))
 
                 arr = np.frombuffer(data, dtype=np.int16)
                 rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) if arr.size else 0
@@ -730,7 +890,7 @@ class WakeWordListener:
                                 and self._wake_trigger_allowed(rms)):
                             trigger = True
                             # Everything the recognizer consumed getting here.
-                            initial_audio = list(self._preroll)
+                            initial_audio = [d for _, d in self._preroll]
                             is_wake_preroll = True
                             trigger_label = f"wake: {partial!r} (rms={rms:.0f})"
                             # Archive the audio that FIRED the wake, separately
@@ -776,7 +936,24 @@ class WakeWordListener:
                             trigger = True
                             from_followup = True
                             trigger_label = f"followup: {partial!r} (rms={rms:.0f})"
-                            initial_audio = [data]
+                            # Seeded with [data] alone until 2026-09-22, which
+                            # discarded everything said while Vosk was still
+                            # accumulating evidence — a measured 880ms, turning
+                            # "Introduce yourself" into "yourself".
+                            #
+                            # The pre-roll cannot be used raw: it keeps filling
+                            # during playback (_capturing is cleared before the
+                            # turn body runs) and there is no AEC, so it can
+                            # hold Onyx's own voice. Trimmed per frame against
+                            # the end of playback; `data` is always kept, so
+                            # this is never worse than the old behaviour.
+                            from backend.ai_modules.speech.tts_piper import (
+                                speech_boundary,
+                            )
+
+                            initial_audio = clean_preroll(
+                                list(self._preroll)[:-1], speech_boundary(),
+                            ) + [data]
                             state_manager._voice_trigger_source = "followup"
                             self.recognizer.Reset()
                             partial = ""

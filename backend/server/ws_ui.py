@@ -35,6 +35,7 @@ from backend.daemon.ui_events import (
     ToolStartedEvent,
     VisionUpdateEvent,
     WakeHeard,
+    FollowUpExpired,
     AIMetricsEvent,
 )
 
@@ -44,6 +45,7 @@ log = logging.getLogger(__name__)
 TYPE_MAP: dict[type, str] = {
     StateChangedEvent: "state_changed",
     WakeHeard: "wake_heard",
+    FollowUpExpired: "followup_expired",
     CommandTranscribed: "command_transcribed",
     IntentResolved: "intent_resolved",
     # Distinct from ToolFinishedEvent below: both used to map to

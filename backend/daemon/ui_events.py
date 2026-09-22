@@ -249,6 +249,23 @@ class ProviderDegradedEvent:
 
 
 @dataclass
+class FollowUpExpired:
+    """The follow-up chain ended; Onyx is no longer listening.
+
+    Published on EVERY expiry, including the unremarkable ones, because the
+    log line it accompanies used to claim the opposite ("listening — 8s idle,
+    -1s left in this chain") and the HUD had no way to show otherwise.
+
+    `question_pending` is the interesting case: the chain died while an answer
+    was owed, which is how a half-dictated WhatsApp message was lost. That is
+    also the only case that gets a spoken cue — see
+    WakeWordListener._announce_followup.
+    """
+    question_pending: bool
+    wake_phrase: str
+
+
+@dataclass
 class SpeechInterruptedEvent:
     """Phase 4A: user spoke while TTS was playing → we cut it off (barge-in).
 

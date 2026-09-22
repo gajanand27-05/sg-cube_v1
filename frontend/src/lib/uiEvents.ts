@@ -148,6 +148,7 @@ export type WakeHeardPayload = {
 export type UiEventPayloadMap = {
   ai_metrics: AIMetricsPayload;
   wake_heard: WakeHeardPayload;
+  followup_expired: FollowUpExpiredPayload;
   intent_resolved: IntentResolvedPayload;
   agent_thinking: AgentThinkingPayload;
   agent_reasoning: AgentReasoningPayload;
@@ -162,6 +163,12 @@ export type UiEventPayloadMap = {
   confidence: ConfidencePayload;
   tool_started: ToolStartedPayload;
   tool_finished: ToolFinishedPayload;
+};
+
+export type FollowUpExpiredPayload = {
+  /** True when the chain died while Onyx was owed an answer. */
+  question_pending: boolean;
+  wake_phrase: string;
 };
 
 export type UiEventType = keyof UiEventPayloadMap;

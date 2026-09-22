@@ -110,7 +110,8 @@ def _run_loop(blocks, require_speech=True):
     # the trigger decision is what is under test, not the capture.
     listener._capture = lambda initial=None: b""
     for b in blocks:
-        listener.queue.put(b)
+        # Through _cb — see the note in test_barge_in_during_speech.
+        listener._cb(b, 0, None, None)
 
     saved = {
         k: getattr(settings, k)

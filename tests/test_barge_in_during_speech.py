@@ -70,7 +70,9 @@ def _run(listener, blocks, seconds=3.0):
     from backend.core.state import manager
     from backend.daemon import wake_word as ww
     for b in blocks:
-        listener.queue.put(b)
+        # Through _cb, not queue.put: the queue carries (frame_start, pcm)
+        # since the pre-roll trim, and _cb is where that stamp is made.
+        listener._cb(b, 0, None, None)
     # The loop sets _voice_trigger_source; trigger.py's finally normally
     # clears it, and we stub that half out. Leaving "barge_in" behind silently
     # un-trusts every SYSTEM_WRITE tool in every later test — it has already

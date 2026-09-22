@@ -34,6 +34,97 @@ MAX_ITER = 5
 _CANVAS_INTENT_RE = re.compile(r"\bcanvas\b|\bshow\s+me\b|\bdisplay\b|\brender\b", re.IGNORECASE)
 
 
+# Which arguments a confirmation must read back, per tool.
+#
+# Naming only the tool ("permission to send whatsapp") is unanswerable for
+# anything outbound: it cannot catch a false wake putting words into a message
+# the user never dictated, nor a misheard recipient. Both are observed live.
+#
+# Scoped to outbound content on purpose. Reading back every argument of every
+# confirmation would make the prompt long enough that the user stops listening
+# to it, which is the failure this is trying to avoid, not cause.
+#
+# tests/test_confirmation_reads_back_content.py fails if a DESTRUCTIVE tool is
+# added to tools/comms.py without an entry here, so this cannot rot quietly.
+_READBACK_FIELDS: dict[str, tuple[str, ...]] = {
+    "send_whatsapp": ("contact", "message"),
+    "send_email": ("to", "subject"),
+    "send_to_phone": ("content",),
+}
+
+# Spoken aloud, so it has a budget. Long enough for a normal message, short
+# enough that a pasted paragraph does not become a recital.
+_READBACK_MAX_CHARS = 160
+
+
+from backend.core.agents.pending_clarification import (  # noqa: E402
+    Clarification as _Clarification,
+    context_for as _clarification_context,
+    parse_missing_arg as _parse_missing_arg,
+    store as _clarification_store,
+)
+
+
+def _coerce_call_args(call: dict) -> dict:
+    """Repair a planner call's argument NAMES before validation.
+
+    Same repair registry.call() applies at execution time — run here so the
+    Guardian validates what the Operator will actually receive. It stays in
+    registry.call() as well, because the rule fast path reaches the registry
+    directly and never sees a Guardian; _coerce_args is idempotent, so the
+    second pass is a no-op on an already-repaired dict.
+
+    Never raises: a malformed call must reach the Guardian and be rejected
+    there, with its own error message, rather than dying here.
+    """
+    if not isinstance(call, dict):
+        return call
+    name, args = call.get("name"), call.get("args")
+    if not isinstance(name, str) or not isinstance(args, dict):
+        return call
+    try:
+        from backend.core.tools.registry import REGISTRY, _coerce_args
+
+        if name not in REGISTRY:
+            return call
+        repaired = _coerce_args(name, args)
+    except Exception:
+        return call
+    if repaired == args:
+        return call
+    log.info("arg repair before verification: %s %s -> %s",
+             name, sorted(args), sorted(repaired))
+    out = dict(call)
+    out["args"] = repaired
+    return out
+
+
+def _readback_args(call: dict) -> str:
+    """What this call will actually send, phrased for speech.
+
+    Returns "" when there is nothing worth reading back — a non-messaging
+    tool, or a call whose arguments have not been filled in yet (which is the
+    normal state on the clarification path, so it must not raise).
+    """
+    fields = _READBACK_FIELDS.get((call or {}).get("name", ""))
+    if not fields:
+        return ""
+    args = (call or {}).get("args") or {}
+    if not isinstance(args, dict):
+        return ""
+
+    parts = []
+    for field in fields:
+        value = args.get(field)
+        if value is None or not str(value).strip():
+            continue
+        text = " ".join(str(value).split())
+        if len(text) > _READBACK_MAX_CHARS:
+            text = text[:_READBACK_MAX_CHARS].rstrip() + "..."
+        parts.append(f"{field} {text}")
+    return ", ".join(parts)
+
+
 def _fan_out_summary(calls: list, limit: int = 4) -> str:
     """"open Notepad, open Chrome, open Firefox and 3 more" — spoken aloud.
 
@@ -352,6 +443,23 @@ class CommanderAgent:
         timeline.record_event(content=f"User asked: \"{text}\"", source="user_query")
 
         tool_records: list[dict] = []
+        # Set when the Guardian rejects a call for a missing argument, so that
+        # if this turn ends by ASKING for it we can hold the partial call.
+        unfilled: tuple[str, dict, str] | None = None
+
+        # A question this assistant asked on an earlier turn, possibly in an
+        # earlier chain. Taken (not peeked) so it is consumed whatever the
+        # planner decides — an ignored question must not stay answerable later.
+        #
+        # Passed as CONTEXT, never auto-applied: the planner decides whether
+        # this utterance answers it. Stuffing it in here would mean "Onyx,
+        # what's the weather" sends the weather to Sharath.
+        _clar = _clarification_store.take(context.session_id)
+        if _clar is not None:
+            log.info("Clarification pending for %r (missing %r); offering it "
+                     "to the planner as context", _clar.tool, _clar.missing)
+            history.insert(max(len(history) - 1, 0),
+                           {"role": "user", "content": _clarification_context(_clar)})
 
         # ── Answer to a pending "should I proceed?" ──────────────────────
         # take() POPS unconditionally: whatever this turn says, the previous
@@ -419,6 +527,22 @@ class CommanderAgent:
                     queued_calls = _pending_tool_calls(content)
                     if (isinstance(content, dict) and "final_response" in content
                             and not queued_calls):
+                        # A question, not an answer: the planner gave up on a
+                        # call the Guardian rejected for a missing argument and
+                        # asked the user for it. Hold the half-built call so the
+                        # reply completes it — even after this chain dies and
+                        # the user says the wake word again, which is exactly
+                        # how the live WhatsApp turn was lost.
+                        if unfilled is not None:
+                            tool_name, known_args, missing = unfilled
+                            _clarification_store.remember(
+                                context.session_id,
+                                _Clarification(
+                                    tool=tool_name, args=known_args,
+                                    missing=missing,
+                                    question=str(content["final_response"]),
+                                ),
+                            )
                         yield CommanderChunk("final_response", content["final_response"])
                         context.add_assistant(content["final_response"])
                         asyncio.create_task(episodic_summarizer.summarize_and_store(text, tool_records))
@@ -435,6 +559,19 @@ class CommanderAgent:
                         )
                     calls = queued_calls or (
                         content if isinstance(content, list) else [content])
+                    # Repair argument NAMES before the Guardian sees them, not
+                    # after. _coerce_args used to run at registry.call(), so a
+                    # planner alias on a REQUIRED argument was rejected before
+                    # the repair could reach it:
+                    #
+                    #   Guardian rejected: ["Missing required argument 'fact'
+                    #                        for tool 'remember'."]
+                    #
+                    # while _coerce_args maps content/text/facts onto `fact`
+                    # perfectly well. Coercing here also closes a hole that is
+                    # not about this bug at all: the Guardian was validating
+                    # one dict while the Operator executed another.
+                    calls = [_coerce_call_args(c) for c in calls]
                     # B. Guardian Stage (Verification)
                     # verify_plan signature is (user_query, calls, request_id, agent_context) — the
                     # fourth arg carries metadata (trigger_source) that the verifier's tier gate uses
@@ -444,6 +581,15 @@ class CommanderAgent:
                     if errors:
                         log.warning(f"Commander: Guardian rejected parts of the plan: {errors}")
                         last_error = errors[-1]
+                        # Remember WHAT was half-built, in case this retry ends
+                        # with the planner asking the user instead of filling
+                        # it in. Recorded here rather than at the question
+                        # because by then `calls` is gone. See the write at the
+                        # final_response branch.
+                        _missing = _parse_missing_arg(last_error)
+                        if _missing and calls and isinstance(calls[0], dict):
+                            unfilled = (_missing[1], dict(calls[0].get("args") or {}),
+                                        _missing[0])
                         # Guardian can reject a plan whose calls list is empty or
                         # malformed — don't let the recovery path itself crash.
                         failed_tool = calls[0].get("name", "unknown") if calls and isinstance(calls[0], dict) else "unknown"
@@ -467,8 +613,20 @@ class CommanderAgent:
                         tool_name = first_pending.get("name", "action").replace("_", " ")
                         is_critical = first_pending.get("is_critical", False)
 
+                        # Read back the content for anything outbound, on EVERY
+                        # branch. It was added to the plain branch first and
+                        # that was backwards: send_whatsapp is classified
+                        # critical, so the most dangerous tool got the least
+                        # informative prompt. Caught by driving the real loop
+                        # in test_pending_clarification_end_to_end.
+                        detail = _readback_args(pending_calls[0]) if pending_calls else ""
+
                         if is_critical:
-                            spoken = f"⚠️ CRITICAL ACTION: I need your explicit permission to {tool_name}. This is a high-risk operation. Should I proceed?"
+                            spoken = (f"⚠️ CRITICAL ACTION: I need your explicit "
+                                      f"permission to {tool_name}")
+                            if detail:
+                                spoken += f" — {detail}"
+                            spoken += ". This is a high-risk operation. Should I proceed?"
                         elif any(c.get("fan_out") for c in pending_calls):
                             # Naming only the first of six app launches would
                             # ask "permission to open app" and hide the scale,
@@ -479,7 +637,15 @@ class CommanderAgent:
                                 f"Should I do all of them?"
                             )
                         else:
-                            spoken = f"I need your permission to {tool_name}. Should I proceed?"
+                            # "Yes" to a bare "permission to send whatsapp"
+                            # authorises an unknown message to an unknown
+                            # person — exactly what a false wake or a misheard
+                            # dictation produces. Empty for every other tool.
+                            if detail:
+                                spoken = (f"I need your permission to {tool_name} "
+                                          f"— {detail}. Should I proceed?")
+                            else:
+                                spoken = f"I need your permission to {tool_name}. Should I proceed?"
 
                         # Remember what we are asking about. Without this the
                         # question was unanswerable: the prompt was spoken and

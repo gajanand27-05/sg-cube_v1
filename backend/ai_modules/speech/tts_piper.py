@@ -1,6 +1,7 @@
 """Streaming TTS with proper chunked playback and interrupt support."""
 import asyncio
 import difflib
+import math
 import re
 import threading
 import time
@@ -174,6 +175,45 @@ def _close_utterance(utterance: _Utterance) -> None:
     with _spoken_lock:
         if utterance.ended_at is None:
             utterance.ended_at = time.monotonic()
+
+
+def speech_boundary() -> float:
+    """Monotonic time after which captured audio cannot contain our own voice.
+
+    Returned as a plain comparable float so the caller is a filter, with no
+    special cases at the call site:
+
+        -inf   nothing has ever been spoken — every captured frame is clean
+        +inf   we are speaking right now — no captured frame can be trusted
+        t      playback ended at t
+
+    Uses the LAST utterance of the burst, not whichever one closed most
+    recently in isolation. Streaming TTS closes sentence 1 while sentences
+    2..N are still queued, so trimming against sentence 1's end would admit
+    every later sentence's audio — the same burst-vs-sentence distinction
+    `_live_utterances` documents.
+
+    `ended_at` is stamped in speak_stream's finally, after `await
+    session.player`, and `_audio_player` closes with `stream.stop()`, which
+    drains the device buffer rather than discarding it (that is `abort()`).
+    So on the normal path this really is "after the speaker went quiet". On
+    the barge-in/error path the player can still be unwinding, which is one
+    more reason callers bias conservative.
+    """
+    with _spoken_lock:
+        if not _recent_spoken:
+            return -math.inf
+        now = time.monotonic()
+        speaking = any(
+            u.ended_at is None and (now - u.started_at) < _UNFINISHED_MAX_S
+            for u in _recent_spoken
+        )
+        if speaking:
+            return math.inf
+        ends = [u.ended_at for u in _recent_spoken if u.ended_at is not None]
+        # Every entry abandoned past _UNFINISHED_MAX_S — nothing is live, and
+        # treating that as "still speaking" would mute the pre-roll forever.
+        return max(ends) if ends else -math.inf
 
 
 def _live_utterances(now: float) -> list[_Utterance]:

@@ -118,7 +118,8 @@ def _drive(fire_after: int, n_frames: int = 12, frames=None):
 
     for f in (frames if frames is not None
               else [_marked_frame(i * 100) for i in range(1, n_frames + 1)]):
-        listener.queue.put(f)
+        # Through _cb — see the note in test_barge_in_during_speech.
+        listener._cb(f, 0, None, None)
 
     with patch.object(ww.sd, "RawInputStream", lambda **kw: _NullStream()), \
          patch.object(ww, "dogfooding_ledger"), \

@@ -486,8 +486,23 @@ def _coerce_args(tool_name: str, args: dict) -> dict:
     # Guarded by the declared JSON type so a stray int can't land in a string
     # slot; an unmatched arg of the wrong type keeps its original key and
     # still raises, which is the honest outcome.
+    # Narrowed 2026-09-22, when coercion moved AHEAD of the Guardian. While it
+    # ran after validation this could only ever repair a call the Guardian had
+    # already approved; now it decides what gets validated, so a guess here is
+    # a guess the security layer will bless.
+    #
+    # On a one-parameter tool there is nothing else the value could have meant.
+    # On a multi-parameter DESTRUCTIVE tool it is a guess about something
+    # irreversible — binding a stray key into send_whatsapp's `message` is not
+    # repairing an argument name, it is inventing the content of a message to
+    # a real person. Those keep their original keys and fail honestly.
+    tool_obj = REGISTRY.get(tool_name)
+    single_param = len(schema_params) == 1
+    irreversible = tool_obj is not None and tool_obj.tier == CapabilityTier.DESTRUCTIVE
+    positional_ok = single_param or not irreversible
+
     free = [p for p in schema_params if p not in out]
-    if len(unmatched) == 1 and free:
+    if len(unmatched) == 1 and free and positional_ok:
         key, value = unmatched[0]
         target = free[0]
         if _json_type_matches(schema_params[target].get("type"), value):

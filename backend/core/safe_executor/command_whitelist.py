@@ -573,15 +573,22 @@ def handle_stop(intent: Intent) -> dict:
     # Each guarded separately: a failure in one must not leave the others
     # running, which is the whole point of a stop.
     from backend.core.agents.pending_confirmation import store as pending_store
+    from backend.core.agents.pending_clarification import store as clarification_store
 
     # An action waiting on "should I proceed?" counts as in flight. The rule
     # tier resolves "cancel"/"never mind"/"abort" here too, so this is also
     # the only place those reach — they never get as far as Commander.
+    #
+    # A half-built action waiting on a missing argument ("what would you like
+    # the message to say?") is in flight in exactly the same sense, and it
+    # outlives its chain by design — so without this, "never mind" would leave
+    # a WhatsApp message to a real person answerable for a full TTL.
     for label, action in (
         ("speech", stop_speech),
         ("queue", lambda: get_sentence_queue().interrupt()),
         ("agent", commander.interrupt),
         ("pending confirmation", pending_store.clear_all),
+        ("pending clarification", clarification_store.clear_all),
     ):
         try:
             action()
