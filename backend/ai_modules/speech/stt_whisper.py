@@ -217,15 +217,32 @@ def transcribe_array_cpu(audio: np.ndarray, sample_rate: int = 16000) -> dict:
                     settings.whisper_model_cpu, device="cpu", compute_type="int8")
                 log.warning("offline STT: loaded %s on CPU in %.1fs",
                             settings.whisper_model_cpu, time.perf_counter() - t0)
-    segments, info = _cpu_model.transcribe(
-        audio,
-        language="en",
-        beam_size=1,
-        vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 300},
-        initial_prompt=_COMMAND_PROMPT,
-    )
-    return _collect_segments(segments, info)
+
+    # Inference is serialized too, not just the load above. Turn bodies are
+    # serialized by wake_word._start_turn — but only up to
+    # _TURN_HANDOVER_TIMEOUT_S, and past that several turns run at once and
+    # every one of them lands here. One CTranslate2 model configured for all
+    # cores, entered by N threads, means N decodes fighting over those cores:
+    #
+    #     [wake] previous turn still running after 15s; starting anyway
+    #     [wake] previous turn still running after 15s; starting anyway
+    #     STT: answered offline on CPU in 19120ms   (2995ms earlier that session)
+    #
+    # The lock spans _collect_segments DELIBERATELY. `transcribe()` returns a
+    # lazy generator and does almost nothing itself — faster-whisper decodes
+    # while that generator is iterated. Locking only the call would serialize
+    # the setup, leave all the real inference concurrent, and read like a
+    # correct fix; tests/test_cpu_whisper_is_serialized.py pins both halves.
+    with _cpu_lock:
+        segments, info = _cpu_model.transcribe(
+            audio,
+            language="en",
+            beam_size=1,
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 300},
+            initial_prompt=_COMMAND_PROMPT,
+        )
+        return _collect_segments(segments, info)
 
 
 
