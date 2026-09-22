@@ -2,6 +2,17 @@
 
     .venv/Scripts/python.exe tools/record_stt_corpus.py    # once
     .venv/Scripts/python.exe tools/stt_bench.py
+    .venv/Scripts/python.exe tools/stt_bench.py --configs groq --show-errors
+    .venv/Scripts/python.exe tools/stt_bench.py --no-groq   # offline, no quota
+
+Benches local faster-whisper (small/medium/large-v3) AND the cloud rung,
+Groq whisper-large-v3-turbo and whisper-large-v3, on the same clips through
+the same scorer. Two things to hold in mind when reading the cloud rows:
+
+  * their p50 includes a round trip, so it moves with your network and is
+    not comparable IN KIND to a local GPU number — but it IS what a turn
+    actually pays, which is the figure that matters.
+  * they spend API quota: one request per clip per model.
 
 Reports, per config:
   WER        word error rate over the whole corpus (lower is better)
@@ -60,14 +71,148 @@ _register_cuda_libs()
 
 from backend.ai_modules.speech.stt_whisper import _COMMAND_PROMPT  # noqa: E402
 
-CONFIGS = [
+LOCAL_CONFIGS = [
     ("small    cpu  int8", "small", "cpu", "int8"),
     ("small    cuda fp16", "small", "cuda", "float16"),
     ("medium   cuda fp16", "medium", "cuda", "float16"),
     ("large-v3 cuda fp16", "large-v3", "cuda", "float16"),
 ]
 
+# The cloud rung. Named separately from LOCAL_CONFIGS because they are not
+# the same kind of measurement: a local p50 is compute, a Groq p50 is compute
+# plus a round trip, and only the second one moves when your wifi does.
+GROQ_MODELS = [
+    ("groq     turbo", "whisper-large-v3-turbo"),
+    ("groq     v3   ", "whisper-large-v3"),
+]
+
 _PUNCT = re.compile(r"[^\w\s]")
+
+
+# ── engines ──────────────────────────────────────────────────────────────
+#
+# Each engine is `load() -> transcribe(wav) -> str -> close()`. The scoring
+# loop below does not know which kind it is holding, so local and cloud are
+# scored by identical code on identical audio — which is the only way the
+# comparison means anything.
+
+
+class LocalWhisper:
+    """faster-whisper, decoding exactly as production does."""
+
+    def __init__(self, label: str, size: str, device: str, ctype: str, beam: int):
+        self.label = label
+        self.size, self.device, self.ctype, self.beam = size, device, ctype, beam
+        self.model = None
+
+    def load(self) -> None:
+        from faster_whisper import WhisperModel
+
+        self.model = WhisperModel(self.size, device=self.device,
+                                  compute_type=self.ctype)
+
+    def transcribe(self, wav: Path) -> str:
+        segs, _ = self.model.transcribe(
+            str(wav), language="en", beam_size=self.beam, vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 300},
+            initial_prompt=_COMMAND_PROMPT,
+        )
+        return " ".join(s.text for s in segs).strip()
+
+    def close(self) -> None:
+        self.model = None
+
+
+class GroqWhisper:
+    """One direct POST per clip.
+
+    Deliberately NOT stt_groq.transcribe(). That function is a FALLBACK CHAIN
+    — Groq, then Gemini, then local CPU Whisper — so a rate-limited run would
+    quietly return Gemini's transcripts and this bench would print them under
+    Groq's name and call it a measurement. The whole point here is to learn
+    what ONE model does, so failures must surface as failures.
+
+    The corpus is already 16 kHz mono PCM_16, the same shape stt_groq._wav_bytes
+    produces, so the file bytes go up untouched.
+    """
+
+    def __init__(self, label: str, model: str, prompt: str):
+        self.label = label
+        self.model = model
+        self.prompt = prompt
+        self.failures = 0
+        # Seconds spent asleep waiting out a 429 during the last transcribe.
+        # The caller subtracts it: a rate-limit wait is the BENCH's cost, not
+        # the model's, and leaving it in put a 3.7s p95 on a model whose p50
+        # is under half a second. A latency figure nobody can trust is worse
+        # than no latency figure, because this one gets quoted later.
+        self.last_wait_s = 0.0
+        self._client = None
+
+    def load(self) -> None:
+        import httpx
+
+        from backend.server.config import settings
+
+        if not settings.groq_api_key:
+            raise RuntimeError("GROQ_API_KEY is not set")
+        self._key = settings.groq_api_key
+        # Far longer than production's ~3s read timeout, on purpose. In
+        # production a slow response SHOULD give up and let Gemini answer; in
+        # a bench, giving up would score a timeout as a wrong transcript and
+        # understate the model's accuracy. We wait, and report the latency —
+        # p95 is where a response too slow for production shows up.
+        self._client = httpx.Client(timeout=httpx.Timeout(connect=5.0, read=60.0,
+                                                          write=60.0, pool=60.0))
+
+    def transcribe(self, wav: Path) -> str:
+        data = {"model": self.model, "language": "en",
+                "temperature": "0", "response_format": "json"}
+        if self.prompt:
+            data["prompt"] = self.prompt
+
+        # Retry ONLY on 429. A rate limit is the one failure that is both
+        # likely (30 clips back-to-back) and silently score-destroying, since
+        # a refused request is indistinguishable from a bad transcript once
+        # it lands in the WER column.
+        self.last_wait_s = 0.0
+        for attempt in range(4):
+            r = self._client.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {self._key}"},
+                files={"file": (wav.name, wav.read_bytes(), "audio/wav")},
+                data=data,
+            )
+            if r.status_code == 429 and attempt < 3:
+                wait = min(float(r.headers.get("retry-after") or 2 ** attempt), 30.0)
+                print(f"      rate limited, waiting {wait:.0f}s…", flush=True)
+                time.sleep(wait)
+                self.last_wait_s += wait
+                continue
+            break
+
+        if r.status_code != 200:
+            self.failures += 1
+            raise RuntimeError(f"HTTP {r.status_code}: {r.text[:120]}")
+        return (r.json().get("text") or "").strip()
+
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+
+def build_engines(args) -> list:
+    """Every engine the run asks for, unfiltered ones dropped by label."""
+    engines: list = [LocalWhisper(label, size, device, ctype, args.beam)
+                     for label, size, device, ctype in LOCAL_CONFIGS]
+    if not args.no_groq:
+        engines += [GroqWhisper(label, model, args.groq_prompt)
+                    for label, model in GROQ_MODELS]
+    if args.configs:
+        engines = [e for e in engines
+                   if any(f.lower() in e.label.lower() for f in args.configs)]
+    return engines
 
 
 def pct(values: list[float], q: float) -> float:
@@ -191,6 +336,15 @@ def main() -> int:
     ap.add_argument("--no-fold-numbers", dest="fold_numbers",
                     action="store_false", default=True,
                     help="do NOT treat 'fifteen' and '15' as equal")
+    ap.add_argument("--no-groq", action="store_true",
+                    help="local models only — no network, no API quota spent")
+    # stt_groq ships with GROQ_STT_PROMPT empty, on measurement: the proper-noun
+    # list derailed quiet clips, once out of English entirely. Its docstring
+    # names the flip worth retrying in a noisier room; this is that flip.
+    ap.add_argument("--groq-prompt", default="",
+                    help="bias Groq decoding toward these words, e.g. "
+                         "'Onyx, Razorpay, KNSIT, WhatsApp'. Off by default, "
+                         "matching production")
     args = ap.parse_args()
 
     corpus_path = CORPUS / "corpus.json"
@@ -207,14 +361,11 @@ def main() -> int:
 
     print(f"{len(items)} utterances from {CORPUS}  (beam_size={args.beam})\n")
 
-    from faster_whisper import WhisperModel
-
     rows = []
-    for label, size, device, ctype in CONFIGS:
-        if args.configs and not any(f.lower() in label.lower() for f in args.configs):
-            continue
+    for engine in build_engines(args):
+        label = engine.label
         try:
-            model = WhisperModel(size, device=device, compute_type=ctype)
+            engine.load()
         except Exception as e:
             print(f"{label:20} UNAVAILABLE: {type(e).__name__}: {str(e)[:90]}")
             continue
@@ -226,15 +377,11 @@ def main() -> int:
         for pid, truth, wav in items:
             t0 = time.perf_counter()
             try:
-                segs, _ = model.transcribe(
-                    str(wav), language="en", beam_size=args.beam, vad_filter=True,
-                    vad_parameters={"min_silence_duration_ms": 300},
-                    initial_prompt=_COMMAND_PROMPT,
-                )
-                hyp = " ".join(s.text for s in segs).strip()
+                hyp = engine.transcribe(wav)
             except Exception as e:
-                hyp = f"<{type(e).__name__}>"
-            times.append((time.perf_counter() - t0) * 1000)
+                hyp = f"<{type(e).__name__}: {str(e)[:60]}>"
+            elapsed = time.perf_counter() - t0 - getattr(engine, "last_wait_s", 0.0)
+            times.append(elapsed * 1000)
 
             scored = hyp
             if args.collapse_repeats:
@@ -286,11 +433,17 @@ def main() -> int:
         print(f"{label:20} WER {errs/max(ref_words,1):5.1%}  EXACT {exact/n:5.1%}  "
               f"CMD {cmd_ok/n:5.1%}  p50 {statistics.median(times):5.0f}ms  "
               f"p95 {pct(times, 0.95):5.0f}ms{note}")
+        # A refused request lands in the WER column looking exactly like a bad
+        # transcript, so say plainly that the number is not an accuracy figure.
+        failed = getattr(engine, "failures", 0)
+        if failed:
+            print(f"      ⚠ {failed}/{n} requests FAILED — these scored as errors. "
+                  f"This row is not a measurement of accuracy.")
         if args.show_errors and mistakes:
             for pid, truth, hyp in mistakes:
                 print(f"      {pid:16} said {truth!r}\n"
                       f"      {'':16} got  {hyp!r}")
-        del model
+        engine.close()
 
     if not rows:
         return 1
