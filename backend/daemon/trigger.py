@@ -501,7 +501,29 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
 
     state_manager.transition_to(AssistantState.IDLE)
     latency_ledger().record(turn)
-    return True
+    # Did this turn produce anything for the user? wake_word._start_turn reads
+    # the answer as `command_handled`, and that is what chooses between
+    # reopening the follow-up window and counting an empty capture toward
+    # _FOLLOWUP_MAX_EMPTY.
+    #
+    # This was an unconditional `return True`, which said "the planner
+    # returned" where it meant "the user was served". Live:
+    #
+    #     [ai] response:  (latency: 3442ms, tools: 0)
+    #     [wake] listening — 8s idle, 45s left in this chain
+    #
+    # A turn that said nothing held the mic open for another 8s, so the room
+    # kept driving turns and the empty-capture brake never engaged.
+    #
+    # Three ways to have produced something, not one. A silent tool call is
+    # still work the user asked for; and `reply` / `sq.spoke_anything` are
+    # ALTERNATIVES at the fallback check above, so a streamed turn whose final
+    # spoken_text came back blank did speak and must count.
+    return bool(
+        reply.strip()
+        or response.tool_calls
+        or (sq is not None and sq.spoke_anything)
+    )
 
 
 async def _run_brain_streaming(
