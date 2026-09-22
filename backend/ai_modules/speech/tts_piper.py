@@ -199,6 +199,15 @@ def speech_boundary() -> float:
     So on the normal path this really is "after the speaker went quiet". On
     the barge-in/error path the player can still be unwinding, which is one
     more reason callers bias conservative.
+
+    KNOWN, and deliberately not defended against: a LEAKED utterance — a
+    speak_stream generator abandoned without being exhausted or closed —
+    holds this at +inf for up to _UNFINISHED_MAX_S (60s). Everything that
+    reads it degrades safely (the follow-up pre-roll trim simply falls back
+    to the single trigger frame), so the failure direction is right. But the
+    user-visible shape is "the capture started losing its first word again,
+    for about a minute, for no reason" — so look here before re-deriving the
+    pre-roll logic.
     """
     with _spoken_lock:
         if not _recent_spoken:

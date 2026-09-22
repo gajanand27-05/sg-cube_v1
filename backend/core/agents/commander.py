@@ -586,10 +586,20 @@ class CommanderAgent:
                         # it in. Recorded here rather than at the question
                         # because by then `calls` is gone. See the write at the
                         # final_response branch.
+                        # Reflects the MOST RECENT rejection, and only that.
+                        # Leaving a previous missing-arg behind when this
+                        # rejection was for some other reason (a hallucinated
+                        # tool name, a type mismatch) is a second route to the
+                        # phantom slot: the planner flails through several
+                        # different errors, recovers, and its closing sentence
+                        # gets recorded as the answer to a question about a
+                        # half-built call the turn stopped being stuck on.
                         _missing = _parse_missing_arg(last_error)
                         if _missing and calls and isinstance(calls[0], dict):
                             unfilled = (_missing[1], dict(calls[0].get("args") or {}),
                                         _missing[0])
+                        else:
+                            unfilled = None
                         # Guardian can reject a plan whose calls list is empty or
                         # malformed — don't let the recovery path itself crash.
                         failed_tool = calls[0].get("name", "unknown") if calls and isinstance(calls[0], dict) else "unknown"
@@ -607,6 +617,28 @@ class CommanderAgent:
                         history.append({"role": "assistant", "content": json.dumps({"tool_calls": calls})})
                         history.append({"role": "user", "content": f"Correction needed: {instruction}"})
                         continue
+
+                    # Past the Guardian, so nothing is half-built any more.
+                    #
+                    # `unfilled` is read much later, in the final_response
+                    # branch — and a RECOVERED turn reaches that same branch,
+                    # because the multi-tool assessment loop comes back around
+                    # to the planner. Without this line an ordinary turn like
+                    #
+                    #   send_whatsapp{contact}  -> rejected for 'message'
+                    #   [get_time, get_time]    -> executes
+                    #   "It is 9:15 PM."        -> closing sentence
+                    #
+                    # stored a pending clarification for a DESTRUCTIVE tool
+                    # carrying its own ANSWER as the question it had asked. A
+                    # single successful tool hid it: that path returns early at
+                    # `len(batch_results) == 1`. Tool FAILURE after a rejection
+                    # was a second route to the same write.
+                    #
+                    # Only a rejection FOLLOWED BY A QUESTION may write the
+                    # slot, and a question short-circuits above this line, so
+                    # clearing here cannot reach the legitimate case.
+                    unfilled = None
 
                     if pending_calls:
                         first_pending = pending_calls[0]

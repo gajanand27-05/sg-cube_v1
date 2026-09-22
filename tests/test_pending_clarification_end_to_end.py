@@ -162,6 +162,82 @@ def test_the_slot_is_consumed_and_is_not_filled_by_an_unrelated_command():
     )
 
 
+def test_a_recovered_turn_does_not_leave_a_phantom_question():
+    """Found in review of the pushed main.
+
+    `unfilled` is set when the Guardian rejects a call for a missing argument
+    and is never cleared. It is read much later, in the final_response branch
+    — and a turn that RECOVERED reaches that same branch, because the
+    multi-tool assessment loop comes back around to the planner.
+
+    A single successful tool hides this: that path returns early at
+    `if len(batch_results) == 1`. Two or more tools fall through, iterate, and
+    the planner's closing sentence lands on the write site:
+
+        planner: send_whatsapp{contact}  -> Guardian rejects 'message'
+                 [get_time, get_time]    -> executes
+                 final_response "It is 9:15 PM."
+        stored:  Clarification(tool='send_whatsapp', missing='message',
+                               question='It is 9:15 PM.')
+
+    So an ordinary recovered turn leaves a pending question pointing at a
+    DESTRUCTIVE tool, carrying its own ANSWER as the question it supposedly
+    asked. The next turn is then told Onyx asked "It is 9:15 PM." and that
+    send_whatsapp is missing its message.
+
+    The read-back confirmation does stop it sending — that precondition
+    earning its keep — but the slot should never have been written. Only a
+    rejection FOLLOWED BY A QUESTION may write it.
+    """
+    two_tools = {"tool_calls": [{"name": "get_time", "args": {}},
+                                {"name": "get_time", "args": {}}]}
+    planner = _ScriptedPlanner([INCOMPLETE, two_tools,
+                                {"final_response": "It is 9:15 PM."}])
+    chunks = _run(planner, "what time is it")
+
+    assert "9:15" in _spoken(chunks), _spoken(chunks)
+    assert not pc.store.awaiting_answer(), (
+        "a recovered turn stored a phantom clarification: "
+        f"{pc.store.take(None)!r} — its 'question' is this turn's answer, and "
+        "the next turn will be told a DESTRUCTIVE send is half-built"
+    )
+
+
+def test_a_later_rejection_for_another_reason_clears_the_half_built_call():
+    """The second route, found by checking rather than assuming — and it is a
+    DIFFERENT mechanism, not the same one.
+
+    Clearing `unfilled` once the Guardian passes does not cover this: the
+    Guardian never passes. A missing-argument rejection sets `unfilled`, then
+    a rejection for an unrelated reason ("Tool 'x' not found in registry.")
+    leaves it standing, and the eventual closing sentence writes it.
+
+    Arguably the likelier of the two in practice: a planner that is flailing
+    produces several different errors in a row, not one.
+
+    So `unfilled` must describe the most recent rejection and nothing else.
+    """
+    two_tools = {"tool_calls": [{"name": "get_time", "args": {}},
+                                {"name": "no_such_tool_at_all", "args": {}}]}
+    planner = _ScriptedPlanner([INCOMPLETE, two_tools,
+                                {"final_response": "I couldn't do that."}])
+    _run(planner, "what time is it")
+
+    assert not pc.store.awaiting_answer(), (
+        f"a failed recovery stored a phantom clarification: {pc.store.take(None)!r}"
+    )
+
+
+def test_a_genuine_question_still_writes_the_slot():
+    """Guard against fixing this by never writing the slot at all."""
+    planner = _ScriptedPlanner([INCOMPLETE, QUESTION])
+    _run(planner, "to send a whatsapp message to sharat")
+    assert pc.store.awaiting_answer(), (
+        "clearing `unfilled` went too far — a real missing-argument question "
+        "no longer records what it was asking about"
+    )
+
+
 def test_a_turn_with_no_pending_question_is_unchanged():
     """Guard: the context block must not appear when nothing is pending."""
     planner = _ScriptedPlanner([{"final_response": "Hello!"}])
