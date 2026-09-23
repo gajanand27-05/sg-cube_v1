@@ -52,7 +52,23 @@ _COMMAND_PROMPT = (
     "weather, read the news, set a reminder, translate to spanish, "
     "summarize this article, stop, cancel, never mind. Apps: notepad, "
     "chrome, firefox, vscode, spotify, whatsapp, discord, telegram, "
-    "calculator, explorer."
+    "calculator, explorer. "
+    # Proper nouns, for the same reason "Onyx" leads this prompt: an unprimed
+    # name has no context, so the decoder rewrites it into whatever common
+    # words sound nearby. Measured live:
+    #     "Nikola Tesla" -> 'Nicoletta', 'Nicola Tere'
+    #     "Gajanand"     -> 'Gajanan'   (twice in one utterance — and the
+    #                                    misheard spelling was then written to
+    #                                    permanent memory by remember())
+    #     "Sharath"      -> 'sharat'    (as a WhatsApp recipient)
+    #
+    # Names only, no sentence around them: prose is what Whisper hands back
+    # verbatim when the audio does not decode. Short enough that the name run
+    # alone stays under _PROMPT_ECHO_MIN_WORDS, so it cannot be mistaken for a
+    # recital — and tests pin that real commands USING these names are not
+    # swallowed by is_prompt_echo, which is the silent failure that would
+    # matter far more than the echo.
+    "Names: Gajanand, Sharath, Nikola Tesla."
 )
 
 # Below this many words, an overlap with the prompt is coincidence — the
