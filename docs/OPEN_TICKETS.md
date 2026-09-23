@@ -625,3 +625,15 @@ The fix for the wake word was to prime Whisper via `_COMMAND_PROMPT`; the same t
 `remember` is `SYSTEM_WRITE` with no declared `verify`, so `runtime.py` caps its confidence at `_UNCONFIRMED_CONFIDENCE` and `_hedge` appends "— though I couldn't confirm it" to a write that succeeded. Observed live; the fact *was* stored.
 
 It writes to Onyx's own store, so reading it back is trivial — this is the cheapest post-condition in the tree and it is missing. Tracked separately from the narration gate (T-planner-narrates-state-it-never-read) because this one is a declarable contract, not a prompting problem.
+
+## T-stt-prompt-names-are-hardcoded (opened 2026-09-23)
+
+`_COMMAND_PROMPT` now primes `Gajanand, Sharath, Nikola Tesla` (04a8c04), which closes the measured mishearings but hardcodes them. `Sharath` is a **contact**, and the contact book already knows every name the user might address — so the prompt should be built from `backend/core/contacts.py` at model-load time rather than edited by hand whenever someone is added.
+
+**Why it matters beyond tidiness**: a contact added later is a contact whose name is mis-transcribed, and `send_whatsapp` resolves recipients by name. The failure is a message to the wrong person, or a confirmation read-back naming someone who does not exist.
+
+**Consider dropping `Nikola Tesla` once this exists.** It is not a contact and not a standing part of this user's vocabulary — it was one query on one evening. It earns its place only while the mechanism is static; a prompt that accretes every proper noun ever misheard will drift back toward prose and toward the recital failure `is_prompt_echo` exists to catch.
+
+**Do in the same change**: the comment at `stt_whisper.py:23-29` still describes the prompt as *"prose-style (NOT a comma-separated list)"*. That has been false since the keyword rewrite, and it directly contradicts the comment fifteen lines below it, which explains why sentences were removed. Two adjacent comments disagreeing about the format is how the next person reintroduces the bug.
+
+Related: [T-proper-nouns-are-not-primed] — the STT half is closed; the memory half (a misheard name still reaching permanent storage sight-unseen) is not.
