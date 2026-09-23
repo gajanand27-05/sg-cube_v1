@@ -384,6 +384,28 @@ class WakeWordListener:
         """
         return rms >= _FOLLOWUP_MIN_RMS
 
+    def _followup_trigger(self, rms: float) -> bool:
+        """The gate decision, plus a count of what it turned away.
+
+        Identical behaviour to `_followup_trigger_allowed` — this only adds
+        the tally, so the rejections are visible as numbers rather than as an
+        absence. Without them the archive can show what RAISING the floor
+        would cost and nothing about what 400 already drops, and the sample is
+        censored at exactly that point.
+
+        Recording only: the threshold moves when there is archived evidence to
+        move it with, not tonight.
+        """
+        if self._followup_trigger_allowed(rms):
+            return True
+        try:
+            from backend.core import capture_archive
+
+            capture_archive.record_gate_rejection(rms, floor=_FOLLOWUP_MIN_RMS)
+        except Exception:
+            pass
+        return False
+
     def _open_followup(self, window: float | None = None, *,
                        new_chain: bool = False) -> None:
         """Open (or refresh) the window and reset the failure count.
@@ -575,7 +597,7 @@ class WakeWordListener:
         return False
 
     def _start_turn(self, audio: bytes, *, new_chain: bool = True,
-                    source: str = "wake") -> None:
+                    source: str = "wake", rms: float | None = None) -> None:
         """Run the turn off the listen loop.
 
         `new_chain` is False when this turn was triggered from inside an open
@@ -630,6 +652,23 @@ class WakeWordListener:
                 if previous.is_alive():
                     print(f"[wake] previous turn still running after "
                           f"{_TURN_HANDOVER_TIMEOUT_S:.0f}s; starting anyway")
+
+            # Hand the listener's own measurement to whoever archives this
+            # capture. Set HERE, on the turn's thread, so it cannot be
+            # overwritten by an overlapping turn — see the note in
+            # capture_archive.set_trigger_context for why this is not a module
+            # global and not an on_wake argument.
+            if rms is not None:
+                try:
+                    from backend.core import capture_archive
+
+                    capture_archive.set_trigger_context(
+                        rms=round(float(rms), 1),
+                        followup_min_rms=_FOLLOWUP_MIN_RMS,
+                        trigger_source=source,
+                    )
+                except Exception:
+                    pass
 
             command_handled = False
             try:
@@ -919,7 +958,7 @@ class WakeWordListener:
                             state_manager._voice_trigger_source = "wake"
                         elif (in_followup
                                 and _partial_grew(partial, self._partial_tokens)
-                                and self._followup_trigger_allowed(rms)):
+                                and self._followup_trigger(rms)):
                             # T-wake-word-executes-ambient-audio item 2: gate the
                             # follow-up window on CONTENT, not loudness. Near-silence
                             # after the speaker cut off still clears rms>500 and
@@ -1028,6 +1067,10 @@ class WakeWordListener:
                     new_chain=not from_followup,
                     source=("barge_in" if is_barge_in
                             else "followup" if from_followup else "wake"),
+                    # The RMS of the frame that fired this turn — the number
+                    # the follow-up gate compares against _FOLLOWUP_MIN_RMS,
+                    # and the one the archive could not previously record.
+                    rms=rms,
                 )
 
     def stop(self) -> None:

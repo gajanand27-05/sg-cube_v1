@@ -61,6 +61,38 @@ def _isolate_dogfooding_ledger(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _isolate_capture_archive(tmp_path_factory):
+    """Keep the suite out of the real capture archive.
+
+    Same hazard as the two below, and it bites hardest here. Several tests
+    drive the REAL listen loop (test_barge_in_real_audio, test_wake_preroll),
+    and the wake branch archives the pre-roll that fired it — reaching the
+    module-level `_ARCHIVE_DIR`, not a fixture. Measured: three test files
+    added three wake records to backend/database/captures.
+
+    That archive is the evidence base for two open questions — where
+    _FOLLOWUP_MIN_RMS belongs, and whether the '[unk] [unk] [unk] onyx' false
+    wakes are marginal or solid. Both are DISTRIBUTION questions, so
+    test-generated records are not merely noise: they are the same fixture
+    clip and the same handful of RMS values, repeated once per suite run. A
+    threshold calibrated from that would be measuring the fixtures.
+
+    Rebinding the module attribute rather than the setting, because `enabled()`
+    reads config and several tests legitimately turn archiving ON to assert
+    that it writes.
+    """
+    from backend.core import capture_archive
+
+    tmp = tmp_path_factory.mktemp("captures")
+    real = capture_archive._ARCHIVE_DIR
+    capture_archive._ARCHIVE_DIR = tmp
+    try:
+        yield tmp
+    finally:
+        capture_archive._ARCHIVE_DIR = real
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _isolate_contact_book(tmp_path_factory):
     """Keep the suite out of the user's real contacts file.
 

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 import wave
 from pathlib import Path
@@ -70,6 +71,86 @@ _BUCKET_PREFIX = {
 def enabled() -> bool:
     from backend.server.config import settings
     return bool(getattr(settings, "stt_archive_captures", False))
+
+
+# ── what the listener measured, carried to the archive call ────────────
+#
+# The number the follow-up gate compares (`_FOLLOWUP_MIN_RMS`) is known in
+# wake_word at trigger time; the transcript and the audio are only known in
+# trigger.py after STT. This carries the first to the second.
+#
+# THREAD-LOCAL, not a module global, and not threaded through on_wake.
+#
+#   * A module global races. Turn bodies are serialized only up to
+#     _TURN_HANDOVER_TIMEOUT_S, and past it two turns run on two threads.
+#     `state_manager._voice_trigger_source` is exactly this shape and was
+#     already found being reset by one turn while another read it, silently
+#     mislabelling records — see the note in wake_word._start_turn.
+#   * on_wake(audio) is called with one positional argument from a dozen
+#     test sites and from tools/, and _start_turn wraps the call in
+#     `except Exception`. Widening the signature would turn every stale
+#     caller into a swallowed TypeError logged as "on_wake handler raised",
+#     i.e. a production break that the tests would not show.
+#
+# handle_wake runs asyncio.run on the turn's OWN thread, so a thread-local
+# set at the top of the turn reaches the archive call and nothing else.
+_local = threading.local()
+
+
+def set_trigger_context(**meta) -> None:
+    """Record what fired this turn, for the archive call that follows."""
+    _local.meta = dict(meta)
+
+
+def take_trigger_context() -> dict:
+    """Pop it. Empty dict when there was no listener behind this turn — the
+    text and proactive paths have none, and must still archive."""
+    meta = getattr(_local, "meta", None) or {}
+    _local.meta = None
+    return dict(meta)
+
+
+# ── rejected triggers, counts only ─────────────────────────────────────
+GATE_REJECTIONS_FILE = "gate_rejections.json"
+_REJECTION_BIN = 100
+_rejection_lock = threading.Lock()
+
+
+def record_gate_rejection(rms: float, *, floor: float) -> None:
+    """Count one follow-up trigger the RMS floor turned away.
+
+    Counts only, no audio. The passing triggers alone can show what RAISING
+    the floor would cost; they say nothing about how much real speech the
+    current floor already drops, which is the other half of the calibration.
+    Keeping audio for these would mean archiving every quiet frame of every
+    follow-up window, which is exactly the volume the bucket budgets exist to
+    avoid.
+
+    Never raises: this runs inside the listen loop, and losing a statistic is
+    worth strictly less than continuing to listen.
+    """
+    if not enabled():
+        return
+    try:
+        with _rejection_lock:
+            path = _ARCHIVE_DIR / GATE_REJECTIONS_FILE
+            try:
+                hist = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                hist = {"floor": floor, "bin_width": _REJECTION_BIN,
+                        "bins": {}, "total": 0}
+            # The floor is stored, not assumed: it is the censoring point of
+            # the whole archived sample, and a record that does not name it
+            # reads as the full population of follow-up attempts.
+            hist["floor"] = floor
+            key = str(int(rms // _REJECTION_BIN) * _REJECTION_BIN)
+            hist["bins"][key] = hist["bins"].get(key, 0) + 1
+            hist["total"] = hist.get("total", 0) + 1
+            hist["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            _ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(hist, indent=2), encoding="utf-8")
+    except Exception as e:
+        log.debug("could not count a gate rejection: %s", e)
 
 
 def _delete(wav: Path) -> None:
@@ -147,6 +228,11 @@ def archive(audio: np.ndarray | bytes, transcript: str, *,
         wav_path.with_suffix(".json").write_text(json.dumps({
             "transcript": transcript,
             "trigger": trigger,
+            # Named here so one record carries rms, transcript AND its audio:
+            # calibration means sorting by rms and listening in order, and
+            # `dispatched` is not a label for "addressed to Onyx" — every turn
+            # in the 2026-09-22 log dispatched and none of them were.
+            "audio": wav_path.name,
             # Whether this reached the router. An empty or gated transcript is
             # exactly the case worth reviewing, so it is archived too and
             # flagged rather than skipped.

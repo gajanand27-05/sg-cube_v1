@@ -833,10 +833,15 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
             try:
                 from backend.core import capture_archive
 
+                # take_trigger_context() carries what the LISTENER measured —
+                # the trigger frame's RMS and the floor in force. It is set on
+                # this same thread by wake_word._start_turn, so an overlapping
+                # turn cannot substitute its own numbers here.
                 capture_archive.archive(
                     audio_float, command,
                     trigger=getattr(state_manager, "_voice_trigger_source", ""),
                     dispatched=bool(command),
+                    extra=capture_archive.take_trigger_context(),
                 )
             except Exception:
                 pass

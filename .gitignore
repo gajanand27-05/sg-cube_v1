@@ -99,3 +99,8 @@ DEMO.md
 # Working notes for coding agents — local, like AGENTS.md
 logs.md
 decisions.md
+
+# Quarantined suite-written captures (see tests/conftest.py
+# _isolate_capture_archive). Kept on disk so the move is reversible, but they
+# are fixture replays, not recordings of the user.
+backend/database/captures/_suite_artifacts/
