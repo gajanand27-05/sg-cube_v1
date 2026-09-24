@@ -3,7 +3,7 @@
 Using dataclasses lets us pattern-match in the UI dispatcher and stay decoupled
 from the daemon internals.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -136,7 +136,11 @@ class AgentCompletedEvent:
 
 @dataclass
 class ProactiveEvent:
+    """A watcher fired. `query` is spoken; `tool`/`args` is the one fixed call
+    resolved at setup (tools/automation.py), run verbatim — never planned."""
     query: str
+    tool: str = ""
+    args: dict = field(default_factory=dict)
 
 
 @dataclass

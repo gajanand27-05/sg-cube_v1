@@ -34,11 +34,17 @@ def test_missing_required_argument_is_a_fix_not_a_clarification_request():
 
 
 def test_the_verifier_still_words_it_that_way():
-    """Guards the seam: healing.py matches on text verifier.py produces."""
-    import inspect
+    """Guards the seam: healing.py matches on text the verifier produces.
+
+    Asserted on the verifier's actual OUTPUT rather than its source: the
+    schema check moved into tool_policy.py, and a grep of verifier.py would
+    have broken on a move that changed no behaviour — or passed on a comment."""
+    import asyncio
+    import backend.core.tools  # noqa: F401
     from backend.core.agent import verifier
-    src = inspect.getsource(verifier)
-    assert "Missing required argument" in src, (
+    res = asyncio.run(verifier.verify("", {"name": "set_volume", "args": {}}))
+    assert not res.is_valid
+    assert "Missing required argument" in res.error, (
         "verifier reworded its missing-arg error; healing.py matches on it"
     )
 

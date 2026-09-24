@@ -967,20 +967,54 @@ def on_proactive_event(event: ProactiveEvent):
                     return
                 time.sleep(0.1)
 
-            asyncio.run(_handle_proactive_async(event.query))
+            asyncio.run(_handle_proactive_async(event))
         except Exception as e:
             log.error(f"Proactive trigger failed: {e}")
 
     threading.Thread(target=_run, daemon=True, name="proactive-trigger").start()
 
 
-async def _handle_proactive_async(query: str):
-    t0 = asyncio.get_event_loop().time()
-    state_manager.transition_to(AssistantState.THINKING)
-    print(f"[proactive] {query!r}")
+async def _handle_proactive_async(event: ProactiveEvent):
+    """Run a watcher's FIXED action. No planner: the call was resolved and
+    checked at setup, and is re-checked here under the `background` trigger
+    source — read-only or allowlisted, never destructive — because the
+    allowlist or the tool may have changed since.
 
-    command = f"[Proactive] {query}"
-    await _process_and_execute(command, peak=0, t0=t0, emit=None, device_id=None)
+    This used to hand free text to the planner under trigger source None,
+    which the verifier reads as an explicit wake: trusted tools ran unchecked
+    and destructive ones asked "should I proceed?" of an empty room.
+    """
+    from backend.core.agent import tool_policy
+    from backend.core.tools import registry as tool_registry
+
+    state_manager.transition_to(AssistantState.THINKING)
+    state_manager._voice_trigger_source = "background"
+    print(f"[proactive] announce={event.query!r} tool={event.tool!r} args={event.args!r}")
+    parts = [event.query] if event.query else []
+    try:
+        if event.tool:
+            args = dict(event.args or {})
+            refusal = (tool_policy.background_refusal(event.tool, args)
+                       or (event.tool in tool_registry.REGISTRY
+                           and tool_policy.schema_problem(event.tool, args)))
+            if refusal:
+                log.warning("Background action refused at fire time: %s", refusal)
+                parts.append(f"I did not run the background action: {refusal}.")
+            else:
+                res = await tool_registry.call(event.tool, args)
+                result = res.model_dump() if hasattr(res, "model_dump") else dict(res)
+                message = result.get("message") or result.get("reason") or ""
+                if message:
+                    parts.append(message)
+
+        spoken = " ".join(p for p in parts if p).strip()
+        if spoken:
+            state_manager.transition_to(AssistantState.SPEAKING)
+            await _speak_selective(spoken, None)
+            get_bus().publish(SpokenResponse(text=spoken), priority=Priority.NORMAL)
+    finally:
+        state_manager._voice_trigger_source = None
+        state_manager.transition_to(AssistantState.IDLE)
 
 
 def register_proactive_handler() -> None:

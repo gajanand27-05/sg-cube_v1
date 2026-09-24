@@ -5,6 +5,7 @@ from typing import Any
 
 from backend.ai_modules.llm import get_provider
 from backend.ai_modules.llm.routing import TaskType
+from backend.core.agent import tool_policy
 from backend.core.state import manager as state_manager
 from backend.core.tools.registry import REGISTRY, CapabilityTier, SecurityLevel, _resolve_name
 
@@ -129,29 +130,11 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
     obs_engine.report_ai_quality(request_id, 100.0, f"Tool {resolved} found")
     tool_obj = REGISTRY[resolved]
 
-    # B. Malformed Check (Schema)
-    params = tool_obj.schema.get("parameters", {})
-    required = params.get("required", [])
-    properties = params.get("properties", {})
-
-    for req in required:
-        if req not in args:
-            obs_engine.report_context_quality(request_id, 0.0, f"Missing required arg: {req}")
-            return VerificationResult(False, error=f"Missing required argument {req!r} for tool {resolved!r}.")
-
-    # Simple type validation
-    for key, val in args.items():
-        if key in properties:
-            expected_type = properties[key].get("type")
-            valid_type = True
-            if expected_type == "integer" and not isinstance(val, int): valid_type = False
-            if expected_type == "number" and not isinstance(val, (int, float)): valid_type = False
-            if expected_type == "string" and not isinstance(val, str): valid_type = False
-            if expected_type == "boolean" and not isinstance(val, bool): valid_type = False
-            
-            if not valid_type:
-                obs_engine.report_ai_quality(request_id, 50.0, f"Type mismatch for {key}")
-                return VerificationResult(False, error=f"Argument {key!r} type mismatch.")
+    # B. Malformed Check (Schema) — shared with the watcher's setup-time check
+    problem = tool_policy.schema_problem(resolved, args)
+    if problem:
+        obs_engine.report_context_quality(request_id, 0.0, problem)
+        return VerificationResult(False, error=problem)
 
     obs_engine.report_context_quality(request_id, 100.0, "Schema valid")
 
@@ -160,6 +143,18 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
     if malicious_reason:
         obs_engine.report_ai_quality(request_id, 0.0, f"Malicious input detected")
         return VerificationResult(False, error=malicious_reason)
+
+    # Background (watcher-fired) calls have no utterance for the deep check to
+    # compare against and nobody present to confirm, so the allowlist IS the
+    # check: read-only or ALLOW, never destructive. Before this, a proactive
+    # turn carried trigger source None — which reads as an explicit wake — and
+    # ran trusted tools with no check at all.
+    if state_manager._voice_trigger_source == "background":
+        refusal = tool_policy.background_refusal(resolved, args)
+        if refusal:
+            obs_engine.report_ai_quality(request_id, 0.0, f"Background refusal: {refusal}")
+            return VerificationResult(False, error=f"Refused in the background: {refusal}")
+        return VerificationResult(True, reasoning=reasoning)
 
     # ── 2. Confidence Scoring (Routing Signal) ───────────────────────
     

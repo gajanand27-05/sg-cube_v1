@@ -40,8 +40,8 @@ def test_proactive_event_actually_reaches_the_handler(monkeypatch):
     seen: list[str] = []
     ran = threading.Event()
 
-    async def _fake_proactive(query: str):
-        seen.append(query)
+    async def _fake_proactive(event):
+        seen.append(event.query)
         ran.set()
 
     monkeypatch.setattr(trigger, "_handle_proactive_async", _fake_proactive)
@@ -59,7 +59,7 @@ def test_proactive_waits_for_idle_then_runs(monkeypatch):
     """It must still defer while a voice turn is in flight."""
     ran = threading.Event()
 
-    async def _fake_proactive(query: str):
+    async def _fake_proactive(event):
         ran.set()
 
     monkeypatch.setattr(trigger, "_handle_proactive_async", _fake_proactive)
