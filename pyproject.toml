@@ -143,6 +143,12 @@ dev = [
     # tools/watch_tests.py
     "watchfiles",
 ]
+# Measurement tools, not the app. tools/wake_bench.py compares Vosk against
+# openWakeWord; its base package runs on onnxruntime (the torch/tensorflow
+# deps all sit behind openwakeword's own `full` extra, which this skips).
+bench = [
+    "openwakeword==0.6.0",
+]
 
 [tool.uv]
 # Not a distributable package: the installer runs it from its directory.

@@ -101,7 +101,7 @@ class OpenWakeWordEngine:
         except ImportError as e:
             raise SystemExit(
                 "openwakeword is not installed.\n"
-                "  pip install openwakeword\n"
+                "  uv sync --group bench\n"
                 "and supply --oww-model with a trained 'onyx' model — the "
                 "shipped pretrained set does not include it."
             ) from e
@@ -114,6 +114,13 @@ class OpenWakeWordEngine:
             raise SystemExit(
                 "--oww-model is required: a pretrained name (hey_jarvis, "
                 "alexa, hey_mycroft, hey_rhasspy) or a path to a trained model.")
+        if not os.path.exists(model_path):
+            # A pretrained NAME. Its files are release assets, not part of the
+            # wheel, so a fresh venv has none of them; this fetches only what
+            # is missing (plus the shared melspectrogram/embedding models).
+            from openwakeword.utils import download_models
+
+            download_models(model_names=[model_path])
         self._m = Model(wakeword_models=[model_path], inference_framework="onnx")
         self.wake_phrase = wake_phrase
         self.detail = os.path.basename(model_path)
