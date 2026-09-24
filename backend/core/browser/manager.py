@@ -81,7 +81,7 @@ class BrowserManager:
             from playwright.async_api import async_playwright
         except ImportError as e:
             raise BrowserLaunchError(
-                "playwright not installed — pip install playwright and run "
+                "playwright not installed — uv sync and run "
                 "`playwright install chromium`"
             ) from e
 

@@ -5,7 +5,8 @@ from typing import Annotated
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from backend.core.auth.jwt_verifier import verify_token
-from backend.database.supabase_client import get_service_client
+from backend.database import supabase_client
+from backend.database.supabase_client import SupabaseUnavailable, get_service_client
 from backend.server.config import settings
 
 DAEMON_USER_ID = "21c19bf1-b73f-4001-80de-789b93c8d703"
@@ -80,6 +81,9 @@ def get_bearer_token(
 
 
 def get_current_user(token: Annotated[str, Depends(get_bearer_token)]) -> dict:
+    if not supabase_client.configured():
+        # Checked before verify_token, which needs pyjwt from the same extra.
+        raise SupabaseUnavailable("bearer tokens need the 'supabase' extra and keys")
     payload = verify_token(token)
     user_id = payload.get("sub")
     if not user_id:

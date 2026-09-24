@@ -64,7 +64,15 @@ def check_config() -> None:
     # Neither backend is "correct" — they trade different things, and which one
     # is right was a deliberate decision (see .env). Report the consequences of
     # whichever is set rather than pretending there is one right answer.
-    if settings.stt_backend == "gemini":
+    if settings.stt_backend == "groq":
+        # The default (stt.py). Was missing here, so the default config FAILed.
+        if settings.groq_api_key:
+            record("PASS", "STT_BACKEND", "groq — cloud; falls back to Gemini, and to "
+                                          "local CPU whisper when the network is down")
+        else:
+            record("WARN", "STT_BACKEND", "groq selected but GROQ_API_KEY is empty — every "
+                                          "utterance falls through to the fallbacks")
+    elif settings.stt_backend == "gemini":
         record("PASS", "STT_BACKEND", "gemini — off the GPU, but NO offline path: "
                                       "no network means no voice at all, and each turn "
                                       "costs 2 requests against the key pool")
@@ -76,7 +84,7 @@ def check_config() -> None:
                                           "profile dropping to CPU/small on battery")
     else:
         record("FAIL", "STT_BACKEND", f"{settings.stt_backend!r} is not a valid backend "
-                                      "(expected 'gemini' or 'whisper')")
+                                      "(expected 'groq', 'gemini' or 'whisper')")
 
     if settings.enable_vision:
         record("WARN", "ENABLE_VISION", "true — passive VLM glance is ~35s and drains battery; "
@@ -283,7 +291,15 @@ def check_voice() -> None:
                    f"NOT available but STT_PROFILE forces {profile.device} — "
                    "set STT_PROFILE=auto or fast")
         else:
-            record("WARN", "CUDA (ctranslate2)", f"unavailable — running {profile}")
+            import ctranslate2
+
+            if ctranslate2.get_cuda_device_count() > 0:
+                # The card is there; only the libraries are missing.
+                record("WARN", "CUDA (ctranslate2)",
+                       f"NVIDIA GPU found but cuBLAS/cuDNN are not installed — running "
+                       f"{profile}. `uv sync --extra gpu` to use it")
+            else:
+                record("WARN", "CUDA (ctranslate2)", f"unavailable — running {profile}")
     except Exception as e:
         record("WARN", "CUDA (ctranslate2)", f"could not query: {type(e).__name__}: {str(e)[:70]}")
 

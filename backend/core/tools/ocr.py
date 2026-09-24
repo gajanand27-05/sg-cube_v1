@@ -161,7 +161,7 @@ def ocr_screen() -> ToolResult:
     try:
         import pytesseract
     except ImportError:
-        return ToolResult.error("pytesseract not installed (pip install pytesseract)")
+        return ToolResult.error("pytesseract not installed (uv sync)")
 
     from backend.core.vision.ocr_reader import tesseract_path
 

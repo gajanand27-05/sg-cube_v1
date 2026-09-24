@@ -31,7 +31,7 @@ def _ensure_prereqs() -> None:
     if shutil.which("schtasks") is None:
         sys.exit("schtasks.exe not on PATH — this script is Windows-only.")
     if not PYTHONW.exists():
-        sys.exit(f"pythonw.exe not found at {PYTHONW} — run pip install in your venv first.")
+        sys.exit(f"pythonw.exe not found at {PYTHONW} — run `uv sync` first.")
     if not DAEMON_SCRIPT.exists():
         sys.exit(f"daemon script not found at {DAEMON_SCRIPT}")
 

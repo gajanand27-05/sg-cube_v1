@@ -291,10 +291,11 @@ ollama pull phi3
 ollama pull qwen2.5vl:3b
 ollama pull nomic-embed-text
 
-# 2. Python environment
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
+# 2. Python environment (https://docs.astral.sh/uv/) — installs Python 3.12
+#    and the exact locked versions into .venv
+uv sync
+#    Optional: Supabase accounts / admin approval / command log
+uv sync --extra supabase
 
 # 3. Download offline voice models
 python tools/download_vosk_model.py

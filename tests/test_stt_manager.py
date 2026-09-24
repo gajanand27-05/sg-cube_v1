@@ -87,6 +87,41 @@ def test_cuda_check_does_not_consult_torch(monkeypatch):
     assert "torch" not in src.split('"""')[-1], "cuda_available consults torch"
 
 
+
+def _fake_ct2(monkeypatch, devices=1):
+    import types
+
+    fake = types.SimpleNamespace(
+        get_cuda_device_count=lambda: devices,
+        get_supported_compute_types=lambda _d: {"float16", "int8"},
+    )
+    monkeypatch.setitem(sys.modules, "ctranslate2", fake)
+    monkeypatch.setattr(m, "_register_cuda_libs", lambda: None)
+
+
+def test_gpu_without_cuda_dlls_is_not_available(monkeypatch, tmp_path):
+    """A fresh install without the gpu extra: the card is there, the DLLs are
+    not. Answering True loaded Whisper onto the GPU and crashed the first
+    decode."""
+    _fake_ct2(monkeypatch)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert m.cuda_available() is False
+
+
+def test_gpu_with_cuda_dlls_is_available(monkeypatch, tmp_path):
+    _fake_ct2(monkeypatch)
+    for dll in m._CUDA_DLLS:
+        (tmp_path / dll).write_bytes(b"")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert m.cuda_available() is True
+
+
+def test_one_missing_dll_is_enough_to_refuse(monkeypatch, tmp_path):
+    _fake_ct2(monkeypatch)
+    (tmp_path / m._CUDA_DLLS[0]).write_bytes(b"")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert m.cuda_available() is False
+
 # ── model cache lifetime ────────────────────────────────────────────────
 
 class _FakeModel:

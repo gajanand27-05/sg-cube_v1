@@ -4,7 +4,7 @@ Runs Tesseract on a JPEG frame, returns text lines with their bounding boxes
 so the caller knows where each piece of text sits on screen. Runs Tesseract on
 a worker thread so it never stalls the WS loop.
 
-Reuses pytesseract from requirements.txt — no new dependency.
+Reuses pytesseract from pyproject.toml — no new dependency.
 """
 import logging
 import os

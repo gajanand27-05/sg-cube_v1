@@ -1,13 +1,15 @@
-import jwt
+# pyjwt ships with the optional 'supabase' extra, so it is imported inside
+# the functions: this module loads at boot through auth/deps.py.
 from fastapi import HTTPException, status
-from jwt import PyJWKClient
 
 from backend.server.config import settings
 
-_jwks_client: PyJWKClient | None = None
+_jwks_client = None
 
 
-def _get_jwks_client() -> PyJWKClient:
+def _get_jwks_client():
+    from jwt import PyJWKClient
+
     global _jwks_client
     if _jwks_client is None:
         if not settings.supabase_url:
@@ -26,6 +28,8 @@ def verify_token(token: str) -> dict:
     and verify with the matching public key. Falls back to HS256 with the
     shared secret for legacy projects.
     """
+    import jwt
+
     try:
         signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
         return jwt.decode(

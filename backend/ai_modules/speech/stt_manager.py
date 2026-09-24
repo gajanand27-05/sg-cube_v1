@@ -64,8 +64,26 @@ def _register_cuda_libs() -> None:
         _cuda_registered = True
 
 
+# CTranslate2 resolves these through PATH at the first GPU op, NOT at model
+# load. Without them a Whisper model loads onto the GPU fine and then dies on
+# its first decode — measured on a fresh `uv sync` without the gpu extra:
+# "Library cublas64_12.dll is not found or cannot be loaded". That is the
+# offline STT fallback, i.e. it fails exactly when the network is down.
+_CUDA_DLLS = ("cublas64_12.dll", "cudnn64_9.dll")
+
+
+def _cuda_libs_present() -> bool:
+    dirs = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d]
+    return all(any((Path(d) / dll).is_file() for d in dirs) for dll in _CUDA_DLLS)
+
+
 def cuda_available() -> bool:
     """True when CTranslate2 can actually run on the GPU here.
+
+    Needs the device AND the cuBLAS/cuDNN DLLs, which ship as the optional
+    `gpu` extra (`uv sync --extra gpu`, ~2 GB) — an 8 GB laptop with no NVIDIA
+    card should not download them. Without them this answers False and the
+    profile falls back to the CPU, which works.
 
     Deliberately not torch.cuda.is_available(): torch is not a dependency, and
     when it was, the venv's CPU-only build reported False while CTranslate2
@@ -77,6 +95,10 @@ def cuda_available() -> bool:
         if ctranslate2.get_cuda_device_count() < 1:
             return False
         _register_cuda_libs()
+        if not _cuda_libs_present():
+            log.debug("cuda_available: GPU present but cuBLAS/cuDNN DLLs are not "
+                      "(install the 'gpu' extra); using the CPU")
+            return False
         return "float16" in ctranslate2.get_supported_compute_types("cuda")
     except Exception as e:
         log.debug("cuda_available: %s", e)

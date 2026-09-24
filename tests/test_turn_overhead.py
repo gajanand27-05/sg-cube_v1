@@ -129,7 +129,7 @@ def test_log_to_db_does_not_block_the_caller():
             release.wait(5)
 
     t0 = time.perf_counter()
-    with patch.object(router, "get_service_client", lambda: _Slow()):
+    with patch.object(router.supabase_client, "configured", lambda: True),             patch.object(router, "get_service_client", lambda: _Slow()):
         router._log_to_db("u", "hello", None, "rule", "success", 1)
         elapsed = (time.perf_counter() - t0) * 1000
         assert started.wait(3), "the write never ran"
@@ -147,7 +147,7 @@ def test_a_failing_log_never_raises():
     def _boom():
         raise RuntimeError("supabase down")
 
-    with patch.object(router, "get_service_client", _boom):
+    with patch.object(router.supabase_client, "configured", lambda: True),             patch.object(router, "get_service_client", _boom):
         router._log_to_db("u", "hello", None, "rule", "success", 1)  # must not raise
 
 

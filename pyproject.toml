@@ -1,0 +1,152 @@
+[project]
+name = "sg-cube"
+version = "1.0.0"
+description = "Local-first, voice-first desktop assistant"
+readme = "README.md"
+# The installer ships its own 3.12; pywin32 308 and the pinned native wheels
+# (ctranslate2, onnxruntime, vosk, piper) were all tested on it.
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+    # ── server core ──
+    "fastapi==0.138.1",
+    "uvicorn[standard]==0.49.0",
+    # >=2.12.5 for google-genai. Was pinned at 2.10.3, which google-genai 2.x
+    # does not accept — the venv only worked because pip never re-resolved.
+    "pydantic>=2.12.5,<3",
+    "pydantic-settings>=2.7.0",
+    "python-dotenv==1.0.1",
+    "pyyaml>=6.0.3",
+
+    # ── LLM ──
+    # The primary reasoning backend (backend/ai_modules/llm/backends/
+    # gemini_backend.py). Was never declared: it only existed in the venv
+    # because someone installed it by hand, so a fresh install had no Gemini.
+    "google-genai>=2.10.0",
+
+    # ── Speech-to-Text ──
+    # Pinned exactly, not just for STT: the post-wake speech gate imports
+    # faster_whisper.vad (VadOptions field names, get_vad_model, the bundled
+    # Silero v5 ONNX files). That is internal API — re-run the gate bench
+    # before bumping. See backend/ai_modules/speech/speech_gate.py.
+    "faster-whisper==1.1.0",
+    # Imported directly by stt_manager for the CUDA check.
+    "ctranslate2>=4.7.1",
+    # Runs the speech gate's VAD. Was only a transitive of faster-whisper;
+    # now called directly, so declared.
+    "onnxruntime==1.26.0",
+    "numpy>=2.0",
+    "sounddevice==0.5.1",
+    # tools/record_stt_corpus.py imports this at module scope.
+    "soundfile==0.14.0",
+    "python-multipart==0.0.20",
+    "requests==2.32.3",
+    # (silero-vad removed 2026-09-24: it imports torch at module level even
+    # for its ONNX path — ~524 MB for one call. tests/test_no_torch.py keeps
+    # it out.)
+
+    # ── Text-to-Speech (Piper — offline neural TTS) ──
+    # Voice models live in paths.PIPER_DIR; fetch with
+    # tools/download_piper_voice.py [voice-name]
+    "piper-tts==1.4.2",
+
+    # ── Screen capture + change detection (backend/core/vision/) ──
+    "Pillow==11.0.0",
+
+    # ── Wake word (Vosk — offline, grammar-restricted) ──
+    # Model lives in paths.VOSK_DIR; fetch with tools/download_vosk_model.py
+    "vosk==0.3.45",
+
+    # ── In-app actions (YouTube first-result resolver) ──
+    "yt-dlp==2026.3.3",
+
+    # ── System control (audio / display / battery / windows / files) ──
+    "psutil==6.1.0",
+    "pycaw==20240210",
+    "screen-brightness-control==0.24.0",
+    "pygetwindow==0.0.9",
+    "pyautogui==0.9.54",
+    # Reads and closes tabs in the user's REAL Chrome (backend/core/
+    # chrome_tabs.py) over UI Automation — the only way in without restarting
+    # Chrome on a CDP debugging port.
+    "uiautomation==2.0.29",
+    # Imported directly (audio.py, chrome_tabs.py); was only a transitive.
+    "comtypes>=1.4.16",
+    # EnumWindows, SetWindowPos, EnumDisplayMonitors, GetDpiForMonitor for
+    # windowing.py; pygetwindow stays for the legacy focus/minimize path.
+    "pywin32==308",
+
+    # ── Live browser automation ──
+    # LAZY — the browser only launches on the first browser tool call.
+    "playwright==1.48.0",
+
+    # ── Information feeds ──
+    "feedparser==6.0.11",
+
+    # ── Web search (backend/core/websearch) ──
+    # Keyless general web search. Deliberately the library rather than our own
+    # POSTs to html.duckduckgo.com: hand-rolled requests answer about two
+    # queries and then return an anti-bot CAPTCHA as HTTP 202.
+    "ddgs==9.14.4",
+    # Was pinned <0.28 for supabase 2.10, which broke ddgs (>=0.28.1) and
+    # google-genai (>=0.28.1). supabase 2.31 accepts <0.29, so the pin goes.
+    # The extras are the ones ddgs asks for.
+    "httpx[http2,brotli,socks]>=0.28.1,<0.29",
+
+    # ── MCP (server + client) ──
+    "fastmcp>=0.5.0",
+    # Imported directly by the MCP client; was only a fastmcp transitive.
+    "mcp>=1.10.1",
+
+    # ── Content analysis (summarize, OCR, translate, read-aloud) ──
+    # pytesseract needs the Tesseract BINARY, which pip cannot install:
+    #   winget install UB-Mannheim.TesseractOCR
+    # ocr_reader.py probes the standard install directories itself (the
+    # installer does not add itself to PATH) and honours TESSERACT_CMD.
+    # cv2 decodes/downscales frames before Tesseract. Headless: no GUI calls.
+    "opencv-python-headless==4.10.0.84",
+    "pypdf==5.1.0",
+    "beautifulsoup4==4.12.3",
+    "pytesseract==0.3.13",
+    "pyperclip==1.9.0",
+
+    # ── Semantic memory ──
+    "chromadb==1.5.9",
+]
+
+[project.optional-dependencies]
+# Accounts, admin approval and the command_logs table. A single-user laptop
+# install needs none of it: the HUD authenticates as the local daemon user.
+# Everything that touches these imports them lazily
+# (backend/database/supabase_client.py), and routes answer 503 without them.
+supabase = [
+    "supabase==2.31.0",
+    # >=2.12 because supabase-auth 2.31 requires it.
+    "pyjwt[crypto]>=2.12.0",
+]
+
+# cuBLAS + cuDNN for Whisper on an NVIDIA GPU (~2 GB). Optional because the
+# floor is an 8 GB laptop with no GPU. Without them stt_manager.cuda_available()
+# answers False and Whisper runs on the CPU. Versions are the ones the dev
+# machine ran on; they were never declared, only hand-installed.
+gpu = [
+    "nvidia-cublas-cu12==12.9.2.10",
+    "nvidia-cudnn-cu12==9.24.0.43",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    # Without it @pytest.mark.asyncio is unknown and async tests are never
+    # awaited — they fail on a fresh clone.
+    "pytest-asyncio>=0.24",
+    # tools/watch_tests.py
+    "watchfiles",
+]
+
+[tool.uv]
+# Not a distributable package: the installer runs it from its directory.
+package = false
+# Windows-only product (pywin32, pycaw, uiautomation). Resolving for other
+# platforms would only invent conflicts nobody can hit.
+environments = ["sys_platform == 'win32'"]

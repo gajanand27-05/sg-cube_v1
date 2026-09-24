@@ -12,6 +12,7 @@ from backend.core.orchestrator.llm_layer import Intent, LLMResolveError
 from backend.core.orchestrator.llm_layer import resolve as llm_resolve
 from backend.core.orchestrator.normalize import normalize, normalize_for_rules
 from backend.daemon.ui_events import IntentResolved
+from backend.database import supabase_client
 from backend.database.supabase_client import get_service_client
 
 log = logging.getLogger(__name__)
@@ -44,6 +45,11 @@ def _log_to_db(
     awaiting it would block the event loop anyway, and callers are both sync
     and async.
     """
+    # Optional: a laptop install has no Supabase, and attempting the write
+    # anyway logged a warning on every single turn.
+    if not supabase_client.configured():
+        return
+
     payload = {
         "user_id": user_id,
         "input_text": input_text,

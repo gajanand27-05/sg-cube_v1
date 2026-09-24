@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from backend.database import supabase_client
 from backend.server.config import settings
 from backend.server.routes import admin, agents, auth, diagnostics, execute, files, memory, orchestrate, remote, system, ui, vision, voice
 
@@ -122,7 +123,7 @@ def health():
         "status": "ok",
         "app_env": settings.app_env,
         "version": app.version,
-        "supabase_configured": bool(settings.supabase_url and settings.supabase_jwt_secret),
+        "supabase_configured": supabase_client.configured(),
     }
 
 
@@ -132,7 +133,7 @@ def api_health():
         "status": "ok",
         "app_env": settings.app_env,
         "version": app.version,
-        "supabase_configured": bool(settings.supabase_url and settings.supabase_jwt_secret),
+        "supabase_configured": supabase_client.configured(),
     }
 
 
