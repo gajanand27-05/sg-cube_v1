@@ -27,16 +27,27 @@ def list_chrome_tabs() -> ToolResult:
 
 
 @tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.SYSTEM_WRITE)  # tier: reversible with Ctrl+Shift+T
-def close_chrome_tab(name: str) -> ToolResult:
+def close_chrome_tab(name: str, only_if_titles: list | None = None) -> ToolResult:
     """Close tabs in the user's real Chrome whose title contains `name`.
     Use for "close youtube", "close the gmail tab". Closes EVERY matching tab
     and reports which ones. Matching is loose on purpose, so always tell the
-    user the titles that were closed."""
+    user the titles that were closed. Leave `only_if_titles` empty — the
+    confirmation step fills it."""
     if not chrome_tabs.available():
         return ToolResult.blocked(_UNAVAILABLE)
     if not (name or "").strip():
         # An empty target would match every tab and close the whole window.
         return ToolResult.blocked("no tab name given")
+
+    # The confirmation listed specific tabs and the user approved THOSE. If the
+    # set that matches now is different (a new tab opened, one was closed),
+    # closing would take something they never saw — so close nothing.
+    if only_if_titles is not None:
+        now = sorted(t.title for t in chrome_tabs.list_tabs() if chrome_tabs.matches(name, t.title))
+        if now != sorted(only_if_titles):
+            return ToolResult.blocked(
+                "the matching tabs changed since you confirmed, so none were closed. "
+                f"Matching now: {'; '.join(now) or 'none'}")
 
     closed = chrome_tabs.close_matching(name)
     if not closed:

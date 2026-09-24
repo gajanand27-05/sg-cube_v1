@@ -1001,7 +1001,8 @@ async def _handle_proactive_async(event: ProactiveEvent):
                 log.warning("Background action refused at fire time: %s", refusal)
                 parts.append(f"I did not run the background action: {refusal}.")
             else:
-                res = await tool_registry.call(event.tool, args)
+                # approved: background_refusal above is this call's policy.
+                res = await tool_registry.call(event.tool, args, approved=True)
                 result = res.model_dump() if hasattr(res, "model_dump") else dict(res)
                 message = result.get("message") or result.get("reason") or ""
                 if message:

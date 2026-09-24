@@ -57,7 +57,9 @@ def send_to_phone(content: str, is_url: bool = False) -> ToolResult:
         "(delivery is not confirmed by the phone)")
 
 
-@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.DESTRUCTIVE)  # tier: external comm, irreversible
+# trusted: opens a pre-filled chat; nothing is sent until the user presses Send
+# in WhatsApp — no code here or anywhere in backend/ presses it (checked 2026-09-24).
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.SYSTEM_WRITE, trusted=True)
 def send_whatsapp(contact: str, message: str) -> ToolResult:
     """Open WhatsApp with a pre-filled message to `contact`.
     `contact` is a saved contact NAME (e.g. "Sharath") or a phone number with
@@ -96,7 +98,8 @@ def send_whatsapp(contact: str, message: str) -> ToolResult:
     return ToolResult.success(f"opened WhatsApp chat with {who} (+{phone})")
 
 
-@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.DESTRUCTIVE)  # tier: external email, irreversible
+# trusted: opens a draft in the mail client; the user sends it, never this code.
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.SYSTEM_WRITE, trusted=True)
 def send_email(to: str, subject: str = "", body: str = "") -> ToolResult:
     """Open the default mail client with a draft email pre-filled.
     `to` must be an email address. `subject` and `body` are optional."""

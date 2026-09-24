@@ -11,7 +11,13 @@ Reconstructed from the live log, in two turns with a dead chain between them:
             -> planner asks "What would you like the message to say?"
     turn 2  (chain expired, fresh wake word)
             'the message is hi sharath how are you doing'
-            -> must complete the ORIGINAL send_whatsapp, still confirming.
+            -> must complete the ORIGINAL send_whatsapp.
+
+send_whatsapp was DESTRUCTIVE and so completed behind a spoken confirmation.
+Since 2026-09-24 it is trusted: it only opens a pre-filled draft, and nothing
+is sent until the user presses Send in WhatsApp (nothing in backend/ presses
+it). So completing it now means opening exactly that draft for exactly that
+recipient — which is what these tests pin.
 
 Only the planner is stubbed. The Guardian, the self-healer, the clarification
 store and the confirmation prompt are all real.
@@ -30,6 +36,20 @@ from backend.core.agent import verifier as v
 from backend.core.agents import commander as cmd
 from backend.core.agents import pending_clarification as pc
 from backend.core.agent.context import ConversationContext
+
+
+@pytest.fixture
+def opened(monkeypatch):
+    """Record the draft the tool opens instead of opening a real browser, and
+    give the (isolated) contact book the recipient the scenario names."""
+    from backend.core.contacts import book
+    from backend.core.tools import comms
+
+    book.add("Sharath", "+919876543210")
+    urls = []
+    monkeypatch.setattr(comms.webbrowser, "open", urls.append)
+    yield urls
+    book.delete("Sharath")
 
 
 @pytest.fixture(autouse=True)
@@ -80,6 +100,7 @@ def _spoken(chunks):
 INCOMPLETE = {"tool_calls": [{"name": "send_whatsapp",
                               "args": {"contact": "Sharath"}}]}
 QUESTION = {"final_response": "What would you like the message to say?"}
+DONE = {"final_response": "Opened WhatsApp with your message."}
 COMPLETED = {"tool_calls": [{"name": "send_whatsapp",
                              "args": {"contact": "Sharath",
                                       "message": "Hi Sharath, how are you doing?"}}]}
@@ -103,14 +124,14 @@ def test_turn_one_records_the_question_it_just_asked():
     assert held.missing == "message"
 
 
-def test_the_answer_after_a_fresh_wake_completes_the_action():
+def test_the_answer_after_a_fresh_wake_completes_the_action(opened):
     """The regression. Turn 2 is a SEPARATE run_stream call with its own
     context object — the chain died in between, exactly as in the log."""
     first = _ScriptedPlanner([INCOMPLETE, QUESTION])
     _run(first, "to send a whatsapp message to sharat")
     assert pc.store.awaiting_answer(), "fixture precondition"
 
-    second = _ScriptedPlanner([COMPLETED])
+    second = _ScriptedPlanner([COMPLETED, DONE])
     chunks = _run(second, "the message is hi sharath how are you doing")
 
     shown = "\n".join(m["content"] for m in second.seen_history[0])
@@ -120,26 +141,23 @@ def test_the_answer_after_a_fresh_wake_completes_the_action():
     )
     assert "Sharath" in shown, "known args were not carried into the prompt"
 
-    spoken = _spoken(chunks)
-    assert "permission" in spoken.lower(), (
-        f"expected the confirmation prompt, got {spoken!r} — a DESTRUCTIVE "
-        "send must not complete without one"
-    )
+    assert len(opened) == 1 and "wa.me/919876543210" in opened[0], (
+        f"the original send_whatsapp never completed: {opened!r}")
 
 
-def test_the_confirmation_reads_back_what_will_be_sent():
-    """Fix 3's safety net. 'Yes' has to be answerable."""
+def test_the_draft_carries_exactly_what_was_said(opened):
+    """The safety net moved from a spoken read-back to the draft itself: the
+    user sees these exact words in WhatsApp before pressing Send."""
     first = _ScriptedPlanner([INCOMPLETE, QUESTION])
     _run(first, "to send a whatsapp message to sharat")
-    chunks = _run(_ScriptedPlanner([COMPLETED]),
-                  "the message is hi sharath how are you doing")
+    _run(_ScriptedPlanner([COMPLETED, DONE]),
+         "the message is hi sharath how are you doing")
 
-    spoken = _spoken(chunks)
-    assert "Sharath" in spoken, spoken
-    assert "how are you doing" in spoken.lower(), (
-        f"the message body was never read back: {spoken!r} — a false wake "
-        "could put words in it and 'yes' would send them"
-    )
+    from urllib.parse import parse_qs, urlparse
+
+    assert len(opened) == 1, opened
+    text = parse_qs(urlparse(opened[0]).query)["text"][0]
+    assert text == "Hi Sharath, how are you doing?", text
 
 
 def test_the_slot_is_consumed_and_is_not_filled_by_an_unrelated_command():

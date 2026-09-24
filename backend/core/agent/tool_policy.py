@@ -36,7 +36,14 @@ ALLOW = frozenset({
     "monitor_battery", "monitor_folder",
     # contacts (reversible with delete_contact)
     "add_contact",
+    # open a pre-filled draft; the user presses Send, never this code
+    "send_email", "send_whatsapp",
 })
+
+# ALLOW tools that still need a yes on follow-up / barge-in turns when phi3 is
+# unavailable: those turns are where a misheard phrase slips in, and these two
+# write into long-term memory that shapes every later answer.
+HUD_ON_LOW_CONFIDENCE = frozenset({"remember", "set_preference"})
 
 HUD_CONFIRM = frozenset({
     "delete_file", "delete_contact", "send_to_phone",
@@ -98,3 +105,20 @@ def background_refusal(name: str, args: dict) -> str | None:
         if reason:
             return f"{name} would need confirmation ({reason})"
     return None
+
+
+def without_verifier(name: str, tier, explicit_trigger: bool, guard_reason: str | None):
+    """Decision when the phi3 deep check is unavailable (local Ollama down).
+
+    -> ("allow", None) | ("confirm", None) | ("refuse", reason)
+    """
+    if name in ALLOW:
+        if guard_reason:
+            return "confirm", None
+        if name in HUD_ON_LOW_CONFIDENCE and not explicit_trigger:
+            return "confirm", None
+        return "allow", None
+    if name in HUD_CONFIRM:
+        return "confirm", None
+    return "refuse", (f"{name} needs the local safety check, and local Ollama "
+                      "is not running")

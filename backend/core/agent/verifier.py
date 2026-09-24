@@ -48,17 +48,19 @@ def _is_malicious(args: dict) -> str | None:
     return None
 
 
-async def _secondary_check(user_query: str, tool_name: str, tool_args: dict, reasoning: str) -> bool:
+async def _secondary_check(user_query: str, tool_name: str, tool_args: dict, reasoning: str) -> bool | None:
     """Ask a second model whether this tool call makes sense.
 
     Routes via TaskType.VERIFICATION to local Ollama (phi3): 861ms warm,
     6408ms cold. Running it in the cloud instead was measured at 3451ms warm
     with a 21-minute outlier, so local stays — see routing.py for the numbers.
 
-    Fail-closed: returns False on rejection AND on any exception. Worth
-    knowing what that means operationally — when the routed backend is
-    unreachable, every deep-checked tool is rejected, which from the outside
-    looks exactly like the assistant mishearing the command.
+    True = approved, False = rejected (including a garbled answer, or any
+    failure while Ollama is up — fail closed), None = UNAVAILABLE: local
+    Ollama is down, so no verdict exists. The caller then falls back to the
+    reviewed allowlist (tool_policy.without_verifier) instead of rejecting
+    every deep-checked tool, which from the outside looked exactly like the
+    assistant mishearing the command.
     """
     llm = get_provider()
     prompt = f"""You are a safety and logic verifier for an AI Operating System.
@@ -98,8 +100,9 @@ Reply with a single JSON object: {{"verified": true}} or {{"verified": false, "r
             from backend.core import local_llm_health
 
             if local_llm_health.note_failure_if_local_is_down():
-                log.warning("Secondary check failed and local Ollama is "
-                            "unreachable — rejecting, and telling the user why")
+                log.warning("Secondary check unavailable: local Ollama is "
+                            "unreachable — falling back to the allowlist")
+                return None
         except Exception:
             pass
         log.warning(f"Secondary check failed: {e}")
@@ -224,7 +227,18 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
     # trigger the deep check. Confidence, multi-step, and legacy SecurityLevel
     # conditions used to gate this earlier; tier now dominates.
     log.info(f"Triggering deep verification for {resolved!r} (conf={conf_score}, multi={is_multi_step}, tier={tier.value})")
-    if not await _secondary_check(user_query, resolved, args, reasoning):
+    verdict = await _secondary_check(user_query, resolved, args, reasoning)
+    if verdict is None:
+        decision, why = tool_policy.without_verifier(
+            resolved, tier, is_explicit_trigger, guard_reason)
+        obs_engine.report_ai_quality(request_id, 50.0, f"No verifier: {decision}")
+        if decision == "refuse":
+            return VerificationResult(False, error=f"Refused without the local verifier: {why}")
+        if decision == "confirm":
+            return VerificationResult(True, reasoning=reasoning, needs_confirmation=True,
+                                      is_critical=tier == CapabilityTier.DESTRUCTIVE)
+        return VerificationResult(True, reasoning=reasoning)
+    if not verdict:
         obs_engine.report_ai_quality(request_id, 20.0, "Secondary check failed")
         return VerificationResult(
             False,

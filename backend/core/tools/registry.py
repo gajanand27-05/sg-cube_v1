@@ -161,6 +161,12 @@ class Tool:
 
 REGISTRY: dict[str, Tool] = {}
 
+# Tools whose arguments become words addressed to another person. They are not
+# DESTRUCTIVE (each only opens a pre-filled draft the user must send), but
+# argument coercion must still never GUESS their content: binding a stray value
+# into `message` invents what gets said to a real person.
+_COMPOSES_MESSAGES = frozenset({"send_whatsapp", "send_email"})
+
 
 # ── Phase 5A: tier-based tool execution timeouts ─────────────────────────
 # The tool's source module basename decides its timeout tier. This is the
@@ -421,18 +427,35 @@ def _resolve_name(name: str, args: dict) -> str | None:
     return best
 
 
-async def call(name: str, args: dict, request_id: Optional[str] = None) -> ToolResult:
+async def call(name: str, args: dict, request_id: Optional[str] = None,
+               approved: bool = False) -> ToolResult:
     """Invoke a registered tool. Falls back to fuzzy name resolution before
-    giving up — see _resolve_name."""
+    giving up — see _resolve_name.
+
+    `approved=True` means an upstream policy has ALREADY decided this exact
+    call: the Guardian (tier gate, phi3 or the no-verifier allowlist, and the
+    user's yes where one was needed) or the watcher's background policy. The
+    legacy SecurityLevel sandbox is then skipped. It stays in force for every
+    caller without such a policy — capabilities, plugins, the rule fast path.
+
+    Why: the sandbox answered EVERY CAUTION tool with "say 'confirm 1234' or
+    click OK", and nothing in production can answer that (guard.confirm has
+    no caller). So a Guardian-confirmed write_file/edit_file/delete_file/
+    add_contact/send_whatsapp/... never ran after the user said yes, and the
+    CRITICAL power tools could never run at all. Measured 2026-09-24: a
+    confirmed write_file through operator.execute_batch returned PENDING and
+    wrote nothing.
+    """
     resolved = _resolve_name(name, args)
     if resolved is None:
         return ToolResult.blocked(f"unknown tool: {name!r}")
-    
+
     # ── Security Layer ───────────────────────────────────────────────
-    from backend.core.tools.sandbox import guard
-    check_res = guard.check(resolved, args)
-    if check_res:
-        return check_res
+    if not approved:
+        from backend.core.tools.sandbox import guard
+        check_res = guard.check(resolved, args)
+        if check_res:
+            return check_res
     # ────────────────────────────────────────────────────────────────
 
     args = _coerce_args(resolved, args)
@@ -498,7 +521,8 @@ def _coerce_args(tool_name: str, args: dict) -> dict:
     # a real person. Those keep their original keys and fail honestly.
     tool_obj = REGISTRY.get(tool_name)
     single_param = len(schema_params) == 1
-    irreversible = tool_obj is not None and tool_obj.tier == CapabilityTier.DESTRUCTIVE
+    irreversible = tool_obj is not None and (
+        tool_obj.tier == CapabilityTier.DESTRUCTIVE or tool_name in _COMPOSES_MESSAGES)
     positional_ok = single_param or not irreversible
 
     free = [p for p in schema_params if p not in out]

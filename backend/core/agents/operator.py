@@ -26,7 +26,9 @@ class OperatorAgent(BaseInternalAgent):
             t0 = time.perf_counter()
 
             self._emit("executing_tool", tool=name)
-            res = await call_tool(name, args, request_id=request_id)
+            # approved: every call reaching the Operator has passed the
+            # Guardian, and been confirmed by the user where it needed to be.
+            res = await call_tool(name, args, request_id=request_id, approved=True)
             latency_ms = int((time.perf_counter() - t0) * 1000)
 
             # Latency only. Tool quality is reported by Runtime.run_tool, which

@@ -1,5 +1,4 @@
 """File ops + dictation tools (Phase 11b)."""
-import os
 import subprocess
 from pathlib import Path
 
@@ -7,38 +6,71 @@ import pyautogui
 
 from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
 
-# ... (rest of imports)
 
-@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.DESTRUCTIVE)  # tier: file deletion, hard to undo
-def delete_file(file: str) -> ToolResult:
-    """Delete a file. `file` is a full path or a substring of a file name in
-    your common user folders. REQUIRES CONFIRMATION."""
-    # This logic matches summarize.py's _resolve_file
+def resolve_delete_targets(file: str, limit: int = 10) -> list[Path]:
+    """Every file `file` could mean: itself if it is an existing path, else
+    each file under SEARCH_ROOTS whose name contains it (up to `limit`).
+
+    Used by delete_file AND by the confirmation step, which binds the call to
+    the one full path shown — so what the user approves is what gets deleted.
+    The old code deleted the FIRST substring match found anywhere, which the
+    user never saw."""
     p = Path(file).expanduser()
-    resolved = None
-    if p.exists() and p.is_file():
-        resolved = p
-    else:
-        q = file.strip().lower()
-        if q:
-            for root in SEARCH_ROOTS:
-                if not root.exists(): continue
-                try:
-                    for candidate in root.rglob("*"):
-                        if candidate.is_file() and q in candidate.name.lower():
-                            resolved = candidate
-                            break
-                    if resolved: break
-                except (PermissionError, OSError): continue
+    if p.is_file():
+        return [p.resolve()]
+    q = (file or "").strip().lower()
+    found: list[Path] = []
+    if not q:
+        return found
+    for root in SEARCH_ROOTS:
+        if not root.exists():
+            continue
+        try:
+            for candidate in root.rglob("*"):
+                if candidate.is_file() and q in candidate.name.lower():
+                    found.append(candidate.resolve())
+                    if len(found) >= limit:
+                        return found
+        except (PermissionError, OSError):
+            continue
+    return found
 
-    if not resolved:
-        return {"status": "blocked", "reason": f"no file matching {file!r}"}
-    
+
+def _to_recycle_bin(path: Path) -> None:
+    """Delete via the shell with undo, i.e. into the Recycle Bin. Raises on
+    failure. pywin32's SHFileOperation: FOF_ALLOWUNDO is what makes it
+    recoverable; the other flags stop the shell from putting up its own UI."""
+    from win32com.shell import shell, shellcon
+
+    flags = (shellcon.FOF_ALLOWUNDO | shellcon.FOF_NOCONFIRMATION
+             | shellcon.FOF_SILENT | shellcon.FOF_NOERRORUI)
+    code, aborted = shell.SHFileOperation(
+        (0, shellcon.FO_DELETE, str(path), None, flags, None, None))
+    if code != 0 or aborted or path.exists():
+        raise OSError(f"shell delete failed (code {code}, aborted={aborted})")
+
+
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.DESTRUCTIVE)  # tier: removes a file; recoverable from the Recycle Bin, but only if the user knows to look
+def delete_file(file: str) -> ToolResult:
+    """Move a file to the Recycle Bin. `file` is a full path or a substring of
+    a file name in your common user folders; if the substring matches more
+    than one file, nothing is deleted and the matches are listed so the user
+    can pick one. REQUIRES CONFIRMATION, which shows the full path."""
+    targets = resolve_delete_targets(file)
+    if not targets:
+        return ToolResult.blocked(f"no file matching {file!r}")
+    if len(targets) > 1:
+        listing = "; ".join(str(t) for t in targets)
+        return ToolResult.blocked(
+            f"{file!r} matches {len(targets)} files, so nothing was deleted. "
+            f"Say which one: {listing}")
+    target = targets[0]
     try:
-        os.remove(resolved)
-        return {"status": "success", "message": f"Deleted {resolved.name}"}
+        _to_recycle_bin(target)
     except Exception as e:
-        return {"status": "error", "reason": f"Delete failed: {e}"}
+        return ToolResult.error(f"Delete failed: {e}")
+    return ToolResult.success(f"Moved {target} to the Recycle Bin")
+
 
 SPECIAL_FOLDERS = {
     "downloads": "Downloads",

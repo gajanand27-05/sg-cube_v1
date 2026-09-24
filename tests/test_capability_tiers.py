@@ -85,6 +85,11 @@ TRUSTED_ALLOWLIST = {
     # guard confirms on a dirty-title marker or an unrecognised app, so the
     # trust only applies to apps known to hold no document state.
     "close_app", "close_active_window",
+    # Were DESTRUCTIVE until 2026-09-24. Each only opens a pre-filled draft;
+    # nothing is sent until the user presses Send (no code in backend/ presses
+    # it). Argument coercion still never guesses their content —
+    # registry._COMPOSES_MESSAGES.
+    "send_email", "send_whatsapp",
 }
 
 # Trusted tools that still confirm for SOME calls, via registry `confirm_if`.

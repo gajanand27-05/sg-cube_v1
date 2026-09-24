@@ -61,7 +61,7 @@ def test_setup_needs_something_to_do():
 def _fire(event, monkeypatch):
     calls, spoken, sources = [], [], []
 
-    async def fake_call(name, args):
+    async def fake_call(name, args, approved=False):
         calls.append((name, args))
         sources.append(state_manager._voice_trigger_source)
         return tool_registry.ToolResult.success(f"{name} done")
