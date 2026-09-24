@@ -106,6 +106,14 @@ class RemoteManager:
         else:
             log.debug(f"Skipping broadcast of {data['type']}: no active loop captured yet")
 
+    def live_device_count(self) -> int:
+        """Connections a broadcast would actually reach right now. Zero when no
+        event loop has been captured yet: _broadcast_event skips the send in
+        that case, so a device that is 'connected' but unreachable counts 0."""
+        if not (self.loop and self.loop.is_running()):
+            return 0
+        return sum(1 for c in self.active_connections.values() if c.is_active)
+
     async def broadcast(self, data: dict):
         for conn in list(self.active_connections.values()):
             await conn.send_json(data)
