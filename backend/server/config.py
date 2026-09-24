@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # Fast local models
     fast_model: str = "phi3"                    # classification, verification, intent
     embedding_model: str = "nomic-embed-text"   # vector embeddings
+    # Memory's embedder — local ONNX, no Ollama. "minilm-l6" (English, 90 MB)
+    # or "multilingual-minilm-l12" (Hindi/Kannada/...; 118 MB). Measured
+    # comparison in core/memory/embedding.py. Changing it re-embeds from the
+    # stored text at the next boot (core/memory/migration.py).
+    memory_embedder: str = "minilm-l6"
     # How long local Ollama keeps a model resident after a call. Ollama's
     # default is 5 minutes, after which the next call pays a cold load —
     # measured on this machine: phi3 5260ms cold vs 107ms warm. phi3 gates

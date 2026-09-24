@@ -48,18 +48,39 @@ def test_a_dead_ollama_does_not_raise(monkeypatch):
     preload._warm()   # must not raise
 
 
+def _record_embedder(monkeypatch, sink):
+    import backend.core.memory.embedding as emb
+
+    monkeypatch.setattr(emb, "get_embedder",
+                        lambda name: (lambda texts: sink.append(name) or [[0.1] * 384]))
+
+
 def test_a_failed_chat_warmup_still_warms_the_embedder(monkeypatch):
     """One model missing must not skip the other — they are independent, and
-    memory search needs nomic whether or not phi3 loaded."""
+    memory search needs its embedder whether or not phi3 loaded."""
     import backend.ai_modules.llm.ollama_client as oc
 
     embedded = []
     monkeypatch.setattr(oc, "generate_sync",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no phi3")))
-    monkeypatch.setattr(oc, "embed", lambda *a, **k: embedded.append(1) or [0.0])
+    _record_embedder(monkeypatch, embedded)
 
     preload._warm()
     assert embedded, "embedder was skipped because the chat model failed"
+
+
+def test_the_embedder_warms_without_ollama(monkeypatch):
+    """Memory is local now; a laptop with no Ollama still gets a warm embedder."""
+    import backend.ai_modules.llm.ollama_client as oc
+
+    def boom(*a, **k):
+        raise ConnectionError("connection refused")
+
+    monkeypatch.setattr(oc, "generate_sync", boom)
+    embedded = []
+    _record_embedder(monkeypatch, embedded)
+    preload._warm()
+    assert embedded
 
 
 def test_it_warms_the_models_the_voice_path_actually_uses(monkeypatch):
@@ -70,12 +91,12 @@ def test_it_warms_the_models_the_voice_path_actually_uses(monkeypatch):
     asked = {}
     monkeypatch.setattr(oc, "generate_sync",
                         lambda *a, **k: asked.update(chat=k.get("model")) or "ok")
-    monkeypatch.setattr(oc, "embed",
-                        lambda *a, **k: asked.update(embed=k.get("model")) or [0.0])
+    embedded = []
+    _record_embedder(monkeypatch, embedded)
 
     preload._warm()
     assert asked["chat"] == settings.fast_model
-    assert asked["embed"] == settings.embedding_model
+    assert embedded == [settings.memory_embedder]
 
 
 def test_the_warmup_thread_cannot_outlive_the_process(monkeypatch):

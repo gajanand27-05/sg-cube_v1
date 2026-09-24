@@ -92,6 +92,11 @@ def start_services(settings) -> dict:
     # command is usually the one being demonstrated.
     _start_one("preload", settings.enable_model_preload, preload.start)
 
+    # Re-embed memory into the active local embedder's collections, from the
+    # stored text, on a background thread. Resumable; sources untouched.
+    from backend.core.memory import migration as memory_migration
+    _start_one("memory-migration", True, memory_migration.start_background)
+
     _start_one("clipboard", settings.enable_clipboard, cb_watcher.start)
     _start_one("vision",    settings.enable_vision,    vision_loop.start)
     _start_one("watcher",   settings.enable_watcher,   watcher_agent.start)

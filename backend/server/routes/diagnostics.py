@@ -167,6 +167,14 @@ def get_preflight():
     }
 
 
+@router.get("/memory")
+def get_memory_migration():
+    """Which embedder memory uses, and how far the re-embed has got. While
+    `running`, recall covers only the rows already migrated."""
+    from backend.core.memory import migration
+    return migration.status()
+
+
 @router.get("/hardware")
 def get_hardware():
     """What the boot-time hardware probe found and which unset defaults it

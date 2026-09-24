@@ -67,15 +67,17 @@ def _warm() -> None:
     except Exception as e:
         log.info("preload of %s skipped: %s", settings.fast_model, e)
 
+    # Memory's embedder: local ONNX since 2026-09-25, so it warms whether or
+    # not Ollama is up (it used to be nomic via Ollama, and skipped with it).
     t0 = time.perf_counter()
     try:
-        if not ollama_up:
-            raise RuntimeError("local Ollama is not running")
-        ollama_client.embed("ok", model=settings.embedding_model)
-        log.info("preloaded %s in %.1fs", settings.embedding_model,
+        from backend.core.memory.embedding import get_embedder
+
+        get_embedder(settings.memory_embedder)(["ok"])
+        log.info("preloaded memory embedder %s in %.1fs", settings.memory_embedder,
                  time.perf_counter() - t0)
     except Exception as e:
-        log.info("preload of %s skipped: %s", settings.embedding_model, e)
+        log.info("preload of memory embedder %s skipped: %s", settings.memory_embedder, e)
 
     # The offline STT model, plus ONE decode on silence.
     #

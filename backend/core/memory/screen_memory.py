@@ -6,7 +6,8 @@ from typing import List, Optional
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 from backend.core.memory.embedding import (
     EmbeddingUnavailable,
-    ProviderEmbeddingFunction,
+    LocalEmbeddingFunction,
+    collection_name,
     report_write_failure,
 )
 from backend.core.memory.base import MemoryEntry, MemoryType, parse_ts
@@ -20,13 +21,15 @@ class ScreenMemory:
     
     def __init__(self):
         self.client = get_chroma_client()
-        self.ef = ProviderEmbeddingFunction("sg_cube_visual")
+        self.ef = LocalEmbeddingFunction("sg_cube_visual")
         
         # Specific collection for visual context
         self.collection = self.client.get_or_create_collection(
-            name="sg_cube_visual",
+            # Per-embedder name; the pre-2026-09-25 "sg_cube_visual" (nomic, 768-d)
+            # is kept untouched and re-embedded from its text by migration.py.
+            name=collection_name("sg_cube_visual", self.ef.embedder),
             embedding_function=self.ef,
-            metadata={"hnsw:space": "cosine"}
+            metadata={"hnsw:space": "cosine", "embedder": self.ef.embedder, "dim": self.ef.dim}
         )
 
     def store_observation(self, observation: dict) -> bool:

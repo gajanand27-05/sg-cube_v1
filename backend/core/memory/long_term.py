@@ -8,7 +8,8 @@ from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 
 from backend.core.memory.embedding import (
     EmbeddingUnavailable,
-    ProviderEmbeddingFunction,
+    LocalEmbeddingFunction,
+    collection_name,
     report_write_failure,
 )
 from backend.core.memory.base import MemoryEntry, MemoryType, naive_local, parse_ts
@@ -22,12 +23,14 @@ class LongTermMemory:
     def __init__(self):
         CHROMA_PATH.parent.mkdir(parents=True, exist_ok=True)
         self.client = get_chroma_client()
-        self.ef = ProviderEmbeddingFunction("sg_cube_memories")
+        self.ef = LocalEmbeddingFunction("sg_cube_memories")
         
         self.collection = self.client.get_or_create_collection(
-            name="sg_cube_memories",
+            # Per-embedder name; the pre-2026-09-25 "sg_cube_memories" (nomic, 768-d)
+            # is kept untouched and re-embedded from its text by migration.py.
+            name=collection_name("sg_cube_memories", self.ef.embedder),
             embedding_function=self.ef,
-            metadata={"hnsw:space": "cosine"}
+            metadata={"hnsw:space": "cosine", "embedder": self.ef.embedder, "dim": self.ef.dim}
         )
 
     def store(self, entry: MemoryEntry) -> bool:

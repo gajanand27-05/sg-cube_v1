@@ -7,7 +7,8 @@ from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 from backend.core.memory.base import MemoryEntry, MemoryType, parse_ts
 from backend.core.memory.embedding import (
     EmbeddingUnavailable,
-    ProviderEmbeddingFunction,
+    LocalEmbeddingFunction,
+    collection_name,
     report_write_failure,
 )
 from backend.database import CHROMA_PATH, get_chroma_client
@@ -20,13 +21,15 @@ class TimelineMemory:
     
     def __init__(self):
         self.client = get_chroma_client()
-        self.ef = ProviderEmbeddingFunction("sg_cube_timeline")
+        self.ef = LocalEmbeddingFunction("sg_cube_timeline")
         
         # Specific collection for chronological events
         self.collection = self.client.get_or_create_collection(
-            name="sg_cube_timeline",
+            # Per-embedder name; the pre-2026-09-25 "sg_cube_timeline" (nomic, 768-d)
+            # is kept untouched and re-embedded from its text by migration.py.
+            name=collection_name("sg_cube_timeline", self.ef.embedder),
             embedding_function=self.ef,
-            metadata={"hnsw:space": "cosine"}
+            metadata={"hnsw:space": "cosine", "embedder": self.ef.embedder, "dim": self.ef.dim}
         )
 
     def record_event(self, content: str, source: str, app: Optional[str] = None, metadata: Optional[dict] = None) -> bool:
