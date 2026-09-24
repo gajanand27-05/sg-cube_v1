@@ -27,7 +27,9 @@ dogfooding_ledger`, so they hold the object, not the module attribute — and a
 module not yet imported when this fixture runs would pick up the real one
 later. Same object with a different path covers every holder, past and future.
 """
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -35,6 +37,16 @@ import pytest
 _project_root = Path(__file__).resolve().parents[1]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
+
+# Every piece of mutable state — Chroma memory, the ledger, captures, contacts,
+# logs — resolves through backend/core/paths.py, which reads SG_CUBE_HOME once
+# at import. Set here, before any test module imports backend, so the whole
+# suite writes to a throwaway directory. The per-singleton fixtures below
+# predate this and stay as a second guard; this one also covers the stores
+# they never reached (a suite run wrote the real chroma_db and
+# ollama_restarts.jsonl). Models are not state and still resolve to the
+# checkout, so real-audio tests keep their Vosk model.
+os.environ["SG_CUBE_HOME"] = tempfile.mkdtemp(prefix="sg_cube_test_home_")
 
 
 @pytest.fixture(autouse=True, scope="session")
