@@ -189,9 +189,10 @@ def _check_vram(settings) -> None:
 def _probe_key_metadata(key: str, model: str) -> None:
     """Raises unless `key` is valid and can see `model`.
 
-    models.get is a metadata call — it never runs generate_content, so it does
-    not spend the free tier's ~20 generations/day. What it cannot tell you is
-    whether today's generation quota is already gone; --live-keys does that.
+    models.get is a metadata call — it never runs generate_content (verified by
+    rigging every generate path to raise). That it costs no quota at all is an
+    inference, not documented by Google as of 2026-09-24. What it cannot tell
+    you is whether today's generation quota is already gone; --live-keys does.
     """
     from google import genai
 
