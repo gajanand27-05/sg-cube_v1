@@ -9,9 +9,48 @@ export type ConnectionState = "connecting" | "open" | "closed";
 
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 10000];
 
-function resolveUrl(): string {
+const DEV_SERVER_PORT = "5173";
+const DEV_BACKEND = "127.0.0.1:8001";
+
+/** Where the backend is. When the backend serves this page (the installed
+ *  app, on whatever port it picked) that is simply this page's host; from the
+ *  Vite dev server it is the dev backend. Exported for tests. */
+export function backendBase(
+  loc: { protocol: string; host: string; port: string } | null =
+    typeof window === "undefined" ? null : window.location,
+): { http: string; ws: string } {
   const envUrl = (import.meta.env.VITE_WS_URL as string | undefined) ?? "";
-  return envUrl.length > 0 ? envUrl : "ws://127.0.0.1:8001/ws/ui";
+  if (envUrl.length > 0) {
+    const u = new URL(envUrl);
+    const http = `${u.protocol === "wss:" ? "https" : "http"}://${u.host}`;
+    return { http, ws: `${u.protocol}//${u.host}` };
+  }
+  if (!loc || loc.port === DEV_SERVER_PORT) {
+    return { http: `http://${DEV_BACKEND}`, ws: `ws://${DEV_BACKEND}` };
+  }
+  const secure = loc.protocol === "https:";
+  return { http: `${secure ? "https" : "http"}://${loc.host}`, ws: `${secure ? "wss" : "ws"}://${loc.host}` };
+}
+
+// The socket requires this process's session token (backend/server/session.py).
+// Fetched from /api/session, which only this app's own pages can read, and
+// re-fetched when the server rejects it as stale (close code 4401 — e.g. the
+// backend restarted and minted a new one).
+let sessionToken: string | null = null;
+
+async function fetchSessionToken(): Promise<string | null> {
+  try {
+    const r = await fetch(`${backendBase().http}/api/session`, { cache: "no-store" });
+    if (!r.ok) return null;
+    const body = (await r.json()) as { token?: unknown };
+    return typeof body.token === "string" ? body.token : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveUrl(token: string): string {
+  return `${backendBase().ws}/ws/ui?token=${encodeURIComponent(token)}`;
 }
 
 // Fields each consumer actually dereferences, and the type it assumes. Guards
@@ -27,6 +66,9 @@ const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | 
     active_model: "string",
   },
   wake_heard: { peak: "number" },
+  // Nothing dereferenced unconditionally; listed so the Record type is total
+  // (its absence failed `tsc -b`, i.e. `npm run build`).
+  followup_expired: {},
   intent_resolved: { source_layer: "string" },
   agent_thinking: { agent_name: "string", is_thinking: "boolean" },
   agent_reasoning: { reasoning: "string" },
@@ -44,6 +86,11 @@ const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | 
   confidence: { metric_tool_success_rate: "number", metric_memory_recall_pct: "number" },
   tool_started: { tool_name: "string" },
   tool_finished: { tool_name: "string", status: "string" },
+  confirmation_request: {
+    id: "string", digest: "string", tool: "string", prompt: "string",
+    critical: "boolean", expires_in_s: "number",
+  },
+  confirmation_resolved: { id: "string", outcome: "string" },
   system_stats: {
     cpu_percent: "number",
     memory_percent: "number",
@@ -107,23 +154,50 @@ function scheduleReconnect() {
   backoffIndex += 1;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    openSocket();
+    void openSocket();
   }, delay);
 }
 
-function openSocket() {
-  if (ws) return;
+let opening = false;
+
+async function openSocket() {
+  if (ws || opening) return;
+  opening = true;
   setConnectionState("connecting");
-  let socket: WebSocket;
   try {
-    socket = new WebSocket(resolveUrl());
-  } catch {
-    scheduleReconnect();
-    return;
+    if (!sessionToken) sessionToken = await fetchSessionToken();
+    if (!sessionToken) {
+      setConnectionState("closed");
+      scheduleReconnect();
+      return;
+    }
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(resolveUrl(sessionToken));
+    } catch {
+      scheduleReconnect();
+      return;
+    }
+    ws = socket;
+    attach(socket);
+  } finally {
+    opening = false;
   }
-  ws = socket;
+}
+
+/** Send a JSON message to the backend (e.g. a confirmation answer).
+ *  Returns false when there is no open socket to send it on. */
+export function sendUiMessage(message: Record<string, unknown>): boolean {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify(message));
+  return true;
+}
+
+function attach(socket: WebSocket) {
+  let opened = false;
 
   socket.onopen = () => {
+    opened = true;
     backoffIndex = 0;
     setConnectionState("open");
   };
@@ -150,8 +224,12 @@ function openSocket() {
     // let onclose handle recovery
   };
 
-  socket.onclose = () => {
+  socket.onclose = (ev) => {
     ws = null;
+    // 4401: our token is stale (the backend restarted). Fetch a fresh one —
+    // and likewise if the socket never opened at all, since a rejected
+    // handshake can surface as a bare 1006 depending on the browser.
+    if (ev.code === 4401 || !opened) sessionToken = null;
     setConnectionState("closed");
     scheduleReconnect();
   };
@@ -160,7 +238,7 @@ function openSocket() {
 function ensureStarted() {
   if (started) return;
   started = true;
-  openSocket();
+  void openSocket();
 }
 
 function subscribe<T extends UiEventType>(

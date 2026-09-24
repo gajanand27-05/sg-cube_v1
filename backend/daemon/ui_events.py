@@ -135,6 +135,31 @@ class AgentCompletedEvent:
 
 
 @dataclass
+class ConfirmationRequested:
+    """An action is waiting for a yes. The HUD shows it as a dialog; voice can
+    answer the same pending — whichever answers first wins, once.
+
+    `id` and `digest` must both come back with the answer: the digest is a hash
+    of the exact tool calls, so an answer can only ever approve what was shown.
+    """
+    id: str
+    digest: str
+    tool: str
+    prompt: str
+    details: list = field(default_factory=list)
+    critical: bool = False
+    expires_in_s: float = 0.0
+
+
+@dataclass
+class ConfirmationResolved:
+    """The pending is gone. outcome: approved | declined | expired |
+    superseded | dropped (the user said something else) | cancelled."""
+    id: str
+    outcome: str
+
+
+@dataclass
 class ProactiveEvent:
     """A watcher fired. `query` is spoken; `tool`/`args` is the one fixed call
     resolved at setup (tools/automation.py), run verbatim — never planned."""

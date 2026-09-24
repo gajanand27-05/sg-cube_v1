@@ -17,7 +17,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { isValidPayload } from "./useUiEvents";
+import { backendBase, isValidPayload } from "./useUiEvents";
 
 describe("isValidPayload", () => {
   it("accepts a complete payload", () => {
@@ -77,5 +77,37 @@ describe("isValidPayload", () => {
   it("requires a string to actually be a string", () => {
     expect(isValidPayload("vision_update", { description: "a browser" })).toBe(true);
     expect(isValidPayload("vision_update", { description: 3 })).toBe(false);
+  });
+});
+
+describe("confirmation events", () => {
+  it("accepts a complete confirmation request", () => {
+    expect(isValidPayload("confirmation_request", {
+      id: "a", digest: "b", tool: "write file", prompt: "Write it?",
+      details: [], critical: false, expires_in_s: 90,
+    })).toBe(true);
+  });
+
+  it("drops a request without its digest — it could not be answered", () => {
+    expect(isValidPayload("confirmation_request", {
+      id: "a", tool: "write file", prompt: "Write it?", critical: false, expires_in_s: 90,
+    })).toBe(false);
+  });
+});
+
+describe("backendBase", () => {
+  it("uses the page's own host when the backend serves the HUD (any port)", () => {
+    expect(backendBase({ protocol: "http:", host: "127.0.0.1:53817", port: "53817" }))
+      .toEqual({ http: "http://127.0.0.1:53817", ws: "ws://127.0.0.1:53817" });
+  });
+
+  it("points the Vite dev server at the dev backend", () => {
+    expect(backendBase({ protocol: "http:", host: "localhost:5173", port: "5173" }).ws)
+      .toBe("ws://127.0.0.1:8001");
+  });
+
+  it("keeps TLS when the page is https", () => {
+    expect(backendBase({ protocol: "https:", host: "box:9443", port: "9443" }).ws)
+      .toBe("wss://box:9443");
   });
 });

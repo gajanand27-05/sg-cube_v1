@@ -87,7 +87,8 @@ def test_ws_ui_closes_lan_peer(app):
 
 
 def test_ws_ui_accepts_loopback(app):
-    with TestClient(app, client=LOOPBACK).websocket_connect("/ws/ui") as ws:
+    from backend.server import session
+    with TestClient(app, client=LOOPBACK).websocket_connect(f"/ws/ui?token={session.TOKEN}") as ws:
         assert ws is not None
 
 

@@ -17,6 +17,8 @@ from backend.daemon.ui_events import (
     ClipboardChangedEvent,
     CommandTranscribed,
     ConfidenceEvent,
+    ConfirmationRequested,
+    ConfirmationResolved,
     Executed,
     HandoverEvent,
     IntentResolved,
@@ -76,6 +78,8 @@ TYPE_MAP: dict[type, str] = {
     CanvasUpdateEvent: "canvas_update",
     SpeechInterruptedEvent: "speech_interrupted",
     ProviderDegradedEvent: "provider_degraded",
+    ConfirmationRequested: "confirmation_request",
+    ConfirmationResolved: "confirmation_resolved",
 }
 
 EVENT_TYPES = list(TYPE_MAP.keys())

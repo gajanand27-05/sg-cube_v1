@@ -9,8 +9,10 @@ from typing import List, Optional, Tuple, AsyncGenerator, Any
 from backend.core.agent.context import ConversationContext
 from backend.core.agents.guardian import GuardianAgent
 from backend.core.agents.operator import OperatorAgent
+from backend.core.agent import tool_policy
 from backend.core.agents.pending_confirmation import (
     Pending,
+    resolved as pending_resolved,
     classify_reply,
     store as pending_store,
 )
@@ -287,6 +289,24 @@ INTERRUPTED = "interrupted"
 
 
 class CommanderAgent:
+    async def execute_confirmed(self, pending, request_id: str) -> tuple[list, str]:
+        """Run a pending action the user approved — by voice or on the HUD.
+
+        Executes what was already verified: these calls passed every check,
+        the confirmation was the only thing outstanding, so re-verifying would
+        just ask the same question again. -> (batch results, spoken summary)
+        """
+        batch_results = await self.operator.execute_batch(pending.calls, request_id)
+        for res_wrapper in batch_results:
+            res = res_wrapper.get("result")
+            status = getattr(res, "status", res.get("status") if isinstance(res, dict) else "error")
+            if status == "success":
+                # "name", not "tool": operator.execute_batch keys its wrappers "name".
+                name = res_wrapper.get("name", "unknown tool").replace("_", " ")
+                msg = getattr(res, "message", res.get("message") if isinstance(res, dict) else "success")
+                timeline.record_event(content=f"Executed {name}: {msg}", source="execution")
+        return batch_results, _confirmed_summary(batch_results, pending.tool_name)
+
     """The central orchestrator of the specialized internal agents."""
 
     def __init__(self):
@@ -468,6 +488,7 @@ class CommanderAgent:
         pending = pending_store.take(context.session_id)
         if pending is not None:
             reply = classify_reply(text)
+            pending_resolved(pending, {"yes": "approved", "no": "declined"}.get(reply, "dropped"))
             if reply == "no":
                 spoken = f"Okay, I won't {pending.tool_name}."
                 context.add_assistant(spoken)
@@ -479,28 +500,10 @@ class CommanderAgent:
                     "Confirmation granted for %r (critical=%s)",
                     pending.tool_name, pending.is_critical,
                 )
-                # Execute what was already verified. These calls passed every
-                # check including the LLM secondary check — confirmation was
-                # the only thing outstanding, so re-verifying would just ask
-                # the same question again.
-                batch_results = await self.operator.execute_batch(
-                    pending.calls, request_id
-                )
+                batch_results, spoken = await self.execute_confirmed(pending, request_id)
                 tool_records.extend(batch_results)
-                for res_wrapper in batch_results:
-                    res = res_wrapper.get("result")
-                    status = getattr(res, "status", res.get("status") if isinstance(res, dict) else "error")
-                    if status == "success":
-                        # "name", not "tool": operator.execute_batch keys its
-                        # wrappers "name".
-                        name = res_wrapper.get("name", "unknown tool").replace("_", " ")
-                        msg = getattr(res, "message", res.get("message") if isinstance(res, dict) else "success")
-                        timeline.record_event(
-                            content=f"Executed {name}: {msg}", source="execution"
-                        )
                 for res in batch_results:
                     yield CommanderChunk("tool_end", res)
-                spoken = _confirmed_summary(batch_results, pending.tool_name)
                 context.add_assistant(spoken)
                 yield CommanderChunk("final_response", spoken)
                 _publish_completed("completed", 100.0, t0, spoken)
@@ -655,6 +658,29 @@ class CommanderAgent:
                     unfilled = None
 
                     if pending_calls:
+                        # Resolve what is being asked about BEFORE asking: a
+                        # file fragment becomes one full path, a tab name
+                        # becomes the titles it matches. The resolved args are
+                        # what the digest binds, so "yes" approves exactly what
+                        # the user was shown — and an ambiguous request is
+                        # refused with the choices instead of being asked about.
+                        details: list[str] = []
+                        refusal = None
+                        for c in pending_calls:
+                            prep = tool_policy.prepare_confirmation(
+                                c.get("name", ""), c.get("args") or {})
+                            if prep.refusal:
+                                refusal = prep.refusal
+                                break
+                            c["args"] = prep.args
+                            details.extend(prep.details)
+                        if refusal:
+                            spoken = f"I didn't do that: {refusal}."
+                            context.add_assistant(spoken)
+                            yield CommanderChunk("final_response", spoken)
+                            _publish_completed("completed", 100.0, t0, spoken)
+                            return
+
                         first_pending = pending_calls[0]
                         tool_name = first_pending.get("name", "action").replace("_", " ")
                         is_critical = first_pending.get("is_critical", False)
@@ -666,6 +692,11 @@ class CommanderAgent:
                         # informative prompt. Caught by driving the real loop
                         # in test_pending_clarification_end_to_end.
                         detail = _readback_args(pending_calls[0]) if pending_calls else ""
+                        if not detail and details:
+                            # delete_file's full path, close_chrome_tab's titles.
+                            shown = details[:3]
+                            more = len(details) - len(shown)
+                            detail = "; ".join(shown) + (f" and {more} more" if more else "")
 
                         if is_critical:
                             spoken = (f"⚠️ CRITICAL ACTION: I need your explicit "
@@ -704,6 +735,8 @@ class CommanderAgent:
                                 user_query=text,
                                 tool_name=tool_name,
                                 is_critical=is_critical,
+                                prompt=spoken,
+                                details=details,
                             ),
                         )
                         context.add_assistant(spoken)

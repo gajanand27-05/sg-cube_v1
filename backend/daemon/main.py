@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import re
 import sys
 import threading
 from datetime import datetime, timezone
@@ -193,6 +194,17 @@ def stop_services(handle: dict) -> None:
         log.debug("Browser close failed: %s", e)
 
 
+class RedactingFormatter(logging.Formatter):
+    """Scrub secrets from every line. uvicorn logs each WebSocket handshake
+    with its full query string, and the HUD's session token rides there
+    (/ws/ui?token=...) — so the log file held a live credential."""
+
+    _SECRET = re.compile(r"(token=)[^&\s\"']+")
+
+    def format(self, record: logging.LogRecord) -> str:
+        return self._SECRET.sub(r"\1<redacted>", super().format(record))
+
+
 def configure_logging() -> Path:
     """Root logger → console + a rotating file in the data dir.
 
@@ -206,7 +218,7 @@ def configure_logging() -> Path:
 
     paths.LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = paths.LOG_DIR / "sg_cube.log"
-    fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    fmt = RedactingFormatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
     file_handler = RotatingFileHandler(log_file, maxBytes=5_000_000, backupCount=3,
                                        encoding="utf-8")
     file_handler.setFormatter(fmt)

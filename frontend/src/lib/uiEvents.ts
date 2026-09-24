@@ -145,6 +145,26 @@ export type WakeHeardPayload = {
   peak: number; // peak amplitude of the captured audio buffer, 0..32767
 };
 
+/** An action is waiting for a yes (backend ConfirmationRequested). The
+ *  answer must echo `id` AND `digest` — the digest binds it to the exact tool
+ *  calls shown, so it cannot approve anything else. */
+export type ConfirmationRequestPayload = {
+  id: string;
+  digest: string;
+  tool: string;
+  prompt: string;
+  /** What exactly is affected: full file paths, tab titles. */
+  details: string[];
+  critical: boolean;
+  expires_in_s: number;
+};
+
+/** The pending is gone, however it ended — the dialog must close. */
+export type ConfirmationResolvedPayload = {
+  id: string;
+  outcome: "approved" | "declined" | "expired" | "superseded" | "dropped" | "cancelled";
+};
+
 export type UiEventPayloadMap = {
   ai_metrics: AIMetricsPayload;
   wake_heard: WakeHeardPayload;
@@ -163,6 +183,8 @@ export type UiEventPayloadMap = {
   confidence: ConfidencePayload;
   tool_started: ToolStartedPayload;
   tool_finished: ToolFinishedPayload;
+  confirmation_request: ConfirmationRequestPayload;
+  confirmation_resolved: ConfirmationResolvedPayload;
 };
 
 export type FollowUpExpiredPayload = {

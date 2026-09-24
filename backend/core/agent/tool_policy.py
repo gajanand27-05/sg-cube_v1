@@ -122,3 +122,61 @@ def without_verifier(name: str, tier, explicit_trigger: bool, guard_reason: str 
         return "confirm", None
     return "refuse", (f"{name} needs the local safety check, and local Ollama "
                       "is not running")
+
+
+class Prepared:
+    """A call made ready to be confirmed: `args` are what will run (resolved
+    and bound), `details` are what the user is shown, `refusal` means there is
+    nothing sensible to ask about."""
+
+    def __init__(self, args: dict, details: list[str] | None = None,
+                 refusal: str | None = None):
+        self.args = args
+        self.details = details or []
+        self.refusal = refusal
+
+
+def prepare_confirmation(name: str, args: dict) -> Prepared:
+    """Resolve what a confirmation is really about BEFORE asking.
+
+    The approved digest covers the args returned here, so the user approves
+    exactly what will run — not a fragment the tool resolves differently later.
+    """
+    args = dict(args or {})
+    if name == "delete_file":
+        from backend.core.tools.files import resolve_delete_targets
+
+        targets = resolve_delete_targets(str(args.get("file", "")))
+        if not targets:
+            return Prepared(args, refusal=f"no file matches {args.get('file')!r}")
+        if len(targets) > 1:
+            return Prepared(args, refusal=(
+                f"{args.get('file')!r} matches {len(targets)} files — say which one: "
+                + "; ".join(str(t) for t in targets)))
+        return Prepared({**args, "file": str(targets[0])}, [str(targets[0])])
+
+    if name == "close_chrome_tab":
+        from backend.core import chrome_tabs
+
+        if not chrome_tabs.available():
+            return Prepared(args)  # the tool itself reports why it cannot run
+        query = str(args.get("name", ""))
+        titles = [t.title for t in chrome_tabs.list_tabs() if chrome_tabs.matches(query, t.title)]
+        if not titles:
+            return Prepared(args, refusal=f"no open Chrome tab matches {query!r}")
+        return Prepared({**args, "only_if_titles": titles}, titles)
+
+    return Prepared(args, _describe_args(args))
+
+
+def _describe_args(args: dict, limit: int = 200) -> list[str]:
+    """Every argument, so the dialog never asks "write file?" without saying
+    which file or what goes in it."""
+    out = []
+    for key, value in args.items():
+        text = value if isinstance(value, str) else repr(value)
+        text = " ".join(str(text).split())
+        if len(text) > limit:
+            text = text[:limit].rstrip() + f"... ({len(str(value))} chars)"
+        out.append(f"{key}: {text}")
+    return out
