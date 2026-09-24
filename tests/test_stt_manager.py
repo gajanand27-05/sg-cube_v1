@@ -222,3 +222,20 @@ def test_stt_whisper_still_exports_get_model():
     from backend.ai_modules.speech import stt_whisper
 
     assert stt_whisper.get_model is m.get_model
+
+
+# ── a forced profile the machine cannot run ─────────────────────────────
+
+def test_forced_accurate_without_a_usable_gpu_falls_back_to_cpu(monkeypatch, caplog):
+    """STT_PROFILE=accurate on a machine without a usable GPU used to load
+    Whisper onto cuda anyway and die on the first decode. A pin overrides the
+    BATTERY heuristic (test above), not the absence of a GPU."""
+    monkeypatch.setattr(m, "_forced_fallback_warned", False)
+    with caplog.at_level("WARNING"):
+        p = _pick(monkeypatch, cuda=False, battery=False, profile="accurate")
+        again = _pick(monkeypatch, cuda=False, battery=False, profile="accurate")
+    assert (p.device, p.compute_type, p.model) == ("cpu", "int8", m.settings.whisper_model_cpu)
+    assert "accurate" in p.reason and "no usable GPU" in p.reason
+    assert again == p
+    warnings = [r for r in caplog.records if "STT_PROFILE" in r.getMessage()]
+    assert len(warnings) == 1, "select_profile runs per utterance; warn once, not every turn"

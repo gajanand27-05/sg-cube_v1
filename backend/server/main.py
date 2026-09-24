@@ -38,6 +38,14 @@ async def lifespan(app: FastAPI):
     log.info("Event bus started")
     register_proactive_handler()
 
+    # Before start_services: it reads the enable_* flags this may adjust. Fills
+    # in only what .env left unset; never raises.
+    try:
+        from backend.core import hardware
+        hardware.probe_and_apply(settings)
+    except Exception as e:
+        log.warning("Hardware probe crashed (defaults unchanged): %s", e)
+
     # Boot background services (vision, wake word, clipboard, telemetry, watcher)
     # gated by ENABLE_* flags in .env. Previously these only ran when the daemon
     # CLI was launched, so `uvicorn backend.server.main:app` alone gave you a

@@ -167,6 +167,14 @@ def get_preflight():
     }
 
 
+@router.get("/hardware")
+def get_hardware():
+    """What the boot-time hardware probe found and which unset defaults it
+    changed because of it (backend/core/hardware.py). Null before boot."""
+    from backend.core import hardware
+    return hardware.last
+
+
 @router.get("/latency")
 def get_latency(n: int = 20):
     """Phase 4C: recent per-turn latency breakdowns.

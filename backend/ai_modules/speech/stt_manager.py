@@ -134,6 +134,9 @@ class SttProfile:
         return f"{self.model}/{self.device}/{self.compute_type} ({self.reason})"
 
 
+_forced_fallback_warned = False
+
+
 def select_profile() -> SttProfile:
     """Choose the model for current conditions.
 
@@ -143,6 +146,19 @@ def select_profile() -> SttProfile:
     forced = (settings.stt_profile or "auto").strip().lower()
 
     if forced == "accurate":
+        # A pin overrides the BATTERY heuristic, not the absence of a GPU.
+        # Honouring it on a machine that cannot run it loaded Whisper onto
+        # cuda and killed the first decode (cublas64_12.dll missing) — the
+        # offline STT path, dying exactly when offline.
+        if not cuda_available():
+            global _forced_fallback_warned
+            if not _forced_fallback_warned:  # runs per utterance; say it once
+                _forced_fallback_warned = True
+                log.warning("STT_PROFILE=accurate needs a usable GPU and there is none "
+                            "(no NVIDIA card, or the 'gpu' extra is not installed); "
+                            "using %s on the CPU", settings.whisper_model_cpu)
+            return SttProfile(settings.whisper_model_cpu, "cpu", "int8",
+                              "forced accurate, but no usable GPU")
         return SttProfile(settings.whisper_model_gpu, "cuda", "float16", "forced accurate")
     if forced == "fast":
         return SttProfile(settings.whisper_model_cpu, "cpu", "int8", "forced fast")
