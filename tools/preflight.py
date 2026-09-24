@@ -256,21 +256,22 @@ def check_voice() -> None:
     import importlib.util as iu
 
     for mod, why in (("faster_whisper", "STT"), ("vosk", "wake word"),
-                     ("piper", "TTS"), ("torch", "GPU whisper")):
+                     ("piper", "TTS"), ("onnxruntime", "speech gate VAD")):
         record("PASS" if iu.find_spec(mod) else "FAIL", f"import {mod}", why)
 
-    speech = ROOT / "backend" / "ai_modules" / "speech"
-    for name, path in (("vosk wake model", speech / "vosk_models"),
-                       ("piper voice", speech / "piper_voices")):
+    from backend.core import paths
+
+    for name, path in (("vosk wake model", paths.VOSK_DIR),
+                       ("piper voice", paths.PIPER_DIR)):
         files = list(path.rglob("*")) if path.exists() else []
         if any(f.is_file() for f in files):
             record("PASS", name, f"{path.name}/ populated")
         else:
             record("FAIL", name, f"{path} is empty — run tools/download_*.py")
 
-    # CUDA via ctranslate2, NOT torch.cuda. This venv ships a CPU-only torch
-    # (2.13.0+cpu) which reports False while CTranslate2 reports a working
-    # device — stt_manager.cuda_available() documents exactly this. An earlier
+    # CUDA via ctranslate2, NOT torch.cuda. torch is no longer a dependency at
+    # all; when it was, the venv's CPU-only build (2.13.0+cpu) reported False
+    # while CTranslate2 reported a working device — stt_manager.cuda_available() documents exactly this. An earlier
     # draft of this script used torch and cried wolf about a healthy GPU.
     try:
         from backend.ai_modules.speech.stt_manager import cuda_available, select_profile

@@ -13,7 +13,14 @@ supabase==2.10.0
 pyjwt[crypto]==2.10.1
 
 # ── Phase 3: Speech-to-Text (Whisper) + recording tool ──
+# Pinned exactly, not just for STT: the post-wake speech gate imports
+# faster_whisper.vad (VadOptions field names, get_vad_model, the bundled
+# Silero v5 ONNX files). That is internal API — re-run the gate bench before
+# bumping. See backend/ai_modules/speech/speech_gate.py.
 faster-whisper==1.1.0
+# Runs the speech gate's VAD. Was only a transitive of faster-whisper; now
+# called directly, so declared.
+onnxruntime==1.26.0
 sounddevice==0.5.1
 # tools/record_stt_corpus.py imports this at module scope, so it was not an
 # optional extra — the STT corpus recorder died on its first line with
@@ -23,8 +30,9 @@ soundfile==0.14.0
 python-multipart==0.0.20
 requests==2.32.3
 
-# ── Phase C1: silero-vad for accurate streaming VAD ──
-silero-vad>=4.0.0
+# (silero-vad removed 2026-09-24: it imports torch at module level even for
+# its ONNX path — ~524 MB for one call. The speech gate uses faster-whisper's
+# bundled Silero v5 instead.)
 
 # ── Phase 7: Text-to-Speech (Piper — offline neural TTS) ──
 # Voice models live in backend/ai_modules/speech/piper_voices/ (gitignored).

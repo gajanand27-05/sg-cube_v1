@@ -53,38 +53,57 @@ def test_ocr_frame_empty_bytes():
     assert result == []
 
 
-def test_ocr_frame_real_image():
-    """A real photograph with no signage in it.
+def _text_free_photo(seed: int) -> bytes:
+    """A deterministic photo-like JPEG with no text in it: a lighting
+    gradient, overlapping solid shapes (hard edges are what Tesseract
+    misreads), lens blur and sensor noise."""
+    import cv2
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    h, w = 480, 640
+    y, x = np.mgrid[0:h, 0:w]
+    img = np.dstack([x * 255 / w, y * 255 / h, (x + y) * 255 / (w + h)])
+    img = img.astype(np.float32) * 0.6 + 40
+    for _ in range(25):
+        colour = tuple(int(v) for v in rng.integers(0, 256, 3))
+        if rng.random() < 0.5:
+            centre = (int(rng.integers(0, w)), int(rng.integers(0, h)))
+            cv2.circle(img, centre, int(rng.integers(10, 120)), colour, -1)
+        else:
+            p = rng.integers(0, [w, h], size=(2, 2))
+            cv2.rectangle(img, tuple(int(v) for v in p[0]),
+                          tuple(int(v) for v in p[1]), colour, -1)
+    img = cv2.GaussianBlur(img, (0, 0), 2.0) + rng.normal(0, 8, img.shape)
+    return cv2.imencode(".jpg", np.clip(img, 0, 255).astype(np.uint8))[1].tobytes()
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_ocr_frame_text_free_image(seed):
+    """A photo-like image with no text in it must not read as a page of text.
 
     Was an unconditional @pytest.mark.skip — permanently off regardless of
     whether Tesseract existed, so installing the engine did not bring it back.
-    It also asserted only isinstance(), which an empty list satisfies, while
-    its comment claimed "we expect zero lines". Now it is gated on the actual
-    resolver and asserts the contract it can honestly make.
+    Then it read zidane.jpg out of the ultralytics package, which was never a
+    declared dependency: it skipped on every fresh install, and went for good
+    when torch/ultralytics left the venv. Now it generates its own images.
 
-    Observed 2026-08-13 with Tesseract 5.4.0: this photo yields one spurious
-    line, 'al j' at confidence 0.56 — just over the 50 cutoff. Recorded rather
-    than tuned away: raising the threshold on a single sample risks dropping
-    genuine low-contrast signage, which is the failure that actually matters.
+    Observed 2026-09-24 with Tesseract 5.4.0: seeds 0-3 yield nothing, seed 4
+    yields one spurious line, 'Jj' at confidence 0.55 — the same behaviour as
+    the old photo ('al j' at 0.56). Recorded rather than tuned away: raising
+    the threshold on these samples risks dropping genuine low-contrast
+    signage, which is the failure that actually matters.
     """
-    from pathlib import Path
-
     from backend.core.vision.ocr_reader import tesseract_path
 
     if tesseract_path() is None:
         pytest.skip("Tesseract binary not installed")
 
-    pt = Path(__file__).parents[1] / ".venv/Lib/site-packages/ultralytics/assets/zidane.jpg"
-    if not pt.exists():
-        pytest.skip("ultralytics assets not installed")
-
-    lines = ocr_frame(pt.read_bytes())
+    lines = ocr_frame(_text_free_photo(seed))
     assert all(isinstance(line, OCRLine) for line in lines)
     assert all(isinstance(line.text, str) and line.text.strip() for line in lines)
-    assert all(0.0 < line.confidence <= 1.0 for line in lines), \
-        [(line.text, line.confidence) for line in lines]
-    # A photo of two footballers must not read as a page of text.
-    assert len(lines) <= 3, f"unexpected volume of text from a text-free photo: {lines}"
+    assert all(0.0 < line.confidence <= 1.0 for line in lines),         [(line.text, line.confidence) for line in lines]
+    assert len(lines) <= 3, f"unexpected volume of text from a text-free image: {lines}"
 
 
 def test_ocr_direction_center_boundary():

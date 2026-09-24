@@ -39,14 +39,13 @@ def test_fails_open_when_silero_is_unavailable(monkeypatch):
 
 def test_fails_open_when_silero_raises_mid_call(monkeypatch):
     """A model that loads but explodes on use is the same situation."""
-    class _Boom:
-        def __call__(self, *a, **k):
-            raise RuntimeError("boom")
+    def _boom(*a, **k):
+        raise RuntimeError("boom")
 
-    # Patch only the MODEL. The real speech_seconds must be the code under
-    # test — it owns the try/except that turns a mid-call explosion into a
-    # pass-through.
-    monkeypatch.setattr(speech_gate, "_get_model", lambda: _Boom())
+    # Patch only the segmentation call. The real speech_seconds must be the
+    # code under test — it owns the try/except that turns a mid-call explosion
+    # into a pass-through.
+    monkeypatch.setattr(speech_gate, "_speech_timestamps", _boom)
     keep, secs = speech_gate.has_speech(np.zeros(16000, dtype=np.float32))
     assert keep is True
     assert secs is None
@@ -94,3 +93,29 @@ def test_empty_audio_is_not_an_error():
     if speech_gate._get_model() is None:
         pytest.skip("silero-vad unavailable in this environment")
     assert speech_gate.speech_seconds(np.zeros(0, dtype=np.float32)) == 0.0
+
+
+def test_min_speech_is_the_measured_150ms():
+    """250ms (silero's default) left 'stop' ~10ms from being discarded on the
+    v5 model; see the module docstring for the measurement."""
+    opts = speech_gate._vad_options()
+    assert opts.min_speech_duration_ms == 150
+    assert (opts.onset, opts.offset, opts.speech_pad_ms) == (0.5, 0.35, 30)
+
+
+_CORPUS = _root / "tools" / "_stt_corpus"
+
+
+@pytest.mark.parametrize("clip", ["stop_1.wav", "stop_2.wav"])
+def test_real_stop_commands_keep_their_margin(clip):
+    """'stop' is the shortest command there is and the one that must never be
+    eaten. Real voice, so the corpus is local-only (git-ignored) — skipped on
+    machines without it."""
+    path = _CORPUS / clip
+    if not path.exists():
+        pytest.skip("STT corpus not recorded on this machine")
+    import soundfile as sf
+
+    audio, sr = sf.read(path, dtype="int16", always_2d=True)
+    secs = speech_gate.speech_seconds(audio[:, 0].astype(np.float32) / 32768.0, sr)
+    assert secs is not None and secs >= 0.45, f"{clip}: {secs}s of speech"

@@ -67,31 +67,31 @@ def test_get_bus_builds_exactly_one_bus():
     assert len({id(r) for r in results}) == 1, "threads got different bus objects"
 
 
-def test_silero_vad_loads_once():
-    import torch
+def test_speech_gate_vad_loads_once():
+    import faster_whisper.vad as fw_vad
 
-    from backend.ai_modules.speech import stt_whisper
+    from backend.ai_modules.speech import speech_gate
 
     calls = []
     calls_lock = threading.Lock()
-    real_load = torch.hub.load
+    real_load = fw_vad.get_vad_model
 
-    def slow_load(*a, **kw):
+    def slow_load():
         time.sleep(0.05)
         with calls_lock:
             calls.append(1)
-        return ("model-sentinel", None)
+        return "model-sentinel"
 
-    saved = stt_whisper._SILERO_VAD
-    torch.hub.load = slow_load
-    stt_whisper._SILERO_VAD = None
+    saved = speech_gate._model, speech_gate._load_failed
+    fw_vad.get_vad_model = slow_load
+    speech_gate._model, speech_gate._load_failed = None, False
     try:
-        results = _hammer(stt_whisper._get_silero_vad)
+        results = _hammer(speech_gate._get_model)
     finally:
-        torch.hub.load = real_load
-        stt_whisper._SILERO_VAD = saved
+        fw_vad.get_vad_model = real_load
+        speech_gate._model, speech_gate._load_failed = saved
 
-    assert len(calls) == 1, f"torch.hub.load ran {len(calls)} times"
+    assert len(calls) == 1, f"get_vad_model ran {len(calls)} times"
     assert results == ["model-sentinel"] * _THREADS
 
 

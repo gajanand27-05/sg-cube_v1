@@ -96,8 +96,10 @@ def _warm() -> None:
     except Exception as e:
         log.info("preload of offline CPU STT skipped: %s", e)
 
-    # silero, for the post-wake speech gate. Measured: 1518ms to load, then
-    # 25ms median per capture. Without this the load lands on the FIRST wake
+    # Silero v5 (faster-whisper's ONNX copy), for the post-wake speech gate.
+    # Measured 2026-09-24: ~590ms cold (import + load, 3 fresh processes),
+    # then ~53ms mean per archived capture. The old torch-based silero was
+    # 1518ms to load. Without this the load lands on the FIRST wake
     # of the session — the one turn where a delay is most obvious — and buys
     # nothing, since the gate only ever decides whether to skip work.
     t0 = time.perf_counter()
@@ -105,12 +107,12 @@ def _warm() -> None:
         from backend.ai_modules.speech import speech_gate
 
         if speech_gate._get_model() is not None:
-            log.info("preloaded silero-vad in %.1fs", time.perf_counter() - t0)
+            log.info("preloaded speech-gate VAD in %.1fs", time.perf_counter() - t0)
         else:
-            log.info("preload of silero-vad skipped: unavailable "
+            log.info("preload of speech-gate VAD skipped: unavailable "
                      "(speech gate will pass every capture through)")
     except Exception as e:
-        log.info("preload of silero-vad skipped: %s", e)
+        log.info("preload of speech-gate VAD skipped: %s", e)
 
 
 def start() -> None:

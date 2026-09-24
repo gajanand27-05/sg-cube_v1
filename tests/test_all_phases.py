@@ -61,28 +61,9 @@ def test_phase_b_plugins_dir_exists():
 
 def test_phase_c1_transcribe_array_exists():
     """transcribe_array function should be importable."""
-    from backend.ai_modules.speech.stt_whisper import (
-        transcribe_array, transcribe_stream, _filter_speech_chunks, vad_speech_prob
-    )
+    from backend.ai_modules.speech.stt_whisper import transcribe_array
     assert callable(transcribe_array)
-    assert callable(transcribe_stream)
-    assert callable(_filter_speech_chunks)
-    assert callable(vad_speech_prob)
     print("  [PASS] Phase C1: streaming STT functions importable")
-
-
-def test_phase_c1_silero_vad_importable():
-    """silero-vad should be importable.
-
-    Was `assert True` inside a try, printing "[SKIP]" on ImportError — so it
-    PASSED whether or not the dependency existed, while its name claimed the
-    opposite. importorskip reports a missing optional dep as an actual skip,
-    and lets a genuinely broken install fail.
-    """
-    pytest.importorskip("torch", reason="optional dep for streaming STT")
-    pytest.importorskip("silero_vad", reason="optional dep for streaming STT")
-    from silero_vad import load_silero_vad
-    assert callable(load_silero_vad)
 
 
 # ── Phase C2: Streaming TTS with Interrupt ───────────────────────────
@@ -493,7 +474,6 @@ def main():
         ("Phase B: Plugin auto-discovery", test_phase_b_plugin_hello_world),
         ("Phase B: Plugins dir", test_phase_b_plugins_dir_exists),
         ("Phase C1: Streaming STT", test_phase_c1_transcribe_array_exists),
-        ("Phase C1: silero-vad", test_phase_c1_silero_vad_importable),
         ("Phase C2: TTS functions", test_phase_c2_tts_stop_speech),
         ("Phase C2: Trigger wired", test_phase_c2_trigger_wired),
         ("Phase D1: Volume", test_phase_d1_volume_patterns),

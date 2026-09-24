@@ -21,8 +21,25 @@ ambient human conversation, which is speech by every measure silero has; no
 VAD can separate "spoken to Onyx" from "spoken near Onyx". Only the wake
 word can, and that is a separate job.
 
-FAILS OPEN. If silero will not load, every capture passes. A broken VAD
+FAILS OPEN. If the VAD will not load, every capture passes. A broken VAD
 must never be able to silence the assistant.
+
+The model is faster-whisper's bundled Silero v5 (ONNX, onnxruntime + numpy),
+not the `silero-vad` pip package: that package imports torch at module level
+even for its ONNX path, and torch was ~524 MB of install for this one call.
+Swapped 2026-09-24 after measuring both on 374 real clips that reach this gate
+(archived captures + the STT corpus), with the parameters below:
+
+    decision flips          3 at min_speech=250ms, 1 at 150ms
+    real commands dropped   none newly (the one flip at 150ms is a follow-up
+                            whose whole transcript was the wake word 'onyx')
+    empty-transcript kept   68 old vs 67 new (noise filtering unchanged)
+    per clip                186ms old vs 53ms new
+
+min_speech is 150ms, not silero's 250ms default, on measurement: v5 finds
+shorter segments on the shortest commands, and at 250ms 'stop' (stop_1)
+scored 0.32s — ~10ms above being discarded outright. At 150ms it scores
+0.57s, and 'Onyx open notepad' keeps a larger margin than it had before.
 """
 from __future__ import annotations
 
@@ -38,14 +55,25 @@ _load_failed = False
 _lock = threading.Lock()
 
 
-def _get_model():
-    """Lazy-load silero from the PIP PACKAGE, not torch.hub.
+def _vad_options():
+    from faster_whisper.vad import VadOptions
 
-    torch.hub.load("snakers4/silero-vad") prompts for repo trust on a machine
-    that has not whitelisted it and then raises — which is why the first
-    attempt to use this returned -1 for every clip. The `silero-vad` pip
-    package is already a declared dependency and needs no download.
-    """
+    # silero-vad's own defaults as this gate used to call it (offset is its
+    # implicit threshold - 0.15), except min_speech — see the module docstring.
+    return VadOptions(onset=0.5, offset=0.35, min_speech_duration_ms=150,
+                      max_speech_duration_s=float("inf"),
+                      min_silence_duration_ms=100, speech_pad_ms=30)
+
+
+def _speech_timestamps(audio: np.ndarray, sample_rate: int) -> list[dict]:
+    """Speech segments in SAMPLES. Its own function so tests can make it raise."""
+    from faster_whisper.vad import get_speech_timestamps
+
+    return get_speech_timestamps(audio, _vad_options(), sampling_rate=sample_rate)
+
+
+def _get_model():
+    """Lazy-load the VAD once. None (latched) when it cannot load."""
     global _model, _load_failed
     if _model is not None or _load_failed:
         return _model
@@ -53,13 +81,14 @@ def _get_model():
         if _model is not None or _load_failed:
             return _model
         try:
-            from silero_vad import load_silero_vad
+            from faster_whisper.vad import get_vad_model
 
-            _model = load_silero_vad(onnx=False)
-            log.info("speech gate: silero-vad loaded")
+            # lru_cached inside faster-whisper, so _speech_timestamps reuses it.
+            _model = get_vad_model()
+            log.info("speech gate: silero v5 (onnx) loaded")
         except Exception as e:
             _load_failed = True
-            log.warning("speech gate: silero unavailable (%s); "
+            log.warning("speech gate: VAD unavailable (%s); "
                         "every capture will pass through", e)
     return _model
 
@@ -70,25 +99,18 @@ def speech_seconds(audio: np.ndarray, sample_rate: int = 16000) -> float | None:
     None and 0.0 mean very different things — "could not measure" versus
     "measured, found nothing" — so they must not collapse into one value.
     """
-    model = _get_model()
-    if model is None:
+    if _get_model() is None:
         return None
     try:
-        import torch
-        from silero_vad import get_speech_timestamps
-
         arr = np.asarray(audio, dtype=np.float32)
         if arr.ndim > 1:
             arr = arr[:, 0]
         if arr.size == 0:
             return 0.0
-        stamps = get_speech_timestamps(
-            torch.from_numpy(arr), model,
-            sampling_rate=sample_rate, return_seconds=True,
-        )
-        return float(sum(s["end"] - s["start"] for s in stamps))
+        stamps = _speech_timestamps(arr, sample_rate)
+        return float(sum(s["end"] - s["start"] for s in stamps)) / sample_rate
     except Exception as e:
-        log.warning("speech gate: silero failed mid-call (%s); passing through", e)
+        log.warning("speech gate: VAD failed mid-call (%s); passing through", e)
         return None
 
 

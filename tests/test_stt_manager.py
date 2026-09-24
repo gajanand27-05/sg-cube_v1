@@ -78,9 +78,9 @@ def test_undetectable_power_state_assumes_plugged_in(monkeypatch):
 
 
 def test_cuda_check_does_not_consult_torch(monkeypatch):
-    """This venv has a CPU-only torch that reports cuda unavailable while
-    CTranslate2 reports a working device. Asking torch would disable the GPU
-    permanently."""
+    """A CPU-only torch reports cuda unavailable while CTranslate2 reports a
+    working device — asking torch disabled the GPU when the venv had one.
+    torch is gone now (tests/test_no_torch.py); this pins the reasoning."""
     import inspect
 
     src = inspect.getsource(m.cuda_available)

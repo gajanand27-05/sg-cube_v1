@@ -3,7 +3,6 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Generator
 
 import numpy as np
 
@@ -104,83 +103,6 @@ def is_prompt_echo(text: str) -> bool:
         _PROMPT_NORMALIZED = _normalize_for_echo(_COMMAND_PROMPT)
     return norm in _PROMPT_NORMALIZED
 
-# ── Phase C1: silero-vad integration ──
-_SILERO_VAD = None
-_silero_lock = threading.Lock()
-
-
-def _get_silero_vad():
-    global _SILERO_VAD
-    # Double-checked locking: the wake-word listener and the capture thread both
-    # reach this. Unguarded, both see None and both run torch.hub.load — two
-    # model loads racing on the same hub cache directory.
-    if _SILERO_VAD is None:
-        with _silero_lock:
-            if _SILERO_VAD is None:
-                import torch
-                _SILERO_VAD, _ = torch.hub.load(
-                    repo_or_dir="snakers4/silero-vad",
-                    model="silero_vad",
-                    force_reload=False,
-                    onnx=True,
-                )
-    return _SILERO_VAD
-
-
-def vad_speech_prob(chunk: np.ndarray, sample_rate: int = 16000) -> float:
-    """Return speech probability (0.0–1.0) for a single audio chunk via silero-vad."""
-    import torch
-    model = _get_silero_vad()
-    return float(model(torch.from_numpy(chunk), sample_rate).item())
-
-
-# ── Phase C1: Streaming VAD iterator ──
-SILERO_VAD_THRESHOLD = 0.5
-VAD_TRAILING_SILENCE_MS = 600
-VAD_MIN_SPEECH_MS = 100
-
-
-def _filter_speech_chunks(
-    chunk_iterable: Generator[bytes, None, None],
-    sample_rate: int = 16000,
-) -> Generator[np.ndarray, None, None]:
-    """Yield numpy arrays of speech-only audio chunks using silero-vad.
-
-    Drops non-speech chunks before and after speech. Handles trailing
-    silence detection so the caller gets a clean utterance.
-    """
-    bytes_per_ms = sample_rate * 2 // 1000
-    trailing_bytes = VAD_TRAILING_SILENCE_MS * bytes_per_ms
-    min_speech_bytes = VAD_MIN_SPEECH_MS * bytes_per_ms
-
-    speech_seen = False
-    speech_buffer: list[np.ndarray] = []
-    trailing_silence_bytes = 0
-
-    for chunk_bytes in chunk_iterable:
-        arr = np.frombuffer(chunk_bytes, dtype=np.int16).astype(np.float32)
-        if arr.size == 0:
-            continue
-        prob = vad_speech_prob(arr, sample_rate)
-        if prob > SILERO_VAD_THRESHOLD:
-            speech_seen = True
-            trailing_silence_bytes = 0
-            speech_buffer.append(arr)
-        elif speech_seen:
-            trailing_silence_bytes += len(chunk_bytes)
-            speech_buffer.append(arr)
-            if trailing_silence_bytes >= trailing_bytes:
-                break
-
-    if not speech_seen:
-        return
-
-    total_speech = np.concatenate(speech_buffer)
-    if len(total_speech) < min_speech_bytes:
-        return
-    yield total_speech
-
-
 def transcribe(audio_path: str | Path) -> dict:
     """Transcribe a short voice-command clip from a WAV file.
 
@@ -274,20 +196,6 @@ def transcribe_array(audio: np.ndarray, sample_rate: int = 16000) -> dict:
         initial_prompt=_COMMAND_PROMPT,
     )
     return _collect_segments(segments, info)
-
-
-def transcribe_stream(
-    chunk_iterable: Generator[bytes, None, None],
-    sample_rate: int = 16000,
-) -> dict:
-    """Transcribe streaming audio chunks directly — no temp file, no pre-capture.
-
-    Uses silero-vad for accurate endpointing, then passes the clean
-    speech segment to faster-whisper for transcription.
-    """
-    for speech_arr in _filter_speech_chunks(chunk_iterable, sample_rate):
-        return transcribe_array(speech_arr, sample_rate)
-    return {"text": "", "language": "en", "language_probability": 1.0, "duration_sec": 0.0}
 
 
 # ── Segment quality gate ────────────────────────────────────────────────

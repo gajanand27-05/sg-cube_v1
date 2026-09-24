@@ -67,8 +67,9 @@ def _register_cuda_libs() -> None:
 def cuda_available() -> bool:
     """True when CTranslate2 can actually run on the GPU here.
 
-    Deliberately not torch.cuda.is_available(): this venv has a CPU-only torch
-    build, which reports False while CTranslate2 reports a working device.
+    Deliberately not torch.cuda.is_available(): torch is not a dependency, and
+    when it was, the venv's CPU-only build reported False while CTranslate2
+    reported a working device.
     """
     try:
         import ctranslate2
