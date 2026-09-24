@@ -22,6 +22,18 @@ DANGEROUS_TOKENS = [
 # Shell injection patterns
 INJECTION_PATTERN = re.compile(r"[;&|`$<>\{\}\[\]\\]")
 
+# Tools whose string arguments can end up EXECUTED: run_command runs a shell;
+# type_text types into whatever has focus, which may be a terminal; open_app
+# launches by name. Only these get the metacharacter and token checks.
+#
+# They used to apply to every argument of every tool, and the backslash alone
+# made every Windows path an "injection" — write_file / edit_file /
+# insert_lines / delete_file were refused for any real path, and write_file
+# with JSON or code as content was refused for its braces. Found live
+# 2026-09-25: a write_file into C:\Users\...\hud_probe.txt was rejected here,
+# before any confirmation could be asked.
+_EXECUTED_ARG_TOOLS = frozenset({"run_command", "type_text", "open_app"})
+
 
 class VerificationResult:
     def __init__(self, is_valid: bool, error: str = "", reasoning: str = "", needs_confirmation: bool = False, is_critical: bool = False):
@@ -32,8 +44,12 @@ class VerificationResult:
         self.is_critical = is_critical
 
 
-def _is_malicious(args: dict) -> str | None:
-    """Scan all tool arguments for injection patterns or dangerous tokens."""
+def _is_malicious(args: dict, tool_name: str | None = None) -> str | None:
+    """Scan the arguments of a tool that can execute them for shell injection
+    patterns or dangerous tokens; None for every other tool (see
+    _EXECUTED_ARG_TOOLS). tool_name=None scans, for callers that cannot say."""
+    if tool_name is not None and tool_name not in _EXECUTED_ARG_TOOLS:
+        return None
     for val in args.values():
         if not isinstance(val, str):
             continue
@@ -142,7 +158,7 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
     obs_engine.report_context_quality(request_id, 100.0, "Schema valid")
 
     # C. Injection & Blacklist Check
-    malicious_reason = _is_malicious(args)
+    malicious_reason = _is_malicious(args, resolved)
     if malicious_reason:
         obs_engine.report_ai_quality(request_id, 0.0, f"Malicious input detected")
         return VerificationResult(False, error=malicious_reason)

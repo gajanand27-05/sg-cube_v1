@@ -50,7 +50,14 @@ def _to_recycle_bin(path: Path) -> None:
         raise OSError(f"shell delete failed (code {code}, aborted={aborted})")
 
 
-@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.DESTRUCTIVE)  # tier: removes a file; recoverable from the Recycle Bin, but only if the user knows to look
+def _verify_deleted(args, result):
+    path = (result.data or {}).get("path")
+    if not path:
+        raise ValueError("delete_file recorded no path to check")
+    return None if not Path(path).exists() else f"{path} is still there"
+
+
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.DESTRUCTIVE, verify=_verify_deleted)  # tier: removes a file; recoverable from the Recycle Bin, but only if the user knows to look
 def delete_file(file: str) -> ToolResult:
     """Move a file to the Recycle Bin. `file` is a full path or a substring of
     a file name in your common user folders; if the substring matches more
@@ -69,7 +76,7 @@ def delete_file(file: str) -> ToolResult:
         _to_recycle_bin(target)
     except Exception as e:
         return ToolResult.error(f"Delete failed: {e}")
-    return ToolResult.success(f"Moved {target} to the Recycle Bin")
+    return ToolResult.success(f"Moved {target} to the Recycle Bin", data={"path": str(target)})
 
 
 SPECIAL_FOLDERS = {

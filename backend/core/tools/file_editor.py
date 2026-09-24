@@ -37,6 +37,30 @@ def _atomic_write(p: Path, content: str) -> None:
         raise
 
 
+def _read_back(args) -> str:
+    """The file as it is now. Raises if it cannot be read — the runtime then
+    reports the outcome as unconfirmed rather than confirmed."""
+    r = _resolve(args["path"])
+    if isinstance(r, ToolResult):
+        raise ValueError(r.reason)
+    return r.read_text(encoding="utf-8")
+
+
+# Post-conditions. These tools could never run before 2026-09-24 (the legacy
+# sandbox swallowed every confirmed call), so they never had any; now that
+# they do run, "wrote N bytes" should be something that was checked.
+def _verify_write(args, result):
+    return None if _read_back(args) == args["content"] else "the file does not hold what was written"
+
+
+def _verify_contains_new_text(args, result):
+    return None if args["new_text"] in _read_back(args) else "the new text is not in the file"
+
+
+def _verify_inserted(args, result):
+    return None if args["text"] in _read_back(args) else "the inserted text is not in the file"
+
+
 @tool(tier=CapabilityTier.READONLY)  # tier: reads file bytes, no side effects
 def read_file(path: str, max_bytes: int = _MAX_BYTES) -> ToolResult:
     """Read a UTF-8 text file and return its contents. `max_bytes` is a soft
@@ -56,7 +80,7 @@ def read_file(path: str, max_bytes: int = _MAX_BYTES) -> ToolResult:
     return ToolResult.success(f"read {size} bytes from {r.name}", data={"text": text, "bytes": size})
 
 
-@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.SYSTEM_WRITE)  # tier: mutates file, atomic write, reversible if user has backup
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.SYSTEM_WRITE, verify=_verify_contains_new_text)  # tier: mutates file, atomic write, reversible if user has backup
 def edit_file(path: str, old_text: str, new_text: str) -> ToolResult:
     """Replace the first occurrence of `old_text` in the file with `new_text`.
     Refuses if `old_text` is missing or ambiguous-friendly (zero matches)."""
@@ -79,7 +103,7 @@ def edit_file(path: str, old_text: str, new_text: str) -> ToolResult:
     return ToolResult.success(f"edited {r.name}")
 
 
-@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.SYSTEM_WRITE)  # tier: mutates file, reversible if user has backup
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.SYSTEM_WRITE, verify=_verify_inserted)  # tier: mutates file, reversible if user has backup
 def insert_lines(path: str, line_number: int, text: str) -> ToolResult:
     """Insert `text` BEFORE line `line_number` (1-indexed). Use line_number=0
     or a value larger than the file length to append."""
@@ -107,7 +131,7 @@ def insert_lines(path: str, line_number: int, text: str) -> ToolResult:
     return ToolResult.success(f"inserted into {r.name} ({where})")
 
 
-@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.SYSTEM_WRITE)  # tier: overwrites file (loses previous content), reversible if user has backup
+@tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.SYSTEM_WRITE, verify=_verify_write)  # tier: overwrites file (loses previous content), reversible if user has backup
 def write_file(path: str, content: str) -> ToolResult:
     """Overwrite the file with `content`. Creates parent dirs if missing."""
     r = _resolve(path)
