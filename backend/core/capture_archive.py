@@ -32,12 +32,13 @@ import threading
 import time
 import wave
 from pathlib import Path
+from backend.core import paths
 
 import numpy as np
 
 log = logging.getLogger(__name__)
 
-_ARCHIVE_DIR = Path(__file__).resolve().parents[1] / "database" / "captures"
+_ARCHIVE_DIR = paths.DB_DIR / "captures"
 SAMPLE_RATE = 16000
 
 # Oldest files are deleted past this. Roughly 2s of 16-bit 16kHz audio is

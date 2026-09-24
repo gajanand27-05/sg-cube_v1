@@ -27,8 +27,9 @@ import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from backend.core import paths
 
-_DATA_DIR = Path(__file__).resolve().parents[1] / "database"
+_DATA_DIR = paths.DB_DIR
 _CONTACTS_PATH = _DATA_DIR / "contacts.json"
 
 # Matches send_whatsapp's own floor. Shorter than this is a typo or a

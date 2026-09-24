@@ -11,13 +11,10 @@ import sys
 import urllib.request
 from pathlib import Path
 
-VOICES_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "backend"
-    / "ai_modules"
-    / "speech"
-    / "piper_voices"
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from backend.core import paths  # noqa: E402
+
+VOICES_DIR = paths.PIPER_DIR
 BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
 
 

@@ -27,7 +27,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime
-from pathlib import Path
+from backend.core import paths
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ OFFLINE_LINE = (
 RECOVERED_LINE = "Local models are back online."
 
 # Survives the daemon. See _record_restart for why a log line is not enough.
-_RESTART_LOG = Path(__file__).resolve().parents[1] / "logs" / "ollama_restarts.jsonl"
+_RESTART_LOG = paths.LOG_DIR / "ollama_restarts.jsonl"
 
 # Where Ollama installs on Windows when it is not on PATH. `where ollama`
 # found it here while the service itself was not running, so PATH absence is

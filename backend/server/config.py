@@ -2,12 +2,16 @@ from pathlib import Path
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from backend.core import paths
+
+PROJECT_ROOT = paths.APP_ROOT
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=PROJECT_ROOT / ".env",
+        # Later files win: the install's .env holds shipped defaults, the
+        # user's (written by first-run setup) holds their keys and overrides.
+        env_file=(PROJECT_ROOT / ".env", paths.USER_ENV),
         env_file_encoding="utf-8",
         extra="ignore",
     )

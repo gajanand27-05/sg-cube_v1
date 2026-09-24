@@ -18,7 +18,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_DATA_DIR = Path(__file__).resolve().parents[1] / "database"
+from backend.core import paths
+
+_DATA_DIR = paths.DB_DIR
 _LEDGER_PATH = _DATA_DIR / "dogfooding.json"
 
 # Counters that are also tracked inside the resettable window.

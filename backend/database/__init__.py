@@ -1,6 +1,6 @@
-from pathlib import Path
+from backend.core import paths
 
-CHROMA_PATH = Path(__file__).resolve().parent / "chroma_db"
+CHROMA_PATH = paths.CHROMA_DIR
 
 
 # Audit HIGH-7: three memory modules each built their own PersistentClient on

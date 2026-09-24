@@ -1,4 +1,4 @@
-"""Download a Vosk acoustic model and unpack it into backend/ai_modules/speech/vosk_models/.
+"""Download a Vosk acoustic model and unpack it into paths.VOSK_DIR (see backend/core/paths.py).
 
 Usage:
     python tools/download_vosk_model.py                       # default small English model
@@ -13,13 +13,10 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-MODELS_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "backend"
-    / "ai_modules"
-    / "speech"
-    / "vosk_models"
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from backend.core import paths  # noqa: E402
+
+MODELS_DIR = paths.VOSK_DIR
 DEFAULT = "vosk-model-small-en-us-0.15"
 BASE = "https://alphacephei.com/vosk/models"
 

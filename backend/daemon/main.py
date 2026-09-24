@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 
 # Force UTF-8 stdout/stderr before importing anything that prints unicode.
@@ -192,6 +193,33 @@ def stop_services(handle: dict) -> None:
         log.debug("Browser close failed: %s", e)
 
 
+def configure_logging() -> Path:
+    """Root logger → console + a rotating file in the data dir.
+
+    Without this the app's own INFO lines went nowhere (uvicorn configures only
+    its own loggers), and an installed copy has no console at all — so a user's
+    bug report had no log to attach. Called from the entry point, never at
+    import, so the test suite does not write to the real log.
+    """
+    from logging.handlers import RotatingFileHandler
+    from backend.core import paths
+
+    paths.LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = paths.LOG_DIR / "sg_cube.log"
+    fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    file_handler = RotatingFileHandler(log_file, maxBytes=5_000_000, backupCount=3,
+                                       encoding="utf-8")
+    file_handler.setFormatter(fmt)
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(file_handler)
+    if sys.stderr is not None:  # None under pythonw — no console to write to
+        console = logging.StreamHandler()
+        console.setFormatter(fmt)
+        root.addHandler(console)
+    return log_file
+
+
 def main() -> None:
     """Thin CLI wrapper: bridge legacy args → env vars, then run uvicorn.
 
@@ -220,11 +248,14 @@ def main() -> None:
         os.environ["WAKE_CAPTURE_SECONDS"] = str(args.capture_seconds)
 
     import uvicorn
+    from backend.core import paths
     from backend.server.config import settings
 
+    log_file = configure_logging()
     host = args.host or settings.app_host
     port = args.port or settings.app_port
-    log.info(f"Starting SG_CUBE web server on http://{host}:{port}")
+    log.info("Starting SG_CUBE web server on http://%s:%s", host, port)
+    log.info("Data dir %s, log file %s", paths.DATA_DIR, log_file)
 
     uvicorn.run(
         "backend.server.main:app",
@@ -232,6 +263,8 @@ def main() -> None:
         port=port,
         reload=args.reload,
         log_level="info",
+        # Keep uvicorn from replacing the root handlers configured above.
+        log_config=None,
     )
 
 

@@ -3,8 +3,9 @@ import queue
 import threading
 import time
 from collections import deque
-from pathlib import Path
 from typing import Any, Callable, Optional, Generator
+
+from backend.core import paths
 
 import numpy as np
 import sounddevice as sd
@@ -20,7 +21,7 @@ from backend.server.config import settings
 
 vosk.SetLogLevel(-1)
 
-MODELS_DIR = Path(__file__).resolve().parents[1] / "ai_modules" / "speech" / "vosk_models"
+MODELS_DIR = paths.VOSK_DIR
 DEFAULT_MODEL = "vosk-model-small-en-us-0.15"
 
 # VAD tuning for command capture. RMS values are int16-amplitude scaled

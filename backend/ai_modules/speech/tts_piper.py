@@ -7,8 +7,9 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from pathlib import Path
 from typing import AsyncGenerator, Tuple
+
+from backend.core import paths
 
 import numpy as np
 import sounddevice as sd
@@ -17,7 +18,7 @@ from piper import PiperVoice
 from backend.core.events import get_bus, Priority
 from backend.daemon.ui_events import TTSStartEvent, TTSEndEvent
 
-VOICE_DIR = Path(__file__).parent / "piper_voices"
+VOICE_DIR = paths.PIPER_DIR
 VOICE_NAME = "en_US-ryan-high"
 
 _voice: PiperVoice | None = None
