@@ -86,3 +86,31 @@ def test_window_survives_a_reopen(tmp_path):
     reopened = Ledger(path=path).snapshot()
     assert reopened["window"]["wake_attempts"] == 1
     assert reopened["window_rates"]["label"] == "run-1"
+
+
+def test_a_process_that_records_nothing_writes_nothing(tmp_path):
+    """Importing the daemon modules builds the ledger singleton. Saving on
+    construction meant every probe script — tools/preflight.py included —
+    stamped a new session into the real ledger without recording anything."""
+    path = tmp_path / "dogfooding.json"
+    Ledger(path=path)
+    assert not path.exists()
+
+
+def test_an_existing_ledger_is_untouched_by_a_silent_process(tmp_path):
+    path = tmp_path / "dogfooding.json"
+    led = Ledger(path=path)
+    led.record_command(success=True, latency_ms=10)
+    before = path.read_bytes()
+    Ledger(path=path)  # e.g. preflight importing trigger.py
+    assert path.read_bytes() == before
+
+
+def test_the_first_record_persists_the_session_stamp(tmp_path):
+    path = tmp_path / "dogfooding.json"
+    led = Ledger(path=path)
+    led.record_command(success=True, latency_ms=10)
+    import json
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["session_started_at"] and data["command_total"] == 1

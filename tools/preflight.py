@@ -186,7 +186,23 @@ def _check_vram(settings) -> None:
 
 
 # ── 3. Gemini keys ───────────────────────────────────────────────────────
-async def check_gemini(offline: bool) -> None:
+def _probe_key_metadata(key: str, model: str) -> None:
+    """Raises unless `key` is valid and can see `model`.
+
+    models.get is a metadata call — it never runs generate_content, so it does
+    not spend the free tier's ~20 generations/day. What it cannot tell you is
+    whether today's generation quota is already gone; --live-keys does that.
+    """
+    from google import genai
+
+    # Held in a name: a temporary Client is collected mid-call, and its
+    # finaliser closes the HTTP client under the request ("Cannot send a
+    # request, as the client has been closed").
+    client = genai.Client(api_key=key)
+    client.models.get(model=model)
+
+
+async def check_gemini(offline: bool, live: bool = False) -> None:
     section("Gemini key pool (cloud planner)")
     if offline:
         record("SKIP", "key pool", "--offline")
@@ -202,36 +218,50 @@ async def check_gemini(offline: bool) -> None:
         record("FAIL", "key pool", "no keys configured — every cloud turn will fail")
         return
 
-    live = 0
-    original = tuple(slots)
-    try:
+    live_count = 0
+    if not live:
         for i in configured:
-            # Expose exactly one key so the backend must use THIS slot.
-            settings.gemini_api_key = slots[i - 1]
-            settings.gemini_api_key_2 = settings.gemini_api_key_3 = ""
-            kp.pool.__init__()
+            t = time.monotonic()
             try:
-                t = time.monotonic()
-                out = await GeminiBackend().generate("Reply with one word: OK", temperature=0.0)
-                dt = time.monotonic() - t
-                if out.strip():
-                    live += 1
-                    record("PASS", f"key slot {i}", f"live in {dt:.2f}s  (…{slots[i-1][-6:]})")
-                else:
-                    record("WARN", f"key slot {i}", f"empty reply in {dt:.2f}s")
+                await asyncio.to_thread(_probe_key_metadata, slots[i - 1], settings.gemini_model)
+                live_count += 1
+                record("PASS", f"key slot {i}",
+                       f"valid, sees {settings.gemini_model} in {time.monotonic() - t:.2f}s  "
+                       f"(…{slots[i-1][-6:]}; quota not checked — --live-keys)")
             except Exception as e:
-                msg = str(e)
-                hint = " — DAILY QUOTA SPENT" if "RESOURCE_EXHAUSTED" in msg or "429" in msg else ""
-                record("FAIL", f"key slot {i}", f"{type(e).__name__}{hint}: {msg[:80]}")
-    finally:
-        settings.gemini_api_key, settings.gemini_api_key_2, settings.gemini_api_key_3 = original
-        kp.pool.__init__()
+                record("FAIL", f"key slot {i}", f"{type(e).__name__}: {str(e)[:90]}")
+    else:
+        # Spends one generation per key. Opt-in: on the free tier three of
+        # these are 15% of the day's budget.
+        original = tuple(slots)
+        try:
+            for i in configured:
+                # Expose exactly one key so the backend must use THIS slot.
+                settings.gemini_api_key = slots[i - 1]
+                settings.gemini_api_key_2 = settings.gemini_api_key_3 = ""
+                kp.pool.__init__()
+                try:
+                    t = time.monotonic()
+                    out = await GeminiBackend().generate("Reply with one word: OK", temperature=0.0)
+                    dt = time.monotonic() - t
+                    if out.strip():
+                        live_count += 1
+                        record("PASS", f"key slot {i}", f"live in {dt:.2f}s  (…{slots[i-1][-6:]})")
+                    else:
+                        record("WARN", f"key slot {i}", f"empty reply in {dt:.2f}s")
+                except Exception as e:
+                    msg = str(e)
+                    hint = " — DAILY QUOTA SPENT" if "RESOURCE_EXHAUSTED" in msg or "429" in msg else ""
+                    record("FAIL", f"key slot {i}", f"{type(e).__name__}{hint}: {msg[:80]}")
+        finally:
+            settings.gemini_api_key, settings.gemini_api_key_2, settings.gemini_api_key_3 = original
+            kp.pool.__init__()
 
     blank = 3 - len(configured)
     if blank:
         record("WARN", "spare key slots", f"{blank} blank — each free key from a separate Google "
                                           "account multiplies the daily budget")
-    if live == 0:
+    if live_count == 0:
         record("FAIL", "usable cloud budget", "no live keys — only rule-tier and offline commands will work")
 
 
@@ -286,20 +316,21 @@ def check_voice() -> None:
         profile = select_profile()
         if cuda_available():
             record("PASS", "CUDA (ctranslate2)", f"available — profile {profile}")
-        elif profile.device == "cuda":
-            record("FAIL", "CUDA (ctranslate2)",
-                   f"NOT available but STT_PROFILE forces {profile.device} — "
-                   "set STT_PROFILE=auto or fast")
         else:
             import ctranslate2
 
+            # A forced 'accurate' no longer reaches cuda here — select_profile
+            # falls back to the CPU — so this is a WARN (it runs, just not as
+            # pinned), where it used to be a FAIL (it crashed on first decode).
+            pinned = " STT_PROFILE=accurate is NOT being honoured." \
+                if "forced accurate" in profile.reason else ""
             if ctranslate2.get_cuda_device_count() > 0:
                 # The card is there; only the libraries are missing.
                 record("WARN", "CUDA (ctranslate2)",
                        f"NVIDIA GPU found but cuBLAS/cuDNN are not installed — running "
-                       f"{profile}. `uv sync --extra gpu` to use it")
+                       f"{profile}.{pinned} `uv sync --extra gpu` to use it")
             else:
-                record("WARN", "CUDA (ctranslate2)", f"unavailable — running {profile}")
+                record("WARN", "CUDA (ctranslate2)", f"unavailable — running {profile}.{pinned}")
     except Exception as e:
         record("WARN", "CUDA (ctranslate2)", f"could not query: {type(e).__name__}: {str(e)[:70]}")
 
@@ -362,6 +393,9 @@ async def main() -> int:
     ap = argparse.ArgumentParser(description="SG-CUBE demo pre-flight")
     ap.add_argument("--offline", action="store_true",
                     help="skip cloud checks (use when rehearsing in airplane mode)")
+    ap.add_argument("--live-keys", action="store_true",
+                    help="also send one generation per Gemini key (spends quota; "
+                         "the default check is a free metadata call)")
     args = ap.parse_args()
 
     print(f"{BOLD}SG-CUBE pre-flight{OFF}  {DIM}"
@@ -369,7 +403,7 @@ async def main() -> int:
 
     check_config()
     check_ollama(args.offline)
-    await check_gemini(args.offline)
+    await check_gemini(args.offline, live=args.live_keys)
     await check_failover()
     check_voice()
     check_fast_path()

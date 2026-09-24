@@ -151,7 +151,9 @@ def test_recording_through_the_singleton_stays_in_the_sandbox():
         "trigger.py holds a different ledger object than the one conftest "
         "redirected, so its writes go somewhere unmonitored"
     )
-    before = ledger.snapshot()["barge_ins"]
+    # .get: the key only exists after a first bump, so indexing it passed only
+    # when an earlier test in the run had recorded a barge-in.
+    before = ledger.snapshot().get("barge_ins", 0)
     trigger.dogfooding_ledger.record_barge_in()
     assert ledger.snapshot()["barge_ins"] == before + 1
 

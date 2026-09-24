@@ -137,7 +137,10 @@ class Ledger:
         win.setdefault("label", None)
         for k in _WINDOWED:
             win.setdefault(k, 0)
-        self._save()
+        # No save here. The module-level singleton is built on import, so
+        # saving on construction made every process that merely imports the
+        # daemon — tools/preflight.py, probe scripts — stamp a new session into
+        # the real ledger. The first record_* call persists all of the above.
 
     def _bump(self, key: str, n: int = 1) -> None:
         """Increment a counter in both the lifetime total and the window.
