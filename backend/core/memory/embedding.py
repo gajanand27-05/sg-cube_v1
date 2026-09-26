@@ -131,6 +131,102 @@ EMBEDDERS: dict[str, int] = {          # name -> vector width
 _MULTI_REPO = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 _MULTI_FILE = "onnx/model_quint8_avx2.onnx"   # int8: fp32 quality at a quarter of the size
 
+# Pinned SHA-256 of every file a model loads. Derived 2026-09-26 through a
+# trusted chain, not from whatever happened to be on disk:
+#   minilm-l6: chromadb verifies its download archive against its own pin
+#   (_MODEL_SHA256) — but ONLY when downloading; an existing extracted folder
+#   is checked for existence alone, which is how a truncated model.onnx
+#   (33 MB of 90) loaded as InvalidProtobuf on the dev machine. These are the
+#   hashes of the files INSIDE that verified archive.
+#   multilingual: the LFS sha256 Hugging Face publishes for each file.
+_PINNED = {
+    "minilm-l6": {
+        "onnx/model.onnx": "4f148ba8ae9c2c7fbee4af2b132db8d06c6a6545b47fc83bbb98c3d22b8393e6",
+        "onnx/tokenizer.json": "da0e79933b9ed51798a3ae27893d3c5fa4a201126cef75586296df9b4d2c62a0",
+    },
+    "multilingual-minilm-l12": {
+        _MULTI_FILE: "98a01d88b7de996cdea58c32ca71208c09968d143798814b2ea09d3439dc334f",
+        "tokenizer.json": "2c3387be76557bd40970cec13153b3bbf80407865484b209e655e5e4729076b8",
+    },
+}
+
+
+class ModelIntegrityError(RuntimeError):
+    """A model file does not match its pinned hash, even after a repair."""
+
+
+def _sha256(path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _bad_files(files: dict) -> list[str]:
+    """Names of files that are missing or do not match. files: name -> path."""
+    from pathlib import Path
+
+    return [name for name, path in files.items()
+            if not Path(path).is_file() or _sha256(path) != _PINNED_FOR[name]]
+
+
+_PINNED_FOR = {name: sha for spec in _PINNED.values() for name, sha in spec.items()}
+
+
+def _verify_minilm_l6(model) -> None:
+    """Hash the extracted files; on a mismatch, delete the folder and let
+    chromadb re-extract from its (SHA-checked) archive; if that still does not
+    match, fail loudly — a silently wrong model is corrupted memory."""
+    import shutil
+
+    root = model.DOWNLOAD_PATH
+    model._download_model_if_not_exists()
+    files = {name: root / name for name in _PINNED["minilm-l6"]}
+    bad = _bad_files(files)
+    if not bad:
+        return
+    log.warning("memory embedder minilm-l6: %s do not match their pinned SHA-256 — "
+                "re-extracting from the verified archive", bad)
+    shutil.rmtree(root / model.EXTRACTED_FOLDER_NAME, ignore_errors=True)
+    model._download_model_if_not_exists()
+    bad = _bad_files(files)
+    if bad:
+        log.error("memory embedder minilm-l6: %s still do not match after re-extraction", bad)
+        raise ModelIntegrityError(f"minilm-l6 model files fail their SHA-256 check: {bad} (in {root})")
+
+
+def _verified_hf_files() -> dict:
+    """Download (or reuse) the multilingual files, verified; one forced
+    re-download on a mismatch, then fail loudly."""
+    from huggingface_hub import hf_hub_download
+
+    def fetch(name):
+        # Cache first: a plain hf_hub_download asks the Hub on every load,
+        # which is a network call per boot and a stall on an offline laptop.
+        # The hash below is what vouches for a cached file.
+        try:
+            return hf_hub_download(_MULTI_REPO, name, local_files_only=True)
+        except Exception:
+            return hf_hub_download(_MULTI_REPO, name)
+
+    names = list(_PINNED["multilingual-minilm-l12"])
+    files = {n: fetch(n) for n in names}
+    bad = _bad_files(files)
+    if bad:
+        log.warning("memory embedder multilingual: %s do not match their pinned SHA-256 — "
+                    "re-downloading", bad)
+        for n in bad:
+            files[n] = hf_hub_download(_MULTI_REPO, n, force_download=True)
+        bad = _bad_files(files)
+        if bad:
+            log.error("memory embedder multilingual: %s still do not match after re-download", bad)
+            raise ModelIntegrityError(f"multilingual model files fail their SHA-256 check: {bad}")
+    return files
+
+
 _models: dict = {}
 _models_lock = threading.Lock()
 
@@ -138,12 +234,12 @@ _models_lock = threading.Lock()
 class _MultilingualMiniLM:
     def __init__(self) -> None:
         import onnxruntime as ort
-        from huggingface_hub import hf_hub_download
         from tokenizers import Tokenizer
 
-        self._session = ort.InferenceSession(hf_hub_download(_MULTI_REPO, _MULTI_FILE),
+        files = _verified_hf_files()
+        self._session = ort.InferenceSession(files[_MULTI_FILE],
                                              providers=["CPUExecutionProvider"])
-        self._tok = Tokenizer.from_file(hf_hub_download(_MULTI_REPO, "tokenizer.json"))
+        self._tok = Tokenizer.from_file(files["tokenizer.json"])
         self._tok.enable_truncation(128)
         self._tok.enable_padding()
 
@@ -166,7 +262,9 @@ def _load(name: str):
         # measured ~210 ms/query that way against ~18 ms held.
         from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import ONNXMiniLM_L6_V2
 
-        return ONNXMiniLM_L6_V2()
+        model = ONNXMiniLM_L6_V2()
+        _verify_minilm_l6(model)
+        return model
     if name == "multilingual-minilm-l12":
         return _MultilingualMiniLM()
     raise ValueError(f"unknown MEMORY_EMBEDDER {name!r}; choose one of {sorted(EMBEDDERS)}")
