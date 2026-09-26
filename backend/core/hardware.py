@@ -27,6 +27,7 @@ class Hardware:
     on_battery: bool
     ollama_up: bool
     ollama_models: tuple[str, ...]
+    ollama_installed: bool = True
 
     def has_ollama_model(self, name: str) -> bool:
         """Ollama lists 'phi3:latest' for a model pulled as 'phi3'."""
@@ -81,10 +82,13 @@ def probe(ollama_url: str, timeout: float = 2.0, connect_timeout: float = 0.3) -
     except Exception as e:
         log.debug("probe: Ollama not reachable at %s: %s", ollama_url, e)
 
+    from backend.core import local_llm_health
+
     return Hardware(ram_gb=ram_gb, nvidia_gpu=nvidia_gpu,
                     cuda_usable=nvidia_gpu and cuda_available(),
                     on_battery=on_battery(), ollama_up=ollama_up,
-                    ollama_models=models)
+                    ollama_models=models,
+                    ollama_installed=ollama_up or local_llm_health.installed())
 
 
 def _recommend(settings, hw: Hardware) -> list[Adjustment]:
@@ -95,6 +99,15 @@ def _recommend(settings, hw: Hardware) -> list[Adjustment]:
             "enable_vision", False,
             f"passive vision needs {settings.vision_model} in local Ollama and {where}; "
             "every glance would fail (describe_screen/ocr_screen still work on demand)"))
+    if settings.llm_fallback_backend == "ollama_fallback" and not hw.ollama_installed:
+        # Measured 2026-09-26: each failover attempt against an absent local
+        # Ollama costs 650-720 ms (3 runs) before failing — paid on top of the
+        # cloud failure that triggered it. With Ollama not installed at all it
+        # can never succeed. (Installed-but-stopped keeps it: preload starts it.)
+        out.append(Adjustment(
+            "llm_fallback_backend", "",
+            "Ollama is not installed, so a local fallback planner can never answer; "
+            "each attempt only added ~0.7 s to a failed turn"))
     return out
 
 

@@ -74,3 +74,46 @@ def test_summary_is_json_safe():
     import json
 
     json.dumps(_hw(ollama_up=True, ollama_models=("a",)).summary())
+
+
+# ── the local fallback planner ──────────────────────────────────────────
+
+def _fb_settings(monkeypatch, **env):
+    monkeypatch.delenv("LLM_FALLBACK_BACKEND", raising=False)
+    monkeypatch.delenv("ENABLE_VISION", raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    return Settings(_env_file=None)
+
+
+def test_no_ollama_installed_clears_the_fallback(monkeypatch):
+    s = _fb_settings(monkeypatch)
+    assert s.llm_fallback_backend == "ollama_fallback", "precondition: shipped default"
+    applied = hardware.apply(s, _hw(ollama_installed=False))
+    assert s.llm_fallback_backend == ""
+    assert "llm_fallback_backend" in [a.field for a in applied]
+
+
+def test_installed_but_stopped_keeps_the_fallback(monkeypatch):
+    """Preload starts an installed Ollama, so the fallback may yet answer."""
+    s = _fb_settings(monkeypatch)
+    hardware.apply(s, _hw(ollama_installed=True, ollama_up=False))
+    assert s.llm_fallback_backend == "ollama_fallback"
+
+
+def test_an_explicit_fallback_setting_wins(monkeypatch):
+    s = _fb_settings(monkeypatch, LLM_FALLBACK_BACKEND="ollama_fallback")
+    applied = hardware.apply(s, _hw(ollama_installed=False))
+    assert s.llm_fallback_backend == "ollama_fallback"
+    assert "llm_fallback_backend" not in [a.field for a in applied]
+    assert "llm_fallback_backend" in [c.field for c in hardware.conflicts(s, _hw(ollama_installed=False))]
+
+
+def test_the_provider_reads_the_cleared_setting(monkeypatch):
+    """Cleared at boot must mean no failover attempt at call time."""
+    from backend.ai_modules.llm import provider as prov
+    from backend.server.config import settings
+    monkeypatch.setattr(settings, "llm_fallback_backend", "")
+    p = prov.LLMProvider.__new__(prov.LLMProvider)
+    p._backends = {"ollama_fallback": object()}
+    assert p._get_fallback_backend("ollama_cloud") is None
