@@ -202,6 +202,28 @@ def _is_network_or_device(raw: str) -> bool:
     return raw.startswith(("\\\\", "//"))
 
 
+def _own_folders() -> list[Path]:
+    """SG-CUBE's own files: install folder / repo checkout, data folder
+    (SG_CUBE_HOME), speech models, and the embedding-model caches. Refused
+    even when they fall under a user folder or EXTRA_ALLOWED_ROOTS — e.g. a
+    checkout under Documents, or D:\\ added as an extra root. Read at call
+    time so an SG_CUBE_HOME change is honoured."""
+    from backend.core import paths
+
+    own = [paths.APP_ROOT, paths.DATA_DIR, paths.VOSK_DIR, paths.PIPER_DIR]
+    try:
+        from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import ONNXMiniLM_L6_V2
+        own.append(ONNXMiniLM_L6_V2.DOWNLOAD_PATH)
+    except Exception:  # noqa: BLE001 — a missing optional import must not open a hole
+        pass
+    try:
+        from huggingface_hub import constants
+        own.append(Path(constants.HF_HUB_CACHE))
+    except Exception:  # noqa: BLE001
+        pass
+    return own
+
+
 def allowed_roots() -> list[Path]:
     """SEARCH_ROOTS plus EXTRA_ALLOWED_ROOTS (";"-separated, config/.env only
     — no tool writes settings, so it can never be widened by voice). A UNC,
@@ -246,6 +268,13 @@ def check_user_path(path_str: str) -> Path:
     if any(part.split(".")[0].upper() in _RESERVED_NAMES for part in p.parts[1:]):
         raise PathRefused("reserved Windows device names are not allowed")
     resolved = p.resolve()
+    for own in _own_folders():
+        try:
+            if resolved.is_relative_to(own.resolve()):
+                raise PathRefused(f"{resolved} is inside SG-CUBE's own files ({own}); "
+                                  "the file tools never touch those")
+        except OSError:
+            continue
     roots = allowed_roots()
     for root in roots:
         try:

@@ -163,3 +163,61 @@ def test_open_notes_today_uses_shellexecute_not_cmd(monkeypatch, tmp_path):
     monkeypatch.setattr(notes.os, "startfile", opened.append, raising=False)
     assert REGISTRY["open_notes_today"].func()["status"] == "success"
     assert len(opened) == 1 and opened[0].endswith(".md")
+
+
+# ── SG-CUBE's own folders, even under an allowed root ───────────────────
+
+@pytest.fixture
+def own_layout(root, monkeypatch):
+    """Put a fake install, data dir and models folder INSIDE an allowed root —
+    the case that matters: a checkout under Documents, SG_CUBE_HOME pointed
+    there, or D:\ added to EXTRA_ALLOWED_ROOTS."""
+    from backend.core import paths
+    layout = {}
+    for name in ("app", "data", "vosk", "piper"):
+        d = root / name
+        d.mkdir()
+        layout[name] = d
+    monkeypatch.setattr(paths, "APP_ROOT", layout["app"])
+    monkeypatch.setattr(paths, "DATA_DIR", layout["data"])
+    monkeypatch.setattr(paths, "VOSK_DIR", layout["vosk"])
+    monkeypatch.setattr(paths, "PIPER_DIR", layout["piper"])
+    return layout
+
+
+@pytest.mark.parametrize("where", ["app", "data", "vosk", "piper"])
+def test_own_folders_are_refused_inside_an_allowed_root(own_layout, where):
+    with pytest.raises(PathRefused, match="SG-CUBE's own files"):
+        check_user_path(str(own_layout[where] / "backend" / "server" / "config.py"))
+
+
+def test_own_folders_are_refused_even_via_extra_allowed_roots(own_layout, monkeypatch):
+    from backend.server.config import settings
+    monkeypatch.setattr(settings, "extra_allowed_roots", str(own_layout["app"].parent))
+    r = REGISTRY["write_file"].func(path=str(own_layout["app"] / ".env"), content="x")
+    assert r.status == "blocked" and "SG-CUBE's own files" in r.reason
+    assert not (own_layout["app"] / ".env").exists()
+
+
+def test_a_junction_into_own_folders_is_refused(own_layout, root):
+    subprocess.run(["cmd", "/c", "mklink", "/J", str(root / "shortcut"), str(own_layout["data"])],
+                   check=True, capture_output=True)
+    with pytest.raises(PathRefused, match="SG-CUBE's own files"):
+        check_user_path(str(root / "shortcut" / "database" / "contacts.json"))
+
+
+def test_the_real_repo_and_model_caches_are_protected():
+    """Not a monkeypatched layout: the actual checkout and caches."""
+    from backend.core import paths
+    own = [str(p).lower() for p in files._own_folders()]
+    assert str(paths.APP_ROOT).lower() in own
+    assert any(".cache" in p and "chroma" in p for p in own)
+    assert any("huggingface" in p for p in own)
+    with pytest.raises(PathRefused, match="SG-CUBE's own files"):
+        check_user_path(str(paths.APP_ROOT / "backend" / "server" / "config.py"))
+
+
+def test_neighbours_of_own_folders_still_work(own_layout, root):
+    """Refusal is by containment, not by name prefix: 'app-notes' is not 'app'."""
+    (root / "app-notes").mkdir()
+    assert check_user_path(str(root / "app-notes" / "todo.txt"))
