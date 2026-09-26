@@ -237,6 +237,59 @@ def configure_logging() -> Path:
     return log_file
 
 
+# ── single instance ──────────────────────────────────────────────────────
+# One backend per data folder. The mutex stops a second one however it was
+# started (shortcut, sg_cube.bat, a terminal); the PID file tells the
+# launcher which process to open or stop — checked against the process's
+# start time and argv, never by matching text in a command line (a shell or
+# an editor showing "backend.daemon.main" must never be taken for it).
+_instance_mutex = None
+
+
+def pid_file() -> Path:
+    from backend.core import paths
+    return paths.DATA_DIR / "sg_cube.pid"
+
+
+def _mutex_name() -> str:
+    import hashlib
+    from backend.core import paths
+    tag = hashlib.sha256(str(paths.DATA_DIR.resolve()).lower().encode()).hexdigest()[:16]
+    return f"Local\\SG-CUBE-{tag}"
+
+
+def claim_single_instance(port: int) -> bool:
+    """Take this data folder's instance mutex and write the PID file.
+    False = another SG-CUBE backend already holds it."""
+    global _instance_mutex
+    import atexit
+    import json
+    import psutil
+    import win32api
+    import win32event
+    import winerror
+
+    handle = win32event.CreateMutex(None, False, _mutex_name())
+    if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+        win32api.CloseHandle(handle)
+        return False
+    _instance_mutex = handle  # held for the life of the process
+    me = psutil.Process()
+    pf = pid_file()
+    pf.parent.mkdir(parents=True, exist_ok=True)
+    pf.write_text(json.dumps({"pid": me.pid, "create_time": me.create_time(), "port": port}),
+                  encoding="utf-8")
+
+    def _remove():
+        try:
+            if json.loads(pf.read_text(encoding="utf-8")).get("pid") == me.pid:
+                pf.unlink()
+        except (OSError, ValueError):
+            pass
+    atexit.register(_remove)
+    return True
+
+
 def warn_if_exposed(host: str, allow_lan_hud: bool) -> str | None:
     """Warn when the server listens beyond this machine. Returns the warning.
 
@@ -298,6 +351,10 @@ def main() -> None:
     log_file = configure_logging()
     host = args.host or settings.app_host
     port = args.port or settings.app_port
+    if not claim_single_instance(port):
+        log.error("SG-CUBE is already running for this data folder (%s); not starting a "
+                  "second backend", paths.DATA_DIR)
+        sys.exit(3)
     log.info("Starting SG_CUBE web server on http://%s:%s", host, port)
     warn_if_exposed(host, settings.allow_lan_hud)
     log.info("Data dir %s, log file %s", paths.DATA_DIR, log_file)

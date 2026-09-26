@@ -104,3 +104,8 @@ decisions.md
 # _isolate_capture_archive). Kept on disk so the move is reversible, but they
 # are fixture replays, not recordings of the user.
 backend/database/captures/_suite_artifacts/
+
+# The running backend's PID file (daemon/main.claim_single_instance)
+backend/sg_cube.pid
+# The shortcut icon tools/install_app.py generates from the logo
+backend/sg-cube.ico
