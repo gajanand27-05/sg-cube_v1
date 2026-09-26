@@ -237,6 +237,33 @@ def configure_logging() -> Path:
     return log_file
 
 
+def warn_if_exposed(host: str, allow_lan_hud: bool) -> str | None:
+    """Warn when the server listens beyond this machine. Returns the warning.
+
+    /ws/ui accepts confirmation answers ("yes, delete that file"). Measured
+    with a LAN peer against a 0.0.0.0 bind: /api/session 403, /ws/ui 4403,
+    command routes 401 — refused, but only because ALLOW_LAN_HUD is off; the
+    port itself (e.g. /health) answers the whole network either way."""
+    import ipaddress
+
+    try:
+        loopback = host == "localhost" or ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = False
+    if loopback:
+        return None
+    if allow_lan_hud:
+        msg = (f"Listening on {host}: reachable from the network, and ALLOW_LAN_HUD=true, so "
+               "any device on your LAN that obtains the session token can answer confirmation "
+               "prompts (/ws/ui). Bind to 127.0.0.1 unless you need the HUD on another device.")
+    else:
+        msg = (f"Listening on {host}: reachable from the network. The confirmation endpoint "
+               "(/ws/ui) and /api/session still refuse non-local peers (ALLOW_LAN_HUD is off), "
+               "but the port is exposed. Set APP_HOST=127.0.0.1 unless you need LAN access.")
+    log.warning(msg)
+    return msg
+
+
 def main() -> None:
     """Thin CLI wrapper: bridge legacy args → env vars, then run uvicorn.
 
@@ -272,6 +299,7 @@ def main() -> None:
     host = args.host or settings.app_host
     port = args.port or settings.app_port
     log.info("Starting SG_CUBE web server on http://%s:%s", host, port)
+    warn_if_exposed(host, settings.allow_lan_hud)
     log.info("Data dir %s, log file %s", paths.DATA_DIR, log_file)
 
     uvicorn.run(
