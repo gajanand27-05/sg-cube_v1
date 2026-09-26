@@ -1,6 +1,8 @@
 """File ops + dictation tools (Phase 11b)."""
 import logging
+import re
 import subprocess
+import time
 from pathlib import Path
 
 import pyautogui
@@ -340,11 +342,132 @@ def find_file(query: str, max_results: int = 10) -> dict:
     }
 
 
+# Consoles: here a line break IS Enter, i.e. "run this command". mintty is
+# Git Bash's terminal.
+TERMINAL_PROCESSES = frozenset({"cmd.exe", "powershell.exe", "pwsh.exe", "windowsterminal.exe",
+                                "wt.exe", "conhost.exe", "openconsole.exe", "mintty.exe"})
+# How long, after a HUD "yes", the user has to click into the approved window.
+TYPE_TEXT_FOCUS_WAIT_S = 10.0
+_CHUNK = 16  # characters typed between focus checks
+# Stop this long before the runtime's timeout for the call, so the typing
+# thread never outlives a timeout the user has already been told about.
+_DEADLINE_MARGIN_S = 2.0
+
+
+def foreground_window() -> dict | None:
+    """The window keystrokes would land in: {hwnd, pid, title, process, class}."""
+    try:
+        import psutil
+        import win32gui
+        import win32process
+
+        hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            return None
+        _tid, pid = win32process.GetWindowThreadProcessId(hwnd)
+        return {"hwnd": int(hwnd), "pid": int(pid), "title": win32gui.GetWindowText(hwnd),
+                "process": psutil.Process(pid).name().lower(),
+                "class": win32gui.GetClassName(hwnd)}
+    except Exception as e:  # noqa: BLE001
+        log.debug("foreground window unreadable: %s", e)
+        return None
+
+
+def runs_commands(win: dict | None) -> bool:
+    """A window where a typed line break executes something: a console, or
+    the Win+R Run dialog (an explorer.exe #32770 dialog — matched by class,
+    not by its title, which is translated on non-English Windows)."""
+    if not win:
+        return False
+    if win["process"] in TERMINAL_PROCESSES:
+        return True
+    return win["process"] == "explorer.exe" and win.get("class") == "#32770"
+
+
+def _is(win: dict | None, hwnd: int, pid: int) -> bool:
+    return bool(win and win["hwnd"] == hwnd and win["pid"] == pid)
+
+
+def _typing_event(state: str, title: str, process: str, **extra) -> None:
+    """Tell the HUD what typing is waiting on / did. Never breaks typing."""
+    try:
+        from backend.core.events import Priority, get_bus
+        from backend.daemon.ui_events import TypingFocusEvent
+
+        get_bus().publish(TypingFocusEvent(state=state, title=title, process=process,
+                                           timeout_s=extra.get("timeout_s", 0.0),
+                                           typed=extra.get("typed", 0),
+                                           total=extra.get("total", 0)),
+                          priority=Priority.NORMAL)
+    except Exception as e:  # noqa: BLE001
+        log.debug("could not publish typing state: %s", e)
+
+
 @tool(tier=CapabilityTier.SYSTEM_WRITE)  # tier: synthesizes keystrokes into focused window, reversible
-def type_text(text: str) -> dict:
+def type_text(text: str, expect_hwnd: int | None = None, expect_pid: int | None = None,
+              expect_title: str = "", expect_process: str = "") -> dict:
     """Type `text` into the currently focused window — as if you typed it on
-    the keyboard. Use for quick dictation. Does NOT press Enter at the end."""
+    the keyboard. Use for quick dictation. Does NOT press Enter at the end.
+    Leave the expect_* arguments empty: the confirmation step fills them with
+    the window the user approved."""
     if not text:
         return {"status": "blocked", "reason": "empty text"}
-    pyautogui.typewrite(text, interval=0.02)
-    return {"status": "success", "message": f"typed {len(text)} chars"}
+
+    if expect_hwnd is None:          # no approved window (a caller outside the
+        fg = foreground_window()     # confirmation flow): pin whatever is in front
+        if fg is None:
+            return {"status": "blocked", "reason": "can't tell which window would receive the text"}
+        expect_hwnd, expect_pid = fg["hwnd"], fg["pid"]
+        expect_title, expect_process = fg["title"], fg["process"]
+    label = f"{expect_title or '(untitled)'} ({expect_process})"
+    from backend.core.runtime import current_call
+
+    cancel, deadline = current_call()
+    stop_at = (deadline - _DEADLINE_MARGIN_S) if deadline else None
+
+    def _halt_reason(typed: int) -> str | None:
+        if cancel is not None and cancel.is_set():
+            return f"stopped: the request was cancelled after {typed:,} of {len(text):,} characters were typed"
+        if stop_at is not None and time.monotonic() >= stop_at:
+            return f"stopped: time limit reached after {typed:,} of {len(text):,} characters were typed"
+        return None
+
+    # After a HUD "yes" the HUD itself has focus. Wait — briefly — for the user
+    # to click into the approved window; never type anywhere else.
+    if not _is(foreground_window(), expect_hwnd, expect_pid):
+        _typing_event("waiting", expect_title, expect_process, timeout_s=TYPE_TEXT_FOCUS_WAIT_S)
+        wait_until = time.monotonic() + TYPE_TEXT_FOCUS_WAIT_S
+        while not _is(foreground_window(), expect_hwnd, expect_pid):
+            halt = _halt_reason(0)
+            if halt:
+                _typing_event("cancelled", expect_title, expect_process)
+                return {"status": "blocked", "reason": halt.replace("stopped: ", "")}
+            if time.monotonic() >= wait_until:
+                _typing_event("cancelled", expect_title, expect_process)
+                return {"status": "blocked",
+                        "reason": f"{label} did not get focus within "
+                                  f"{TYPE_TEXT_FOCUS_WAIT_S:.0f} seconds, so nothing was typed"}
+            time.sleep(0.1)
+
+    target = foreground_window()
+    if ("\n" in text or "\r" in text) and runs_commands(target):
+        _typing_event("cancelled", expect_title, expect_process)
+        return {"status": "blocked",
+                "reason": f"refused to type a line break into {label}: there it would run a command"}
+
+    _typing_event("typing", expect_title, expect_process, total=len(text))
+    typed = 0
+    for chunk in re.findall(r"[^\r\n]{1,%d}|\r\n|\r|\n" % _CHUNK, text):
+        halt = _halt_reason(typed)
+        if halt:
+            _typing_event("stopped", expect_title, expect_process, typed=typed, total=len(text))
+            return {"status": "error", "reason": halt}
+        if not _is(foreground_window(), expect_hwnd, expect_pid):
+            _typing_event("stopped", expect_title, expect_process, typed=typed, total=len(text))
+            return {"status": "error",
+                    "reason": f"stopped: focus left {label} after {typed} of {len(text)} "
+                              "characters were typed"}
+        pyautogui.typewrite("\n" if chunk in ("\r\n", "\r") else chunk, interval=0.02)
+        typed += len(chunk)
+    _typing_event("done", expect_title, expect_process, typed=typed, total=len(text))
+    return {"status": "success", "message": f"typed {typed} characters into {label}"}

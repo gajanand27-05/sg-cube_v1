@@ -20,12 +20,14 @@ import { ResponseModePanel } from "@/components/ResponseModePanel";
 import { ArchitectureSection } from "@/components/ArchitecturePanel";
 import { SystemStatsPanel } from "@/components/SystemStatsPanel";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
+import { TypingFocusBanner } from "@/components/TypingFocusBanner";
 
 export default function App() {
   return (
     <div className="min-h-screen flex flex-col relative">
       <AppBackground />
       <ConfirmationDialog />
+      <TypingFocusBanner />
       <div className="relative z-10 flex flex-col flex-1 min-h-0">
         <Header />
 

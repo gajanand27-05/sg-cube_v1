@@ -165,6 +165,17 @@ export type ConfirmationResolvedPayload = {
   outcome: "approved" | "declined" | "expired" | "superseded" | "dropped" | "cancelled";
 };
 
+/** type_text's progress. "waiting": the user approved on the HUD, so the
+ *  HUD has focus; typing starts only once they click into this window. */
+export type TypingFocusPayload = {
+  state: "waiting" | "typing" | "done" | "stopped" | "cancelled";
+  title: string;
+  process: string;
+  timeout_s: number;
+  typed: number;
+  total: number;
+};
+
 export type UiEventPayloadMap = {
   ai_metrics: AIMetricsPayload;
   wake_heard: WakeHeardPayload;
@@ -185,6 +196,7 @@ export type UiEventPayloadMap = {
   tool_finished: ToolFinishedPayload;
   confirmation_request: ConfirmationRequestPayload;
   confirmation_resolved: ConfirmationResolvedPayload;
+  typing_focus: TypingFocusPayload;
 };
 
 export type FollowUpExpiredPayload = {

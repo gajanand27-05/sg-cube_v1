@@ -189,6 +189,23 @@ def prepare_confirmation(name: str, args: dict) -> Prepared:
             return Prepared(args, refusal=f"no open Chrome tab matches {query!r}")
         return Prepared({**args, "only_if_titles": titles}, titles)
 
+    if name == "type_text":
+        from backend.core.tools.files import foreground_window, runs_commands
+
+        text = str(args.get("text", ""))
+        target = foreground_window()
+        if target is None:
+            return Prepared(args, refusal="I can't tell which window would receive the typing")
+        if ("\n" in text or "\r" in text) and runs_commands(target):
+            return Prepared(args, refusal=(
+                f"the text contains a line break and the target is {target['process']}, where "
+                "that would run it as a command"))
+        shown = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "⏎")
+        return Prepared({**args, "expect_hwnd": target["hwnd"], "expect_pid": target["pid"],
+                         "expect_title": target["title"], "expect_process": target["process"]},
+                        [f"Types into: {target['title'] or '(untitled)'} ({target['process']})",
+                         f"Text: {shown}"])
+
     return Prepared(args, _describe_args(args))
 
 

@@ -91,6 +91,7 @@ const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | 
     critical: "boolean", expires_in_s: "number",
   },
   confirmation_resolved: { id: "string", outcome: "string" },
+  typing_focus: { state: "string", title: "string", process: "string", timeout_s: "number" },
   system_stats: {
     cpu_percent: "number",
     memory_percent: "number",

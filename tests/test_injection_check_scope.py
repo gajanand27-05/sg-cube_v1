@@ -34,7 +34,7 @@ def test_json_content_is_not_an_injection():
 
 @pytest.mark.parametrize("name,args", [
     ("run_command", {"command": "dir & del /q C:\\x"}),
-    ("type_text", {"text": "rm -rf ~"}),
+    ("open_app", {"name": "calc & del x"}),
 ])
 def test_tools_that_execute_their_arguments_are_still_checked(name, args):
     r = _verify(name, args)

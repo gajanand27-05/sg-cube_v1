@@ -152,6 +152,19 @@ class ConfirmationRequested:
 
 
 @dataclass
+class TypingFocusEvent:
+    """type_text's progress, for the HUD. state: waiting (for the user to click
+    into the approved window, up to timeout_s) | typing | done | stopped (focus
+    left mid-way; typed of total went in) | cancelled."""
+    state: str
+    title: str
+    process: str
+    timeout_s: float = 0.0
+    typed: int = 0
+    total: int = 0
+
+
+@dataclass
 class ConfirmationResolved:
     """The pending is gone. outcome: approved | declined | expired |
     superseded | dropped (the user said something else) | cancelled."""

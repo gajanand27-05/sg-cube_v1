@@ -125,3 +125,15 @@ def _isolate_contact_book(tmp_path_factory):
         yield contacts.book
     finally:
         contacts.book = real
+
+
+@pytest.fixture(autouse=True)
+def _no_real_desktop(monkeypatch):
+    """No test may read the real foreground window: its title is whatever the
+    user has open (a browser tab, a document name) — private, and different
+    on every run. type_text's confirmation reads it; tests get a neutral fake.
+    Tests that need a particular window patch files.foreground_window again."""
+    from backend.core.tools import files
+    monkeypatch.setattr(files, "foreground_window",
+                        lambda: {"hwnd": 1, "pid": 1, "title": "test window", "process": "test.exe",
+                                 "class": "TestWindow"})

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -158,6 +159,19 @@ class Task:
             get_bus().publish(TaskEvent(self.id, self.status, message="Task cancelled by user"))
 
 
+# Per-call context for SYNC tools, which run on a thread-pool thread that
+# asyncio.wait_for cannot stop: on a timeout or cancel the thread keeps going.
+# A long-running sync tool (type_text) reads this to stop itself — at the
+# deadline, or as soon as the call is timed out / cancelled / finished.
+_call_ctx = threading.local()
+
+
+def current_call() -> tuple[threading.Event | None, float | None]:
+    """(cancel event, monotonic deadline) of the sync tool call running on this
+    thread, or (None, None) outside one."""
+    return getattr(_call_ctx, "cancel", None), getattr(_call_ctx, "deadline", None)
+
+
 class Runtime:
     """Async execution runtime for SG_CUBE tools."""
 
@@ -170,9 +184,19 @@ class Runtime:
         rid = request_id or task_id
         
         # Wrap sync functions in a thread pool to avoid blocking
+        cancel = threading.Event()
         if not asyncio.iscoroutinefunction(func):
             loop = asyncio.get_running_loop()
-            coro = loop.run_in_executor(None, lambda: func(**args))
+            deadline = time.monotonic() + timeout
+
+            def _in_thread():
+                _call_ctx.cancel, _call_ctx.deadline = cancel, deadline
+                try:
+                    return func(**args)
+                finally:
+                    _call_ctx.cancel = _call_ctx.deadline = None
+
+            coro = loop.run_in_executor(None, _in_thread)
         else:
             coro = func(**args)
 
@@ -207,11 +231,13 @@ class Runtime:
             task.status = TaskStatus.COMPLETED if res.status == ToolStatus.SUCCESS else TaskStatus.FAILED
 
         except asyncio.TimeoutError:
+            cancel.set()   # a sync tool's thread outlives wait_for; tell it to stop
             log.error(f"Task {name} ({task_id}) timed out after {timeout}s")
             task.status = TaskStatus.FAILED
             task.result = ToolResult.error(f"Execution timed out after {timeout}s", confidence=0.0, confidence_reason=["Timeout reached"])
 
         except asyncio.CancelledError:
+            cancel.set()
             log.info(f"Task {name} ({task_id}) was cancelled")
             task.status = TaskStatus.CANCELLED
             task.result = ToolResult.blocked("Task was cancelled", confidence=0.0, confidence_reason=["User cancelled"])
@@ -222,6 +248,7 @@ class Runtime:
             task.result = ToolResult.error(str(e), confidence=0.0, confidence_reason=["Internal crash"])
             
         finally:
+            cancel.set()   # whatever ended this call, nothing may keep running for it
             # A BaseException (KeyboardInterrupt, GeneratorExit) escapes the
             # excepts above with task.result still None. The publishes below
             # dereference it, so the AttributeError raised *inside* finally

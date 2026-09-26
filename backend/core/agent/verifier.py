@@ -32,7 +32,12 @@ INJECTION_PATTERN = re.compile(r"[;&|`$<>\{\}\[\]\\]")
 # with JSON or code as content was refused for its braces. Found live
 # 2026-09-25: a write_file into C:\Users\...\hud_probe.txt was rejected here,
 # before any confirmation could be asked.
-_EXECUTED_ARG_TOOLS = frozenset({"run_command", "type_text", "open_app"})
+# type_text left this set 2026-09-26: measured, the check refused ordinary
+# dictation (paths, URLs with &, "$49", "format the report") while allowing
+# "del important.txt" + Enter. Its real protection is the confirmation (always
+# asked, phi3 up or down), which now names the target window, shows line
+# breaks, and refuses a line break into a terminal.
+_EXECUTED_ARG_TOOLS = frozenset({"run_command", "open_app"})
 
 
 class VerificationResult:
