@@ -342,12 +342,13 @@ class WakeWordListener:
     def _wake_trigger_allowed(self, rms: float) -> bool:
         """May a decoded wake phrase start a turn at this loudness?
 
-        Not while a turn is in progress (THINKING or SPEAKING), unless it is
-        loud enough to be a real interruption. Barge-in is guarded by an RMS floor and a debounce; the
-        bare wake test beside it had neither, so our own TTS bleeding back
-        into the mic decoded as "onyx" and started a turn at rms=54 — cutting
-        off the sentence still being spoken, capturing nothing, and repeating.
-        Every barge-in protection was bypassed by sitting in the other branch.
+        Never while a reply is playing (see the interim note below). While a
+        turn is THINKING, only if it is loud enough to be a real interruption.
+        Barge-in is guarded by an RMS floor and a debounce; the bare wake test
+        beside it had neither, so our own TTS bleeding back into the mic
+        decoded as "onyx" and started a turn at rms=54 — cutting off the
+        sentence still being spoken, capturing nothing, and repeating. Every
+        barge-in protection was bypassed by sitting in the other branch.
 
         Deferring to the same threshold keeps one number in charge of "is this
         the user talking over us". With barge-in disabled there is no other
@@ -378,16 +379,25 @@ class WakeWordListener:
         good-morning wake among them. Loudness cannot tell a wake from room
         speech; this only raises the bar while a turn is busy.
         """
-        if not settings.enable_barge_in:
-            return True
         try:
             playing = is_speaking()
         except Exception:
             playing = False
-        busy = state_manager.current in (AssistantState.THINKING, AssistantState.SPEAKING)
-        if not busy and not playing:
+        # Interim, 2026-09-26: while a reply plays, a wake never interrupts it
+        # — loud or not, barge-in enabled or not. All 15 wakes that fired
+        # during SPEAKING that day were loud (rms 1002-2970); transcribed, 14 of
+        # the 15 clips hold no "onyx" (one is ambiguous): Onyx's own voice and
+        # room speech decode as the wake phrase. The barge-in path
+        # (Vosk-decoded speech, the RMS floor, a debounce) is the only voice
+        # interrupt now, when ENABLE_BARGE_IN is on. Revisit once the wake
+        # detector itself stops false-firing.
+        if playing or state_manager.current == AssistantState.SPEAKING:
+            return False
+        if not settings.enable_barge_in:
             return True
-        return rms >= settings.barge_in_rms_threshold
+        if state_manager.current == AssistantState.THINKING:
+            return rms >= settings.barge_in_rms_threshold
+        return True
 
     def _followup_trigger_allowed(self, rms: float) -> bool:
         """May decoded content inside the follow-up window start a turn?

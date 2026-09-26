@@ -54,14 +54,16 @@ def test_quiet_wake_is_refused_while_audio_is_actually_playing():
         assert lis._wake_trigger_allowed(342) is False
 
 
-def test_loud_wake_still_interrupts_playback():
-    """Talking over the assistant must keep working — that is barge-in."""
+def test_even_a_loud_wake_does_not_interrupt_playback():
+    """Interim (2026-09-26): all 15 wakes during a reply were loud and 14 of
+    their clips hold no "onyx". Talking over the assistant is the barge-in
+    path's job, not the wake word's."""
     lis = _listener()
     state_manager.transition_to(AssistantState.IDLE)
 
     with patch("backend.daemon.wake_word.is_speaking", return_value=True):
-        assert lis._wake_trigger_allowed(settings.barge_in_rms_threshold) is True
-        assert lis._wake_trigger_allowed(2500) is True
+        assert lis._wake_trigger_allowed(settings.barge_in_rms_threshold) is False
+        assert lis._wake_trigger_allowed(2500) is False
 
 
 def test_quiet_wake_is_allowed_when_nothing_is_playing():
@@ -81,19 +83,21 @@ def test_state_machine_speaking_still_guards_on_its_own():
     try:
         with patch("backend.daemon.wake_word.is_speaking", return_value=False):
             assert lis._wake_trigger_allowed(59) is False
-            assert lis._wake_trigger_allowed(2500) is True
+            assert lis._wake_trigger_allowed(2500) is False
     finally:
         state_manager.transition_to(AssistantState.IDLE)
 
 
-def test_guard_steps_aside_when_barge_in_is_disabled():
-    """With barge-in off there is no other way to interrupt — unchanged."""
+def test_wake_does_not_interrupt_even_with_barge_in_disabled():
+    """Interim: the wake word no longer interrupts a reply at all. With
+    barge-in off, nothing said aloud can stop one (see the rule's comment)."""
     lis = _listener()
     state_manager.transition_to(AssistantState.SPEAKING)
     try:
         with patch.object(settings, "enable_barge_in", False), \
              patch("backend.daemon.wake_word.is_speaking", return_value=True):
-            assert lis._wake_trigger_allowed(59) is True
+            assert lis._wake_trigger_allowed(59) is False
+            assert lis._wake_trigger_allowed(2500) is False
     finally:
         state_manager.transition_to(AssistantState.IDLE)
 

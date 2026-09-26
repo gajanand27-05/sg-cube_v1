@@ -3,9 +3,9 @@ did while SPEAKING.
 
 2026-09-26: "onyx" decoded out of "good morning" 0.3s into a turn; that
 capture ran on through the reply and Onyx's own sentence came back as the
-user's words. Of that day's 33 wakes, 9 fired while THINKING and none of the
-9 clips contains "onyx" when transcribed — Vosk's two-word grammar decodes
-room speech as the wake phrase.
+user's words. Of that day's first 33 wakes, 9 fired while THINKING; transcribed,
+8 of the 9 clips hold no "onyx" (204319 is ambiguous) — Vosk's two-word
+grammar decodes room speech as the wake phrase.
 
 The real-clip test reads the user's own wake clips from a local path and is
 skipped when they (or the Vosk model) are missing; the clips hold the user's

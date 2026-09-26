@@ -58,13 +58,14 @@ def test_quiet_wake_is_ignored_while_speaking(listener, monkeypatch, rms):
     assert listener._wake_trigger_allowed(rms) is False
 
 
-@pytest.mark.parametrize("rms", [800, 1732, 4063])
-def test_a_genuinely_loud_wake_still_interrupts(listener, monkeypatch, rms):
-    """Saying "onyx" over the top of a reply must still work — that is the
-    whole point of being interruptible."""
+@pytest.mark.parametrize("rms", [800, 1002, 1732, 2970, 4063])
+def test_a_loud_wake_does_not_interrupt_either(listener, monkeypatch, rms):
+    """Interim (2026-09-26): 15 wakes fired during replies at rms 1002-2970
+    and 14 of their clips hold no "onyx". Interrupting a reply is left to
+    the barge-in path (decoded speech + RMS floor + debounce)."""
     monkeypatch.setattr(ww.state_manager, "_current_state",
                         AssistantState.SPEAKING, raising=False)
-    assert listener._wake_trigger_allowed(rms) is True
+    assert listener._wake_trigger_allowed(rms) is False
 
 
 @pytest.mark.parametrize("rms", [54, 96, 800, 4063])
@@ -76,13 +77,13 @@ def test_any_wake_is_allowed_when_not_speaking(listener, monkeypatch, rms):
     assert listener._wake_trigger_allowed(rms) is True
 
 
-def test_the_guard_defers_to_barge_in_being_enabled(listener, monkeypatch):
-    """With barge-in off there is no other way to interrupt, so suppressing
-    the wake would make Onyx uninterruptible for the length of a reply."""
+def test_barge_in_disabled_does_not_reopen_the_wake_path(listener, monkeypatch):
+    """Interim, and a known cost: with barge-in off, no voice can stop a
+    reply. The user chose that over Onyx interrupting itself."""
     monkeypatch.setattr(ww.state_manager, "_current_state",
                         AssistantState.SPEAKING, raising=False)
     monkeypatch.setattr(ww.settings, "enable_barge_in", False)
-    assert listener._wake_trigger_allowed(54) is True
+    assert listener._wake_trigger_allowed(54) is False
 
 
 # ── follow-up on room noise ──────────────────────────────────────────────
