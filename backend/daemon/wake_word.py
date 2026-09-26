@@ -342,8 +342,8 @@ class WakeWordListener:
     def _wake_trigger_allowed(self, rms: float) -> bool:
         """May a decoded wake phrase start a turn at this loudness?
 
-        Not while we are SPEAKING, unless it is loud enough to be a real
-        interruption. Barge-in is guarded by an RMS floor and a debounce; the
+        Not while a turn is in progress (THINKING or SPEAKING), unless it is
+        loud enough to be a real interruption. Barge-in is guarded by an RMS floor and a debounce; the
         bare wake test beside it had neither, so our own TTS bleeding back
         into the mic decoded as "onyx" and started a turn at rms=54 — cutting
         off the sentence still being spoken, capturing nothing, and repeating.
@@ -369,6 +369,14 @@ class WakeWordListener:
         load-bearing at 50. is_speaking() answers the question exactly —
         it reports whether the current playback session's player task is
         still running.
+
+        THINKING joined SPEAKING on 2026-09-26: "onyx" decoded out of "good
+        morning" 0.3s into a turn, and that capture ran on through the reply
+        (see _capture's cut_at_playback_after). Measured on that day's 33
+        wakes: 9 fired while THINKING, and at the 800 floor this blocks the 6
+        below it (rms 224-578) but not the other 3 (1248, 1511, 1561) — the
+        good-morning wake among them. Loudness cannot tell a wake from room
+        speech; this only raises the bar while a turn is busy.
         """
         if not settings.enable_barge_in:
             return True
@@ -376,7 +384,8 @@ class WakeWordListener:
             playing = is_speaking()
         except Exception:
             playing = False
-        if state_manager.current != AssistantState.SPEAKING and not playing:
+        busy = state_manager.current in (AssistantState.THINKING, AssistantState.SPEAKING)
+        if not busy and not playing:
             return True
         return rms >= settings.barge_in_rms_threshold
 
