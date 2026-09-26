@@ -226,6 +226,20 @@ def speech_boundary() -> float:
         return max(ends) if ends else -math.inf
 
 
+def speech_onset_after(t: float) -> float:
+    """Monotonic time we started speaking at or after `t`; +inf if we haven't.
+
+    The other end of speech_boundary(): a capture that began at `t` holds only
+    the user until this moment, and our own voice from here on (there is no
+    echo cancellation). Stamped when the sentence is queued, before synthesis,
+    so it runs slightly EARLY — the error drops a little of the user, never
+    keeps a little of us.
+    """
+    with _spoken_lock:
+        starts = [u.started_at for u in _recent_spoken if u.started_at >= t]
+    return min(starts, default=math.inf)
+
+
 def _live_utterances(now: float) -> list[_Utterance]:
     """Everything from the current speaking burst.
 

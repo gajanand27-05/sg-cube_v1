@@ -11,7 +11,7 @@ import numpy as np
 import sounddevice as sd
 import vosk
 
-from backend.ai_modules.speech.tts_piper import is_speaking
+from backend.ai_modules.speech.tts_piper import is_speaking, speech_onset_after
 from backend.core.agents.pending_confirmation import store as _pending_store
 from backend.core.events import get_bus, Priority
 from backend.daemon.ui_events import FollowUpExpired
@@ -198,6 +198,17 @@ def clean_preroll(frames, boundary: float) -> list[bytes]:
     "still speaking" or "never spoke" branch to get wrong here.
     """
     return [data for start, data in frames if start > boundary]
+
+
+def before_playback(frame_start: float, frame_s: float, onset: float) -> bool:
+    """clean_preroll's mirror for the far END of a capture: may this frame
+    stay, given we started speaking at `onset` (tts_piper.speech_onset_after)?
+
+    Tests the frame's END where clean_preroll tests its start, for the same
+    reason: a frame straddling the moment playback began already holds our
+    voice in its last samples, so it goes.
+    """
+    return frame_start + frame_s <= onset
 
 
 def wake_phrase_present(partial: str, wake_phrase: str) -> bool:
@@ -735,7 +746,8 @@ class WakeWordListener:
                 break
 
     def _capture(self, initial: Optional[list[bytes]] = None,
-                 initial_is_speech: bool = True) -> bytes:
+                 initial_is_speech: bool = True,
+                 cut_at_playback_after: Optional[float] = None) -> bytes:
         """Read mic chunks until VAD says the user stopped speaking.
 
         Two phases:
@@ -747,6 +759,15 @@ class WakeWordListener:
         `initial` is any audio already collected by the caller (e.g. the
         chunk that triggered follow-up mode, or audio that arrived during
         wake recognition). It seeds the buffer so we don't lose it.
+
+        `cut_at_playback_after` (the trigger frame's start; None for a
+        barge-in) ends the capture at the frame where Onyx starts speaking,
+        if that happens after the trigger. Measured 2026-09-26: a wake fired
+        while the previous turn was still thinking, the capture ran on to its
+        10s cap straight through the reply, and "It certainly is. How can I
+        help you start your day?" came back as the user's own words — there is
+        no echo cancellation, so nothing after that moment is the user alone.
+        What was captured before it is still the command.
         """
         bytes_per_second = self.sample_rate * 2  # int16 mono
         max_total_bytes = int(_VAD_MAX_CAPTURE_S * bytes_per_second)
@@ -777,13 +798,18 @@ class WakeWordListener:
             try:
                 # The queue carries (frame_start, pcm) since the pre-roll trim
                 # needed callback-time stamps; capture only wants the audio.
-                _frame_start, chunk = self.queue.get(timeout=2.0)
+                frame_start, chunk = self.queue.get(timeout=2.0)
             except queue.Empty:
                 break
 
             arr = np.frombuffer(chunk, dtype=np.int16)
             if arr.size == 0:
                 continue
+            if cut_at_playback_after is not None and not before_playback(
+                    frame_start, arr.size / self.sample_rate,
+                    speech_onset_after(cut_at_playback_after)):
+                print("[wake] capture cut where Onyx started speaking")
+                break
             rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
             # Capture gate, not the wake gate — see _CAPTURE_SILENCE_THRESHOLD.
             is_speech = rms > _CAPTURE_SILENCE_THRESHOLD
@@ -1038,8 +1064,12 @@ class WakeWordListener:
                 try:
                     # Wake pre-roll is the wake WORD, not the command --
                     # see _capture's initial_is_speech.
-                    audio = self._capture(initial=initial_audio,
-                                          initial_is_speech=not is_wake_preroll)
+                    audio = self._capture(
+                        initial=initial_audio,
+                        initial_is_speech=not is_wake_preroll,
+                        # A barge-in starts over our voice on purpose.
+                        cut_at_playback_after=None if is_barge_in else frame_start,
+                    )
                 except Exception as e:
                     print(f"[wake] capture raised: {e}")
                     audio = b""
