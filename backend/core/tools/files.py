@@ -40,6 +40,73 @@ def resolve_delete_targets(file: str, limit: int = 10) -> list[Path]:
     return found
 
 
+_DRIVE_FIXED = 3
+_BITBUCKET = r"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume"
+
+
+def _drive_type(root: str) -> int:
+    import ctypes
+
+    return ctypes.windll.kernel32.GetDriveTypeW(root)
+
+
+def _bitbucket_settings(root: str) -> dict:
+    """This volume's Recycle Bin settings: NukeOnDelete, MaxCapacity (MB)."""
+    import ctypes
+    import winreg
+
+    buf = ctypes.create_unicode_buffer(64)
+    if not ctypes.windll.kernel32.GetVolumeNameForVolumeMountPointW(root, buf, 64):
+        return {}
+    guid = buf.value[buf.value.find("{"):buf.value.find("}") + 1]
+    out = {}
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, f"{_BITBUCKET}\\{guid}") as k:
+            for name in ("NukeOnDelete", "MaxCapacity"):
+                try:
+                    out[name] = int(winreg.QueryValueEx(k, name)[0])
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return out
+
+
+def _total_size(path: Path) -> int:
+    """Bytes the Recycle Bin would have to hold: a file's size, or every file
+    under a folder (a folder is judged by its total, not its own entry)."""
+    if path.is_file():
+        return path.stat().st_size
+    if path.is_dir():
+        return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    return 0
+
+
+def permanent_delete_reason(path: Path) -> str | None:
+    """Why deleting this file would NOT be recoverable, or None if it goes to
+    the Recycle Bin. The shell's undoable delete silently deletes for good
+    when the drive has no bin (removable and network drives), when the bin is
+    switched off for that drive, or when the file is bigger than the bin.
+
+    ponytail: predicts from the drive type and this volume's BitBucket
+    settings; measured only on fixed drives (this machine has no USB or
+    network volume to test on). Ceiling: an exotic volume that reports FIXED
+    but has no bin would be predicted recoverable."""
+    root = path.anchor
+    try:
+        if _drive_type(root) != _DRIVE_FIXED:
+            return "that drive has no Recycle Bin (removable or network drive)"
+        bb = _bitbucket_settings(root)
+        if bb.get("NukeOnDelete") == 1:
+            return "the Recycle Bin is turned off for that drive"
+        cap = bb.get("MaxCapacity")
+        if cap and _total_size(path) > cap * 1024 * 1024:
+            return "it is larger than the Recycle Bin"
+    except Exception as e:  # noqa: BLE001 — when unsure, say so rather than promise undo
+        return f"could not confirm a Recycle Bin for that drive ({type(e).__name__})"
+    return None
+
+
 def _to_recycle_bin(path: Path) -> None:
     """Delete via the shell with undo, i.e. into the Recycle Bin. Raises on
     failure. pywin32's SHFileOperation: FOF_ALLOWUNDO is what makes it
@@ -79,10 +146,14 @@ def delete_file(file: str) -> ToolResult:
             f"{file!r} matches {len(targets)} files, so nothing was deleted. "
             f"Say which one: {listing}")
     target = targets[0]
+    permanent = permanent_delete_reason(target)
     try:
-        _to_recycle_bin(target)
+        _to_recycle_bin(target)   # without a bin this deletes for good
     except Exception as e:
         return ToolResult.error(f"Delete failed: {e}")
+    if permanent:
+        return ToolResult.success(f"Permanently deleted {target} — {permanent}",
+                                  data={"path": str(target), "permanent": True})
     return ToolResult.success(f"Moved {target} to the Recycle Bin", data={"path": str(target)})
 
 

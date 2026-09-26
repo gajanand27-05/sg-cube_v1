@@ -168,7 +168,15 @@ def prepare_confirmation(name: str, args: dict) -> Prepared:
             return Prepared(args, refusal=(
                 f"{args.get('file')!r} matches {len(targets)} files — say which one: "
                 + "; ".join(str(t) for t in targets)))
-        return Prepared({**args, "file": str(targets[0])}, [str(targets[0])])
+        from backend.core.tools.files import permanent_delete_reason
+
+        target = targets[0]
+        permanent = permanent_delete_reason(target)
+        lines = [str(target)]
+        if permanent:
+            # First line: it becomes the spoken detail and the dialog's top row.
+            lines.insert(0, f"PERMANENT DELETE, cannot be undone: {permanent}")
+        return Prepared({**args, "file": str(target)}, lines)
 
     if name == "close_chrome_tab":
         from backend.core import chrome_tabs
