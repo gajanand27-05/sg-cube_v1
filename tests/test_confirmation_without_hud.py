@@ -88,3 +88,43 @@ def test_timeout_refuses(tmp_path, monkeypatch):
     time.sleep(0.5)
     _turn("yes", [{"final_response": "Yes to what?"}])
     assert not target.exists()
+
+
+def test_a_late_voice_yes_after_the_hud_won_is_ignored_not_planned(tmp_path, caplog):
+    """The race the other way round: the HUD approved, then "yes" arrives by
+    voice. It must not reach the planner as a new request."""
+    target = _ask(tmp_path)
+    p = next(iter(pcm.store._slots.values()))
+    got, _ = pcm.store.take_by_id(p.id, p.digest)          # HUD wins
+    assert got is p
+
+    class _MustNotPlan:
+        async def generate_plan_stream(self, *a, **k):
+            raise AssertionError("a late 'yes' was handed to the planner")
+            yield  # pragma: no cover
+
+    cmd.commander.planner = _MustNotPlan()
+    ctx = ConversationContext(session_id="no-hud")
+
+    async def go():
+        async for _ in cmd.commander.run_stream("yes", ctx, "u"):
+            pass
+    with caplog.at_level("INFO"):
+        asyncio.run(go())
+    assert "late voice 'yes' ignored" in caplog.text and "consumed by hud" in caplog.text
+
+
+def test_a_quick_yes_still_answers_a_NEW_pending(tmp_path):
+    """The race window only swallows a bare yes/no with NOTHING pending. A new
+    question asked within 10 s of the last one being consumed is answerable."""
+    first = _ask(tmp_path)
+    _turn("yes")
+    assert first.read_text() == "hi"
+    assert pcm.store.recently_consumed() is not None, "precondition: inside the window"
+
+    second = tmp_path / "second.txt"
+    spoken = _turn("write again", [{"tool_calls": [{"name": "write_file",
+                                    "args": {"path": str(second), "content": "two"}}]}])
+    assert "permission" in spoken.lower()
+    _turn("yes")
+    assert second.read_text() == "two"

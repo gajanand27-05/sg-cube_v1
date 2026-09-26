@@ -191,3 +191,38 @@ def test_the_session_token_never_reaches_the_log():
                             '127.0.0.1:1 - "WebSocket /ws/ui?token=abc_DEF-123" 403', None, None)
     out = RedactingFormatter("%(message)s").format(rec)
     assert "abc_DEF-123" not in out and "token=<redacted>" in out
+
+
+# ── the voice/HUD race ──────────────────────────────────────────────────
+
+def test_racing_answers_consume_exactly_once(tmp_path):
+    """Voice and HUD answer from different threads; the store's lock must let
+    exactly one of them win, however they interleave."""
+    import threading
+    p, _ = _pending(tmp_path)
+    wins, go = [], threading.Barrier(16)
+
+    def voice():
+        go.wait()
+        if store.take("s1") is not None:
+            wins.append("voice")
+
+    def hud():
+        go.wait()
+        got, _ = store.take_by_id(p.id, p.digest)
+        if got is not None:
+            wins.append("hud")
+
+    ts = [threading.Thread(target=voice if i % 2 else hud) for i in range(16)]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    assert len(wins) == 1, wins
+
+
+def test_a_late_hud_answer_is_ignored_and_says_who_won(app, tmp_path, caplog):
+    p, target = _pending(tmp_path)
+    assert store.take("s1") is p                       # voice won
+    with caplog.at_level("INFO"), _ws(app) as ws:
+        ack = _answer(ws, p)
+    assert not ack["ok"] and ack["message"] == "already answered by voice"
+    assert "HUD answer ignored" in caplog.text
+    assert not target.exists()

@@ -142,9 +142,27 @@ class PendingStore:
     """One slot per session. Thread-safe: the voice path and the HTTP path
     reach Commander from different threads and event loops."""
 
+    # A second answer arriving this soon after the first is the loser of a
+    # voice/HUD race, not a new request. ponytail: fixed window; ceiling is a
+    # genuinely new bare "yes" to something else inside it, which is swallowed.
+    RACE_WINDOW_S = 10.0
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._slots: dict[str, Pending] = {}
+        self._last_consumed: tuple[str, str, float] | None = None  # (id, by, when)
+
+    def _consumed(self, pending: "Pending", by: str) -> None:
+        self._last_consumed = (pending.id, by, time.monotonic())
+
+    def recently_consumed(self) -> tuple[str, str] | None:
+        """(pending id, "voice" | "hud") if a confirmation was consumed within
+        RACE_WINDOW_S — i.e. a yes/no now is the losing half of a race."""
+        with self._lock:
+            last = self._last_consumed
+        if last and time.monotonic() - last[2] <= self.RACE_WINDOW_S:
+            return last[0], last[1]
+        return None
 
     def remember(self, session_id: str, pending: Pending) -> None:
         from backend.daemon.ui_events import ConfirmationRequested
@@ -190,6 +208,8 @@ class PendingStore:
                      pending.tool_name, settings.confirmation_ttl_s)
             resolved(pending, "expired")
             return None
+        with self._lock:
+            self._consumed(pending, "voice")
         return pending
 
     def take_by_id(self, pending_id: str, digest: str) -> tuple[Pending | None, str]:
@@ -204,8 +224,14 @@ class PendingStore:
                     if not secrets.compare_digest(p.digest, digest or ""):
                         return None, "that answer does not match the pending action"
                     self._slots.pop(sid)
+                    self._consumed(p, "hud")
                     break
             else:
+                last = self._last_consumed
+                if last and secrets.compare_digest(last[0], pending_id or ""):
+                    log.info("Confirmation %s: HUD answer ignored — already consumed by %s",
+                             pending_id, last[1])
+                    return None, f"already answered by {last[1]}"
                 return None, "nothing is waiting for that answer (already answered or expired)"
         if p.expired():
             resolved(p, "expired")
@@ -234,6 +260,7 @@ class PendingStore:
         with self._lock:
             gone = list(self._slots.values())
             self._slots.clear()
+            self._last_consumed = None
         for p in gone:
             resolved(p, "cancelled")
 

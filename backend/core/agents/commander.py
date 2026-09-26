@@ -486,6 +486,16 @@ class CommanderAgent:
         # prompt is now closed. An unanswered prompt must not survive to be
         # accidentally authorised by a later "sure" meant for something else.
         pending = pending_store.take(context.session_id)
+        if pending is None and classify_reply(text) is not None:
+            raced = pending_store.recently_consumed()
+            if raced:
+                # The losing half of a voice/HUD race: the confirmation was
+                # already consumed an instant ago. Ignored, never planned —
+                # a bare "yes" handed to the planner could authorise anything.
+                log.info("Confirmation %s: late voice %r ignored — already consumed by %s",
+                         raced[0], text, raced[1])
+                _publish_completed("completed", 100.0, t0, "")
+                return
         if pending is not None:
             reply = classify_reply(text)
             pending_resolved(pending, {"yes": "approved", "no": "declined"}.get(reply, "dropped"))
