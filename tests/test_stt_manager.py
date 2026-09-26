@@ -234,8 +234,50 @@ def test_forced_accurate_without_a_usable_gpu_falls_back_to_cpu(monkeypatch, cap
     with caplog.at_level("WARNING"):
         p = _pick(monkeypatch, cuda=False, battery=False, profile="accurate")
         again = _pick(monkeypatch, cuda=False, battery=False, profile="accurate")
-    assert (p.device, p.compute_type, p.model) == ("cpu", "int8", m.settings.whisper_model_cpu)
+    assert (p.device, p.compute_type, p.model) == ("cpu", "int8", "small"),         "STT_PROFILE=accurate keeps small on the CPU"
     assert "accurate" in p.reason and "no usable GPU" in p.reason
     assert again == p
     warnings = [r for r in caplog.records if "STT_PROFILE" in r.getMessage()]
     assert len(warnings) == 1, "select_profile runs per utterance; warn once, not every turn"
+
+
+
+# ── base for every CPU decode (2026-09-26) ──────────────────────────────
+
+def test_base_is_the_shipped_cpu_model():
+    from backend.server.config import Settings
+    s = Settings(_env_file=None)
+    assert (s.whisper_model_cpu, s.whisper_model_cpu_accurate) == ("base", "small")
+
+
+@pytest.mark.parametrize("cuda,battery,profile", [
+    (False, False, "auto"),    # no usable GPU
+    (True, True, "auto"),      # on battery
+    (True, False, "fast"),     # forced fast
+])
+def test_every_cpu_profile_uses_base(monkeypatch, cuda, battery, profile):
+    p = _pick(monkeypatch, cuda=cuda, battery=battery, profile=profile)
+    assert (p.device, p.model) == ("cpu", "base")
+
+
+def test_the_offline_decoder_follows_the_same_rule(monkeypatch):
+    """stt_whisper's offline CPU fallback (warmed by preload at boot) must not
+    load a different model from the profile path."""
+    from backend.ai_modules.speech import stt_whisper
+    loaded = []
+
+    class _FakeModel:
+        def __init__(self, name, **kw):
+            loaded.append(name)
+
+        def transcribe(self, *a, **k):
+            return iter(()), type("I", (), {"language": "en", "language_probability": 1.0,
+                                            "duration": 0.0})()
+
+    monkeypatch.setattr("faster_whisper.WhisperModel", _FakeModel)
+    for profile, want in (("auto", "base"), ("accurate", "small")):
+        m.settings.stt_profile = profile
+        monkeypatch.setattr(stt_whisper, "_cpu_model", None)
+        import numpy as np
+        stt_whisper.transcribe_array_cpu(np.zeros(1600, dtype=np.float32), 16000)
+        assert loaded[-1] == want, (profile, loaded)

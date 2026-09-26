@@ -137,6 +137,15 @@ class SttProfile:
 _forced_fallback_warned = False
 
 
+def cpu_model() -> str:
+    """The model every CPU decode uses: base, or small when the user pinned
+    STT_PROFILE=accurate (they asked for accuracy over speed). One place, so
+    the profile path and the offline fallback (stt_whisper) cannot disagree."""
+    if (settings.stt_profile or "").strip().lower() == "accurate":
+        return settings.whisper_model_cpu_accurate
+    return settings.whisper_model_cpu
+
+
 def select_profile() -> SttProfile:
     """Choose the model for current conditions.
 
@@ -156,24 +165,24 @@ def select_profile() -> SttProfile:
                 _forced_fallback_warned = True
                 log.warning("STT_PROFILE=accurate needs a usable GPU and there is none "
                             "(no NVIDIA card, or the 'gpu' extra is not installed); "
-                            "using %s on the CPU", settings.whisper_model_cpu)
-            return SttProfile(settings.whisper_model_cpu, "cpu", "int8",
+                            "using %s on the CPU", cpu_model())
+            return SttProfile(cpu_model(), "cpu", "int8",
                               "forced accurate, but no usable GPU")
         return SttProfile(settings.whisper_model_gpu, "cuda", "float16", "forced accurate")
     if forced == "fast":
-        return SttProfile(settings.whisper_model_cpu, "cpu", "int8", "forced fast")
+        return SttProfile(cpu_model(), "cpu", "int8", "forced fast")
     if forced != "auto":
         log.warning("unknown STT_PROFILE %r; falling back to auto", forced)
 
     if not cuda_available():
-        return SttProfile(settings.whisper_model_cpu, "cpu", "int8", "no usable GPU")
+        return SttProfile(cpu_model(), "cpu", "int8", "no usable GPU")
     if on_battery():
         # ponytail: a binary plugged/unplugged switch, not a battery-level or
         # thermal policy. Ceiling — it will drop to the small model at 99%
         # charge the moment the cable comes out. Upgrade path is to also read
         # percent and only downgrade below a threshold, which needs a real
         # measurement of what STT actually costs per utterance to be worth it.
-        return SttProfile(settings.whisper_model_cpu, "cpu", "int8", "on battery")
+        return SttProfile(cpu_model(), "cpu", "int8", "on battery")
     return SttProfile(settings.whisper_model_gpu, "cuda", "float16", "on AC power")
 
 

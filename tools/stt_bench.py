@@ -71,7 +71,13 @@ _register_cuda_libs()
 
 from backend.ai_modules.speech.stt_whisper import _COMMAND_PROMPT  # noqa: E402
 
+# TODO(noisy clips): re-run this on NOISY clips once we have them. The
+# base-over-small choice for CPU decodes (2026-09-26: base CMD 96.7% vs small
+# 93.3%, ~985 vs ~2760 ms p50, 3 runs) was measured on the 30-clip quiet-room
+# corpus only, which is at its ceiling; small's lower WER (9% vs 12-13%) may
+# matter more in noise. If it does, flip WHISPER_MODEL_CPU back to small.
 LOCAL_CONFIGS = [
+    ("base     cpu  int8", "base", "cpu", "int8"),
     ("small    cpu  int8", "small", "cpu", "int8"),
     ("small    cuda fp16", "small", "cuda", "float16"),
     ("medium   cuda fp16", "medium", "cuda", "float16"),

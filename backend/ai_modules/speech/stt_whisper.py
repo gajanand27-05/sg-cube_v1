@@ -150,11 +150,13 @@ def transcribe_array_cpu(audio: np.ndarray, sample_rate: int = 16000) -> dict:
             if _cpu_model is None:
                 from faster_whisper import WhisperModel
 
+                from backend.ai_modules.speech.stt_manager import cpu_model
+
                 t0 = time.perf_counter()
-                _cpu_model = WhisperModel(
-                    settings.whisper_model_cpu, device="cpu", compute_type="int8")
+                name = cpu_model()
+                _cpu_model = WhisperModel(name, device="cpu", compute_type="int8")
                 log.warning("offline STT: loaded %s on CPU in %.1fs",
-                            settings.whisper_model_cpu, time.perf_counter() - t0)
+                            name, time.perf_counter() - t0)
 
     # Inference is serialized too, not just the load above. Turn bodies are
     # serialized by wake_word._start_turn — but only up to

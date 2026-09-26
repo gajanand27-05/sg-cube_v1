@@ -74,7 +74,13 @@ class Settings(BaseSettings):
     # so large-v3 may still win in noise; STT_PROFILE=accurate with
     # WHISPER_MODEL_GPU=large-v3 pins it back if a real environment shows that.
     whisper_model_gpu: str = "medium"           # AC power, cuda/float16
-    whisper_model_cpu: str = "small"            # battery or no GPU, cpu/int8
+    # base, not small, for CPU decodes (2026-09-26). Measured on the 30-clip
+    # corpus of the user's voice, 3 runs, cpu/int8, beam 1: base CMD 96.7% /
+    # EXACT 87-90% / WER 12-13% / p50 ~985 ms / 191 MiB, small CMD 93.3% /
+    # EXACT 83% / WER 9% / p50 ~2760 ms / 376 MiB. Quiet room only — see the
+    # note in tools/stt_bench.py. STT_PROFILE=accurate keeps small on the CPU.
+    whisper_model_cpu: str = "base"             # battery or no GPU, cpu/int8
+    whisper_model_cpu_accurate: str = "small"   # CPU decodes when STT_PROFILE=accurate
     # Release the model after this many seconds idle. 0 disables. Kept well
     # above a conversational pause: unloading after every utterance would pay
     # the 2-3s load cost on the very next command.
