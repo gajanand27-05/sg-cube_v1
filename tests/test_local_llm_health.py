@@ -24,10 +24,13 @@ def _ledger(path) -> list[dict]:
 
 
 @pytest.fixture(autouse=True)
-def _clean():
-    h._offline, h._pending = False, None
+def _clean(monkeypatch):
+    # Installed unless a test says otherwise — these tests used to pass only
+    # because this dev machine happens to have Ollama.
+    monkeypatch.setattr(h, "_binary", lambda: "C:/fake/ollama.exe")
+    h._offline, h._pending, h._offline_announced = False, None, False
     yield
-    h._offline, h._pending = False, None
+    h._offline, h._pending, h._offline_announced = False, None, False
 
 
 def test_offline_is_announced_exactly_once(monkeypatch):
@@ -160,3 +163,78 @@ def test_repeated_restarts_accumulate(tmp_path, monkeypatch):
 def test_no_ledger_file_until_something_restarts(tmp_path, monkeypatch):
     monkeypatch.setattr(h, "_RESTART_LOG", tmp_path / "nope.jsonl")
     assert not (tmp_path / "nope.jsonl").exists()
+
+
+# ── not installed vs installed-but-down (2026-09-26) ────────────────────
+
+def test_not_installed_is_never_announced(monkeypatch):
+    """The laptop floor: no Ollama at all is the normal state, not news."""
+    monkeypatch.setattr(h, "_binary", lambda: None)
+    monkeypatch.setattr(h, "is_reachable", lambda timeout=2.0: False)
+    assert h.ensure_running(wait_s=1) is False           # boot path
+    assert h.note_failure_if_local_is_down() is True     # mid-turn path
+    assert h.take_announcement() is None
+    assert h.state() == {"installed": False, "running": False, "state": "not_installed"}
+
+
+def test_installed_but_down_is_announced_once_per_boot(monkeypatch):
+    down = {"v": True}
+    monkeypatch.setattr(h, "is_reachable", lambda timeout=2.0: not down["v"])
+    monkeypatch.setattr(h, "try_start", lambda: False)
+    assert h.ensure_running(wait_s=1) is False
+    assert h.take_announcement() == h.OFFLINE_LINE
+    assert h.state()["state"] == "offline"
+
+    down["v"] = False                                    # it comes back...
+    h.note_reachable()
+    assert h.take_announcement() == h.RECOVERED_LINE
+    down["v"] = True                                     # ...and drops again
+    h.note_failure_if_local_is_down()
+    assert h.take_announcement() is None, "offline is spoken once per boot, not per outage"
+
+
+def test_the_offline_line_says_what_is_true_now():
+    """Actions no longer stop without the verifier: they follow the allowlist."""
+    assert "can't verify" not in h.OFFLINE_LINE
+    assert "confirm" in h.OFFLINE_LINE
+
+
+def test_preload_speaks_nothing_when_ollama_is_not_installed(monkeypatch):
+    from backend.ai_modules.speech import tts_piper
+    from backend.daemon import preload
+    spoken = []
+    monkeypatch.setattr(tts_piper, "speak", spoken.append)
+    monkeypatch.setattr(h, "_binary", lambda: None)
+    monkeypatch.setattr(h, "is_reachable", lambda timeout=2.0: False)
+    monkeypatch.setattr("backend.core.memory.embedding.get_embedder",
+                        lambda name: (lambda texts: [[0.1] * 384]))
+    monkeypatch.setattr("backend.ai_modules.speech.stt_whisper.transcribe_array_cpu",
+                        lambda *a, **k: {"text": ""})
+    preload._warm()
+    assert spoken == []
+
+
+def test_preload_speaks_once_when_installed_but_down(monkeypatch):
+    from backend.ai_modules.speech import tts_piper
+    from backend.daemon import preload
+    spoken = []
+    monkeypatch.setattr(tts_piper, "speak", spoken.append)
+    monkeypatch.setattr(h, "is_reachable", lambda timeout=2.0: False)
+    monkeypatch.setattr(h, "try_start", lambda: False)
+    monkeypatch.setattr("backend.core.memory.embedding.get_embedder",
+                        lambda name: (lambda texts: [[0.1] * 384]))
+    monkeypatch.setattr("backend.ai_modules.speech.stt_whisper.transcribe_array_cpu",
+                        lambda *a, **k: {"text": ""})
+    preload._warm()
+    preload._warm()
+    assert spoken == [h.OFFLINE_LINE]
+
+
+def test_diagnostics_reports_the_live_state(monkeypatch):
+    from fastapi.testclient import TestClient
+    from backend.server.main import app
+    monkeypatch.setattr(h, "_binary", lambda: None)
+    monkeypatch.setattr(h, "is_reachable", lambda timeout=2.0: False)
+    body = TestClient(app, client=("127.0.0.1", 50000)).get("/diagnostics/hardware").json()
+    assert body["local_models"] == {"installed": False, "running": False, "state": "not_installed"}
+    assert "boot" in body

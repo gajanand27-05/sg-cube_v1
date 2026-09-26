@@ -1,9 +1,41 @@
-import { useUiEvent } from "@/hooks/useUiEvents";
+import { useEffect, useState } from "react";
+import { backendBase, useUiEvent } from "@/hooks/useUiEvents";
+
+type LocalModels = "ready" | "offline" | "not_installed";
+
+/** Local Ollama state from /diagnostics/hardware, re-read every 30 s — it
+ *  can start or stop after boot. With Ollama not installed nothing is spoken
+ *  at boot (that is the laptop floor), so this row is where it shows. */
+function useLocalModels(): LocalModels | null {
+  const [state, setState] = useState<LocalModels | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const read = () =>
+      fetch(`${backendBase().http}/diagnostics/hardware`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => alive && d?.local_models?.state && setState(d.local_models.state))
+        .catch(() => undefined);
+    read();
+    const t = setInterval(read, 30_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+  return state;
+}
+
+export const LOCAL_MODELS_LABEL: Record<LocalModels, string> = {
+  ready: "Ready",
+  offline: "Offline — risky actions ask first",
+  not_installed: "Not installed — allowlist mode",
+};
 
 /** Module Status panel. Shows model, memory status, and system info. */
 export function ModuleStatusPanel() {
   const metrics = useUiEvent("ai_metrics");
   const vision = useUiEvent("vision_update");
+  const localModels = useLocalModels();
 
   const modelName = metrics?.active_model ?? "—";
   // Was hardcoded "Ollama Cloud". Wrong on two counts: this row describes the
@@ -38,6 +70,13 @@ export function ModuleStatusPanel() {
           <span className="font-mono text-xs text-hud-text">{visionStatus}</span>
           {vision && <span className="font-mono text-[10px] text-hud-text-dim">{visionApp}</span>}
         </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <span className="hud-label">Local models</span>
+        <span className="font-mono text-xs text-hud-text">
+          {localModels ? LOCAL_MODELS_LABEL[localModels] : "—"}
+        </span>
       </div>
 
       <div className="flex flex-col gap-2">

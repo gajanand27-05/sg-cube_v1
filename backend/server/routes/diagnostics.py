@@ -178,9 +178,11 @@ def get_memory_migration():
 @router.get("/hardware")
 def get_hardware():
     """What the boot-time hardware probe found and which unset defaults it
-    changed because of it (backend/core/hardware.py). Null before boot."""
-    from backend.core import hardware
-    return hardware.last
+    changed because of it (backend/core/hardware.py), plus the LIVE local-
+    models state (ready / offline / not_installed) — Ollama can start or stop
+    after boot. `boot` is null before the probe has run."""
+    from backend.core import hardware, local_llm_health
+    return {"boot": hardware.last, "local_models": local_llm_health.state()}
 
 
 @router.get("/latency")

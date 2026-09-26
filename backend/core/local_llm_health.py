@@ -34,10 +34,18 @@ log = logging.getLogger(__name__)
 _lock = threading.Lock()
 _offline = False           # last known state
 _pending: str | None = None  # a line owed to the user, or None
+# The offline notice is spoken at most once per boot, and never when Ollama
+# is not installed at all: on the laptop floor (no Ollama) that is the normal
+# state, and announcing it at every boot would be noise. The state is shown in
+# /diagnostics/hardware and the HUD instead.
+_offline_announced = False
 
+# What is true since 2026-09-25: without the local verifier, actions follow
+# the reviewed allowlist — routine ones run, risky ones ask, a few are refused.
+# The old line ("I can't verify actions right now") had become false.
 OFFLINE_LINE = (
-    "My local models are offline, so I can't verify actions right now. "
-    "Start Ollama and I'll pick it up."
+    "Local models are offline, so risky actions will ask you to confirm, "
+    "and a few won't run until they're back."
 )
 RECOVERED_LINE = "Local models are back online."
 
@@ -66,6 +74,19 @@ def is_reachable(timeout: float = 2.0) -> bool:
         return r.status_code == 200
     except Exception:
         return False
+
+
+def installed() -> bool:
+    """Is Ollama on this machine at all (PATH or its default install dir)?"""
+    return _binary() is not None
+
+
+def state() -> dict:
+    """Live local-models state for /diagnostics/hardware and the HUD."""
+    inst = installed()
+    running = is_reachable(timeout=1.0)
+    return {"installed": inst, "running": running,
+            "state": "ready" if running else ("offline" if inst else "not_installed")}
 
 
 def _binary() -> str | None:
@@ -166,13 +187,22 @@ def ensure_running(wait_s: float = 30.0) -> bool:
 
 
 def note_unreachable() -> None:
-    """Record that local models are down; queue the notice once."""
-    global _offline, _pending
+    """Record that local models are down. Queue the spoken notice only if
+    Ollama is installed, and only once per boot."""
+    global _offline, _pending, _offline_announced
+    inst = installed()
     with _lock:
         if not _offline:
             _offline = True
-            _pending = OFFLINE_LINE
-            log.warning("local models OFFLINE")
+            if not inst:
+                log.info("local models not installed (no Ollama); running on the "
+                         "allowlist — not announced")
+            elif not _offline_announced:
+                _offline_announced = True
+                _pending = OFFLINE_LINE
+                log.warning("local models OFFLINE")
+            else:
+                log.warning("local models OFFLINE again (already announced this boot)")
 
 
 def note_reachable() -> None:
