@@ -3,7 +3,7 @@ import queue
 import threading
 import time
 from collections import deque
-from typing import Any, Callable, Optional, Generator
+from typing import Any, Callable, Optional
 
 from backend.core import paths
 
@@ -841,62 +841,6 @@ class WakeWordListener:
                         break
 
         return b"".join(chunks)
-
-    def _capture_chunks(self, initial: Optional[list[bytes]] = None) -> Generator[bytes, None, None]:
-        """Yield mic chunks until VAD says the user stopped speaking.
-        
-        Generator version for streaming STT integration.
-        """
-        bytes_per_second = self.sample_rate * 2  # int16 mono
-        max_total_bytes = int(_VAD_MAX_CAPTURE_S * bytes_per_second)
-        silence_threshold_bytes = (_VAD_TRAILING_SILENCE_MS / 1000) * bytes_per_second
-        initial_wait_bytes = int(_VAD_INITIAL_WAIT_S * bytes_per_second)
-
-        chunks: list[bytes] = list(initial or [])
-        total_bytes = sum(len(c) for c in chunks)
-        speech_seen = False
-        trailing_silence_bytes = 0
-        bytes_before_speech = 0
-
-        # Account for any speech in the initial chunks already.
-        for c in chunks:
-            arr = np.frombuffer(c, dtype=np.int16)
-            if arr.size and float(np.sqrt(np.mean(arr.astype(np.float32) ** 2))) > _CAPTURE_SILENCE_THRESHOLD:
-                speech_seen = True
-                break
-
-        while total_bytes < max_total_bytes:
-            try:
-                # The queue carries (frame_start, pcm) since the pre-roll trim
-                # needed callback-time stamps; capture only wants the audio.
-                _frame_start, chunk = self.queue.get(timeout=2.0)
-            except queue.Empty:
-                break
-
-            arr = np.frombuffer(chunk, dtype=np.int16)
-            if arr.size == 0:
-                continue
-            rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
-            # Capture gate, not the wake gate — see _CAPTURE_SILENCE_THRESHOLD.
-            is_speech = rms > _CAPTURE_SILENCE_THRESHOLD
-
-            chunks.append(chunk)
-            total_bytes += len(chunk)
-
-            yield chunk  # Yield each chunk for streaming STT
-
-            if is_speech:
-                speech_seen = True
-                trailing_silence_bytes = 0
-            else:
-                if speech_seen:
-                    trailing_silence_bytes += len(chunk)
-                    if trailing_silence_bytes >= silence_threshold_bytes:
-                        break
-                else:
-                    bytes_before_speech += len(chunk)
-                    if bytes_before_speech >= initial_wait_bytes:
-                        break
 
     def listen(self) -> None:
         """Continuously listen for wake word and fire callbacks."""
