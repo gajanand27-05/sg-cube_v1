@@ -15,6 +15,18 @@ def _checks():
     import tempfile
     tmpdir = Path(tempfile.mkdtemp(prefix="sg_file_editor_"))
     f = tmpdir / "demo.txt"
+    # The file tools only touch the user's folders (files.check_user_path);
+    # make this temp dir one of them for the checks, and only for them.
+    from backend.core.tools import files
+    saved_roots = files.SEARCH_ROOTS
+    files.SEARCH_ROOTS = [tmpdir]
+    try:
+        _run(tmpdir, f)
+    finally:
+        files.SEARCH_ROOTS = saved_roots
+
+
+def _run(tmpdir, f):
 
     # write_file
     r = REGISTRY["write_file"].func(path=str(f), content="alpha\nbeta\ngamma\n")
@@ -72,7 +84,7 @@ def _checks():
     # path traversal rejection
     r = REGISTRY["read_file"].func(path=str(tmpdir / ".." / "demo.txt"))
     assert r.status.value == "blocked"
-    assert "traversal" in (r.message or r.reason or "").lower()
+    assert "outside your user folders" in (r.message or r.reason or "").lower()
     print("  PASS: read_file rejects path traversal")
 
 

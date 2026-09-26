@@ -15,10 +15,15 @@ _MAX_BYTES = 5_000_000  # 5MB — read/edit caps to avoid loading massive files 
 
 
 def _resolve(path_str: str) -> Path | ToolResult:
-    p = Path(path_str).expanduser()
-    if ".." in p.parts:
-        return ToolResult.blocked("path traversal rejected (contains '..')")
-    return p
+    """Every file_editor tool goes through here: the shared user-folder guard
+    (files.check_user_path) — the verifier's shell-injection check no longer
+    looks at paths, so this is THE path policy."""
+    from backend.core.tools.files import PathRefused, check_user_path
+
+    try:
+        return check_user_path(path_str)
+    except PathRefused as e:
+        return ToolResult.blocked(str(e))
 
 
 def _atomic_write(p: Path, content: str) -> None:

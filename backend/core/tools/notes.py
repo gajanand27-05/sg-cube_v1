@@ -1,5 +1,5 @@
 """Notes tools (Phase 11c) — daily markdown file under ~/sg_cube/notes/."""
-import subprocess
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -57,5 +57,7 @@ def open_notes_today() -> dict:
     path = _notes_path(_today())
     if not path.exists():
         path.write_text(f"# Notes — {_today()}\n\n", encoding="utf-8")
-    subprocess.Popen(f'start "" "{path}"', shell=True)
+    # ShellExecute via os.startfile — opens with the default app, no cmd.exe.
+    # `start` is a cmd builtin, so shell=True was the only way to call it.
+    os.startfile(str(path))
     return {"status": "success", "message": f"opened {path.name}"}

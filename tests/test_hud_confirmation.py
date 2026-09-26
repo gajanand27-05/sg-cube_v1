@@ -17,6 +17,14 @@ from backend.server import hud_confirm, session
 LOOPBACK = ("127.0.0.1", 50123)
 
 
+@pytest.fixture(autouse=True)
+def _tmp_is_a_user_folder(tmp_path, monkeypatch):
+    """These tests are about execution, not path policy: let the file tools
+    write into this test's temp dir (files.check_user_path)."""
+    from backend.core.tools import files as _files
+    monkeypatch.setattr(_files, "SEARCH_ROOTS", [tmp_path])
+
+
 @pytest.fixture
 def app():
     from backend.server.main import app

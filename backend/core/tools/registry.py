@@ -451,6 +451,14 @@ async def call(name: str, args: dict, request_id: Optional[str] = None,
         return ToolResult.blocked(f"unknown tool: {name!r}")
 
     # ── Security Layer ───────────────────────────────────────────────
+    # Input checks hold for EVERY caller, approved or not: approval means a
+    # policy accepted this call, not that its arguments may carry a shell
+    # injection. (The file tools' path guard runs inside the tools, so it
+    # cannot be skipped either.)
+    from backend.core.agent.verifier import _is_malicious
+    bad = _is_malicious(args or {}, resolved)
+    if bad:
+        return ToolResult.blocked(bad)
     if not approved:
         from backend.core.tools.sandbox import guard
         check_res = guard.check(resolved, args)

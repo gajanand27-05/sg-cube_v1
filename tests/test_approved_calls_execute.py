@@ -14,6 +14,14 @@ from backend.core.agents.operator import OperatorAgent
 from backend.core.tools import files, registry
 
 
+@pytest.fixture(autouse=True)
+def _tmp_is_a_user_folder(tmp_path, monkeypatch):
+    """These tests are about execution, not path policy: let the file tools
+    write into this test's temp dir (files.check_user_path)."""
+    from backend.core.tools import files as _files
+    monkeypatch.setattr(_files, "SEARCH_ROOTS", [tmp_path])
+
+
 def test_a_guardian_approved_caution_tool_actually_runs(tmp_path):
     target = tmp_path / "out.txt"
     res = asyncio.run(OperatorAgent().execute_batch(

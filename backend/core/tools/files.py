@@ -1,10 +1,13 @@
 """File ops + dictation tools (Phase 11b)."""
+import logging
 import subprocess
 from pathlib import Path
 
 import pyautogui
 
 from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
+
+log = logging.getLogger(__name__)
 
 
 def resolve_delete_targets(file: str, limit: int = 10) -> list[Path]:
@@ -15,9 +18,10 @@ def resolve_delete_targets(file: str, limit: int = 10) -> list[Path]:
     the one full path shown — so what the user approves is what gets deleted.
     The old code deleted the FIRST substring match found anywhere, which the
     user never saw."""
-    p = Path(file).expanduser()
-    if p.is_file():
-        return [p.resolve()]
+    looks_like_path = any(sep in (file or "") for sep in ("\\", "/")) or ":" in (file or "")
+    if looks_like_path:
+        p = check_user_path(file)   # raises PathRefused
+        return [p] if p.is_file() else []
     q = (file or "").strip().lower()
     found: list[Path] = []
     if not q:
@@ -63,7 +67,10 @@ def delete_file(file: str) -> ToolResult:
     a file name in your common user folders; if the substring matches more
     than one file, nothing is deleted and the matches are listed so the user
     can pick one. REQUIRES CONFIRMATION, which shows the full path."""
-    targets = resolve_delete_targets(file)
+    try:
+        targets = resolve_delete_targets(file)
+    except PathRefused as e:
+        return ToolResult.blocked(str(e))
     if not targets:
         return ToolResult.blocked(f"no file matching {file!r}")
     if len(targets) > 1:
@@ -90,15 +97,93 @@ SPECIAL_FOLDERS = {
     "music": "Music",
 }
 
-# Where find_file looks. Bounded to user profile to avoid scanning the OS.
-SEARCH_ROOTS = [
-    Path.home() / "Desktop",
-    Path.home() / "Documents",
-    Path.home() / "Downloads",
-    Path.home() / "Pictures",
-    Path.home() / "Videos",
-    Path.home() / "Music",
-]
+def _user_folder(name: str) -> Path:
+    """The REAL location of a user folder. Windows redirects Desktop,
+    Documents and Pictures into OneDrive on many laptops (this dev machine
+    included): Path.home()/"Desktop" then still exists but is stale, and every
+    search and "open desktop" looked in the wrong place."""
+    try:
+        from win32com.shell import shell
+
+        fid = getattr(shell, f"FOLDERID_{name}")
+        return Path(shell.SHGetKnownFolderPath(fid, 0, None))
+    except Exception:
+        return Path.home() / name
+
+
+_FOLDER_NAMES = ("Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music")
+
+# Where find_file / delete_file / summarize look, and the ONLY places the
+# file tools may read or write (check_user_path). Bounded to the user's own
+# folders to avoid scanning the OS — and, for writes, to keep the assistant
+# out of AppData (the Startup folder there runs whatever lands in it).
+SEARCH_ROOTS = list(dict.fromkeys(_user_folder(n) for n in _FOLDER_NAMES))
+
+_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
+                   *(f"LPT{i}" for i in range(1, 10))}
+
+
+class PathRefused(ValueError):
+    pass
+
+
+def _is_network_or_device(raw: str) -> bool:
+    return raw.startswith(("\\\\", "//"))
+
+
+def allowed_roots() -> list[Path]:
+    """SEARCH_ROOTS plus EXTRA_ALLOWED_ROOTS (";"-separated, config/.env only
+    — no tool writes settings, so it can never be widened by voice). A UNC,
+    device or relative entry is ignored with a warning rather than trusted."""
+    from backend.server.config import settings
+
+    roots = list(SEARCH_ROOTS)
+    for entry in filter(None, (e.strip() for e in (settings.extra_allowed_roots or "").split(";"))):
+        p = Path(entry).expanduser()
+        if _is_network_or_device(entry) or not p.is_absolute():
+            log.warning("EXTRA_ALLOWED_ROOTS entry ignored (must be a local absolute path): %r", entry)
+            continue
+        roots.append(p)
+    return roots
+
+
+def check_user_path(path_str: str) -> Path:
+    """The path a file tool may touch, resolved — or PathRefused saying why.
+
+    Refuses UNC shares (\\\\server\\share) and device paths (\\\\?\\, \\\\.\\),
+    control characters, alternate data streams (file.txt:stream), reserved
+    device names (CON, NUL, COM1...), and anything that RESOLVES outside
+    allowed_roots() — which catches '..' traversal and junctions or symlinks
+    pointing out. A relative path is taken relative to Documents.
+
+    No quote or shell-metacharacter rule: no file tool hands a path to a
+    shell (open_folder and open_notes_today were switched to shell-free calls
+    on 2026-09-26), and such a rule refused legal names like "Mom's notes.txt".
+    """
+    raw = (path_str or "").strip()
+    if not raw:
+        raise PathRefused("empty path")
+    if _is_network_or_device(raw):
+        raise PathRefused("network (UNC) and device paths are not allowed")
+    if any(ord(c) < 32 for c in raw):
+        raise PathRefused("path contains control characters")
+    if ":" in raw[2:] or (len(raw) > 1 and raw[1] == ":" and not raw[0].isalpha()):
+        raise PathRefused("alternate data streams and stray ':' are not allowed")
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        p = _user_folder("Documents") / p
+    if any(part.split(".")[0].upper() in _RESERVED_NAMES for part in p.parts[1:]):
+        raise PathRefused("reserved Windows device names are not allowed")
+    resolved = p.resolve()
+    roots = allowed_roots()
+    for root in roots:
+        try:
+            if resolved.is_relative_to(root.resolve()):
+                return resolved
+        except OSError:
+            continue
+    raise PathRefused(f"{resolved} is outside your user folders "
+                      f"({', '.join(str(r) for r in roots)})")
 
 
 @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: opens an explorer window, reads nothing, writes nothing
@@ -107,7 +192,7 @@ def open_folder(name: str) -> dict:
     (downloads, documents, desktop, pictures, videos, music) or a full path."""
     canonical = SPECIAL_FOLDERS.get(name.strip().lower())
     if canonical:
-        path = Path.home() / canonical
+        path = _user_folder(canonical)
     else:
         path = Path(name).expanduser()
 
@@ -116,7 +201,9 @@ def open_folder(name: str) -> dict:
     if not path.exists() or not path.is_dir():
         return {"status": "blocked", "reason": f"folder not found: {path}"}
 
-    subprocess.Popen(f'explorer "{path}"')
+    # Argument list, no shell: the path is one argv entry, never re-parsed
+    # out of a command string.
+    subprocess.Popen(["explorer", str(path)], shell=False)
     return {"status": "success", "message": f"opened {path}"}
 
 

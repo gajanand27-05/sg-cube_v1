@@ -221,6 +221,11 @@ class Settings(BaseSettings):
     # instead of localhost — it widens the guard to RFC1918 peers, which means
     # anything on the same Wi-Fi can screenshot this desktop. Off by default.
     allow_lan_hud: bool = False
+    # Extra folders the file tools may read/write, beyond the user's own
+    # (Desktop, Documents, Downloads, Pictures, Videos, Music). ";"-separated
+    # local absolute paths. Config/.env only — no tool sets it, so voice
+    # cannot widen it. Empty by default.
+    extra_allowed_roots: str = ""
     enable_clipboard: bool = True   # clipboard change tracking
     enable_telemetry: bool = True   # CPU/mem/disk broadcast to UI
     enable_watcher: bool = True     # proactive agent triggers

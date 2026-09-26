@@ -144,9 +144,12 @@ def prepare_confirmation(name: str, args: dict) -> Prepared:
     """
     args = dict(args or {})
     if name == "delete_file":
-        from backend.core.tools.files import resolve_delete_targets
+        from backend.core.tools.files import PathRefused, resolve_delete_targets
 
-        targets = resolve_delete_targets(str(args.get("file", "")))
+        try:
+            targets = resolve_delete_targets(str(args.get("file", "")))
+        except PathRefused as e:
+            return Prepared(args, refusal=str(e))
         if not targets:
             return Prepared(args, refusal=f"no file matches {args.get('file')!r}")
         if len(targets) > 1:
