@@ -44,7 +44,9 @@ def _resolve_action(announce: str, action_tool: str, action_args: dict | None):
         parts.append(f"say {announce!r}")
     if name:
         parts.append(f"run {name}({json.dumps(args, ensure_ascii=False)})")
-    return {"announce": announce, "tool": name, "args": args}, " and ".join(parts)
+    return ({"announce": announce, "tool": name, "args": args,
+             "fingerprint": tool_policy.policy_fingerprint(name) if name else ""},
+            " and ".join(parts))
 
 
 @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: starts a watcher whose action is itself gated at setup and at fire time

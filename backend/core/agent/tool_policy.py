@@ -57,6 +57,27 @@ HUD_CONFIRM = frozenset({
 _NEVER_FROM_BACKGROUND = frozenset({"monitor_battery", "monitor_folder"})
 
 
+def policy_fingerprint(name: str) -> str:
+    """What a watcher was confirmed against: the tool's schema and policy
+    class (tier, trust, guard, which list it is on). If any of it changes, the
+    user confirmed something that no longer exists — the watcher must stop."""
+    import hashlib
+    import json
+
+    tool = REGISTRY.get(name)
+    if tool is None:
+        return ""
+    bucket = "allow" if name in ALLOW else "hud" if name in HUD_CONFIRM else "other"
+    blob = json.dumps({
+        "schema": tool.schema.get("parameters", {}),
+        "tier": getattr(getattr(tool, "tier", None), "value", None),
+        "trusted": bool(getattr(tool, "trusted", False)),
+        "guarded": callable(getattr(tool, "confirm_if", None)),
+        "bucket": bucket,
+    }, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
 def schema_problem(name: str, args: dict) -> str | None:
     """Missing required args or wrong primitive types — the verifier's cheap
     checks, shared so a watcher's fixed call is held to the same standard."""
@@ -82,28 +103,19 @@ def schema_problem(name: str, args: dict) -> str | None:
 def background_refusal(name: str, args: dict) -> str | None:
     """Why this call may NOT run with nobody present, or None if it may.
 
-    Read-only, or on ALLOW; never DESTRUCTIVE whatever the lists say; never
-    a HUD_CONFIRM tool (there is no one to say yes); and a guarded tool whose
-    guard objects to these arguments is refused rather than asked about.
+    Read-only tools only (decided 2026-09-26). A fired watcher can speak its
+    announcement and run a read-only tool — nothing else: no ALLOW tool
+    (add_contact, send_email and send_whatsapp are side effects nobody asked
+    for at that moment), no HUD tool (nobody there to say yes), and no
+    monitor_* (a watcher creating watchers is an unbounded chain).
     """
     tool = REGISTRY.get(name)
     if tool is None:
         return f"{name!r} is not a known tool"
-    tier = getattr(tool, "tier", CapabilityTier.DESTRUCTIVE)
-    if tier == CapabilityTier.DESTRUCTIVE:
-        return f"{name} is destructive and never runs in the background"
     if name in _NEVER_FROM_BACKGROUND:
         return f"{name} cannot be started by another background action"
-    if tier != CapabilityTier.READONLY and name not in ALLOW:
-        return f"{name} is not on the background allowlist"
-    guard = getattr(tool, "confirm_if", None)
-    if callable(guard):
-        try:
-            reason = guard(args)
-        except Exception:
-            reason = "its safety check could not be evaluated"
-        if reason:
-            return f"{name} would need confirmation ({reason})"
+    if getattr(tool, "tier", CapabilityTier.DESTRUCTIVE) != CapabilityTier.READONLY:
+        return f"{name} changes something, and only read-only tools run in the background"
     return None
 
 

@@ -71,6 +71,8 @@ class WatcherAgent:
     def _loop(self):
         while self.running:
             for t in self.tasks:
+                if t.get("disabled"):
+                    continue
                 try:
                     self._check_task(t)
                 except Exception as e:
@@ -83,7 +85,7 @@ class WatcherAgent:
             if not b: return
             if b.percent <= t["threshold"] and not t["triggered"]:
                 t["triggered"] = True
-                self._fire(t["action"], f"Battery is at {int(b.percent)}%.")
+                self._fire(t["action"], f"Battery is at {int(b.percent)}%.", task=t)
             elif b.percent > t["threshold"]:
                 t["triggered"] = False
                 
@@ -97,9 +99,37 @@ class WatcherAgent:
             if new_files:
                 t["known"] = current
                 files_str = ", ".join(new_files)
-                self._fire(t["action"], f"New file: {files_str}.")
+                self._fire(t["action"], f"New file: {files_str}.", task=t)
 
-    def _fire(self, action: dict, context: str = ""):
+    def _stale_reason(self, action: dict) -> str | None:
+        """Why this watcher's confirmation no longer holds, or None.
+
+        The user confirmed ONE fixed call at setup. If the tool's schema or
+        policy class has changed since, or the call is no longer allowed to run
+        unattended, or the record predates fixed calls entirely (no
+        fingerprint: set up before c98e0ac), that confirmation covers
+        something that no longer exists."""
+        from backend.core.agent import tool_policy
+
+        name = action.get("tool", "")
+        if not name:
+            return None  # announce-only: nothing to re-check
+        if "fingerprint" not in action:
+            return "it was set up before watchers were confirmed"
+        if tool_policy.policy_fingerprint(name) != action["fingerprint"]:
+            return f"{name} has changed since you confirmed it"
+        return tool_policy.background_refusal(name, dict(action.get("args") or {}))
+
+    def _fire(self, action: dict, context: str = "", task: dict | None = None):
+        stale = self._stale_reason(action)
+        if stale:
+            if task is not None:
+                task["disabled"] = stale
+            log.warning("Watcher disabled: %s", stale)
+            get_bus().publish(ProactiveEvent(
+                query=(f"I switched off a background watcher because {stale}. "
+                       "Set it up again if you still want it.")))
+            return
         announce = " ".join(x for x in (action.get("announce", ""), context) if x)
         log.info("Watcher firing: announce=%r tool=%r", announce, action.get("tool"))
         get_bus().publish(ProactiveEvent(query=announce, tool=action.get("tool", ""),
