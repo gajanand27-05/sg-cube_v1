@@ -52,6 +52,9 @@ def launches(monkeypatch):
     monkeypatch.setattr(cw, "_apps_cache", [(n, f"id.{i}") for i, n in enumerate(APPS)])
     monkeypatch.setattr(cw, "refresh_apps_cache", lambda: None)
     monkeypatch.setattr(cw, "_app_paths", lambda: {"winword": r"C:\Office\WINWORD.EXE"})
+    # By default the launched app shows up as a new process named like it.
+    monkeypatch.setattr(cw, "_procs_started_since", lambda since: ["Code.exe", "WINWORD.EXE"])
+    monkeypatch.setattr(cw, "_APP_APPEAR_S", 0.3)
     return calls
 
 
@@ -85,3 +88,29 @@ def test_paths_and_file_names_are_refused(launches, target):
     res = _open(target)
     assert res["status"] == "blocked"
     assert launches == []
+
+
+# ── did the app actually appear? ─────────────────────────────────────────
+
+def test_an_app_that_never_appears_is_reported(launches, monkeypatch):
+    monkeypatch.setattr(cw, "_procs_started_since", lambda since: ["svchost.exe"])
+    res = _open("notepad")
+    assert res == {"status": "error", "reason": "I tried to open Notepad, but it didn't appear"}
+
+
+def test_an_already_running_app_brought_to_the_front_counts(launches, monkeypatch):
+    from backend.core.tools import files
+    monkeypatch.setattr(cw, "_procs_started_since", lambda since: [])
+    monkeypatch.setattr(files, "foreground_window", lambda: {
+        "hwnd": 5, "pid": 5, "title": "notes.txt - Notepad", "process": "notepad.exe", "class": "Notepad"})
+    assert _open("notepad")["status"] == "success"
+
+
+@pytest.mark.parametrize("app,process", [
+    ("Microsoft Edge", "msedge.exe"), ("Calculator", "CalculatorApp.exe"),
+    ("Settings", "SystemSettings.exe"), ("WhatsApp", "WhatsApp.Root.exe"),
+    ("Visual Studio Code", "Code.exe"),
+])
+def test_process_names_that_differ_from_the_app_name(monkeypatch, app, process):
+    monkeypatch.setattr(cw, "_procs_started_since", lambda since: [process])
+    assert cw._app_seen(app, 0.0)

@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import subprocess
+import time
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -403,6 +404,50 @@ def _find_running_proc(query: str) -> str | None:
 # ── Handlers ─────────────────────────────────────────────────────────────
 
 
+# How long a launched app gets to show itself: a process started since the
+# launch, or a foreground window, named like the app. explorer.exe
+# shell:AppsFolder "succeeds" whether or not anything opens, so its exit
+# tells us nothing. ponytail: the match is on words of the Start-menu name
+# ("code" in code.exe, "edge" in msedge.exe); an app whose process and window
+# share no word with its name reads as "didn't appear" — widen the match
+# (package family, AppID) if one shows up.
+_APP_APPEAR_S = 3.0
+
+
+def _procs_started_since(since: float) -> list[str]:
+    import psutil
+
+    out = []
+    for p in psutil.process_iter(["name", "create_time"]):
+        if (p.info.get("create_time") or 0) >= since - 0.5 and p.info.get("name"):
+            out.append(p.info["name"])
+    return out
+
+
+def _flat(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def _app_seen(name: str, since: float) -> bool:
+    from backend.core.tools.files import foreground_window
+
+    words = [w for w in _norm(name).split() if len(w) >= 3] or _norm(name).split()
+    if any(w in _flat(p) for p in _procs_started_since(since) for w in words):
+        return True
+    fg = foreground_window()
+    return bool(fg) and any(w in _flat(fg["title"]) or w in _flat(fg["process"]) for w in words)
+
+
+def _launched(name: str, since: float) -> dict:
+    deadline = time.monotonic() + _APP_APPEAR_S
+    while True:
+        if _app_seen(name, since):
+            return {"status": "success", "message": f"opened {name}"}
+        if time.monotonic() >= deadline:
+            return {"status": "error", "reason": f"I tried to open {name}, but it didn't appear"}
+        time.sleep(0.2)
+
+
 def handle_open_app(intent: Intent) -> dict:
     target_raw = intent.target.strip()
     target = target_raw.lower()
@@ -466,21 +511,23 @@ def handle_open_app(intent: Intent) -> dict:
         resolved = _resolve_app_id(query)
     if resolved is not None:
         name, app_id = resolved
+        since = time.time()
         try:
             subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{app_id}"])
         except Exception as e:
             return {"status": "error", "reason": str(e)}
-        return {"status": "success", "message": f"opened {name}"}
+        return _launched(name, since)
 
     # 4. App Paths registrations (what the Run dialog uses), matched by name.
     registered = _app_paths()
     hit = _match_app(query, list(registered))
     if hit is not None:
+        since = time.time()
         try:
             subprocess.Popen([registered[hit]])
         except Exception as e:
             return {"status": "error", "reason": str(e)}
-        return {"status": "success", "message": f"opened {hit}"}
+        return _launched(hit, since)
 
     # No `start "" <name>` fallback: it reported "opened vscode" while Windows
     # showed "Windows cannot find 'vscode'" (2026-09-26).
