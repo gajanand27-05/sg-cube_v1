@@ -206,6 +206,18 @@ def prepare_confirmation(name: str, args: dict) -> Prepared:
                         [f"Types into: {target['title'] or '(untitled)'} ({target['process']})",
                          f"Text: {shown}"])
 
+    if name == "close_active_window":
+        # Pin the window the guard looked at: after a HUD "yes", focus is on
+        # the HUD, and "the active window" would be the wrong one.
+        from backend.core.tools.files import foreground_window
+
+        target = foreground_window()
+        if target is None:
+            return Prepared(args, refusal="I can't tell which window is focused")
+        return Prepared({**args, "expect_hwnd": target["hwnd"], "expect_pid": target["pid"],
+                         "expect_title": target["title"], "expect_process": target["process"]},
+                        [f"Closes: {target['title'] or '(untitled)'} ({target['process']})"])
+
     return Prepared(args, _describe_args(args))
 
 

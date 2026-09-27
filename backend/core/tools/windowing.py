@@ -26,6 +26,7 @@ import json
 import logging
 import subprocess
 import threading
+import time
 
 import pyautogui
 import pygetwindow as gw
@@ -685,10 +686,73 @@ def focus_window(app: str) -> ToolResult:
     confirm_if=lambda args: confirm_close_focused(),
 )  # trusted like close_app, and guarded the same way — the difference is that
 # the target is whatever happens to be focused, so the guard has to look it up
-def close_active_window() -> ToolResult:
-    """Close the currently focused window (Alt+F4)."""
-    pyautogui.hotkey("alt", "f4")
-    return ToolResult.success("closed active window")
+def close_active_window(expect_hwnd: int | None = None, expect_pid: int | None = None,
+                        expect_title: str = "", expect_process: str = "") -> ToolResult:
+    """Close the currently focused window. Leave the expect_* arguments
+    empty: the confirmation step fills them with the window the user
+    approved."""
+    # Alt+F4 went to whatever had focus when it RAN — after a HUD "yes" that
+    # can be the HUD — and "closed" was said even when a "Save changes?"
+    # prompt kept the window open. Now: the window pinned when the guard
+    # looked (or the foreground now, with no confirmation in between), a
+    # polite WM_CLOSE to exactly that window, and a check that it went.
+    if expect_hwnd is None:
+        from backend.core.tools.files import foreground_window
+
+        fg = foreground_window()
+        if fg is None:
+            return ToolResult.blocked("can't tell which window is focused")
+        expect_hwnd, expect_pid, expect_title = fg["hwnd"], fg["pid"], fg["title"]
+    label = expect_title or expect_process or "the window"
+    if not _window_alive(expect_hwnd) or (expect_pid and _window_pid(expect_hwnd) != expect_pid):
+        return ToolResult.blocked(f"{label} is no longer open — nothing was closed")
+    if not _post_close(expect_hwnd):
+        return ToolResult.error(f"Windows wouldn't send the close request to {label}")
+    deadline = time.monotonic() + _CLOSE_WAIT_S
+    while time.monotonic() < deadline:
+        if not _window_alive(expect_hwnd):
+            return ToolResult.success(f"closed {label}")
+        time.sleep(0.1)
+    if _has_modal_popup(expect_hwnd):
+        return ToolResult.blocked(f"a save prompt is open in {label} — it is still open")
+    return ToolResult.error(f"{label} didn't close")
+
+
+_CLOSE_WAIT_S = 2.0
+
+
+def _window_alive(hwnd: int) -> bool:
+    import win32gui
+
+    return bool(win32gui.IsWindow(hwnd)) and bool(win32gui.IsWindowVisible(hwnd))
+
+
+def _window_pid(hwnd: int) -> int:
+    import win32process
+
+    return int(win32process.GetWindowThreadProcessId(hwnd)[1])
+
+
+def _post_close(hwnd: int) -> bool:
+    import win32con
+    import win32gui
+
+    try:
+        win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+        return True
+    except Exception as e:  # noqa: BLE001 — pywintypes.error on a dead/elevated window
+        log.debug("WM_CLOSE to %s failed: %s", hwnd, e)
+        return False
+
+
+def _has_modal_popup(hwnd: int) -> bool:
+    """A dialog the window is waiting on ("Save changes?"): it disables its
+    owner, and GW_ENABLEDPOPUP names it."""
+    import win32con
+    import win32gui
+
+    popup = win32gui.GetWindow(hwnd, win32con.GW_ENABLEDPOPUP)
+    return (bool(popup) and popup != hwnd) or not win32gui.IsWindowEnabled(hwnd)
 
 
 @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: locking is the SAFE direction, and reversible by unlocking
