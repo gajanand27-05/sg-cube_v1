@@ -49,6 +49,27 @@ async function fetchSessionToken(): Promise<string | null> {
   }
 }
 
+/**
+ * fetch() against this app's backend with the session token attached, for
+ * the HUD's own HTTP actions (recordings on/off, delete). Re-fetches the
+ * token once if the backend restarted and rejects the old one (401).
+ */
+export async function hudFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const send = (token: string | null) =>
+    fetch(`${backendBase().http}${path}`, {
+      ...init,
+      cache: "no-store",
+      headers: { ...(init.headers ?? {}), "X-SG-Session": token ?? "" },
+    });
+  if (sessionToken === null) sessionToken = await fetchSessionToken();
+  let r = await send(sessionToken);
+  if (r.status === 401) {
+    sessionToken = await fetchSessionToken();
+    r = await send(sessionToken);
+  }
+  return r;
+}
+
 function resolveUrl(token: string): string {
   return `${backendBase().ws}/ws/ui?token=${encodeURIComponent(token)}`;
 }

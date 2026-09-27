@@ -168,11 +168,19 @@ def _prune(directory: Path) -> None:
     everything = sorted(directory.glob("*.wav"), key=lambda p: p.stat().st_mtime)
     prefixes = tuple(_BUCKET_PREFIX.values())
 
+    cutoff = time.time() - _DROPPED_MAX_AGE_S
     real = [p for p in everything if not p.name.startswith(prefixes)]
     for stale in real[:-_MAX_CAPTURES]:
         _delete(stale)
+    # The user's own commands expire too (2026-09-27): count-only retention
+    # kept a recording of their voice for as long as they spoke rarely.
+    for p in real[-_MAX_CAPTURES:]:
+        try:
+            if p.stat().st_mtime < cutoff:
+                _delete(p)
+        except OSError:
+            continue
 
-    cutoff = time.time() - _DROPPED_MAX_AGE_S
     for prefix in prefixes:
         bucket = [p for p in everything if p.name.startswith(prefix)]
         # Count first, then age. BOTH apply, so the stricter one decides — an
@@ -186,6 +194,40 @@ def _prune(directory: Path) -> None:
                     _delete(p)
             except OSError:
                 continue
+
+
+RETENTION_DAYS = _DROPPED_MAX_AGE_S // 86400
+
+
+def stats() -> dict:
+    """What is on disk right now, for the HUD: recordings and their size."""
+    wavs = list(_ARCHIVE_DIR.glob("*.wav")) if _ARCHIVE_DIR.exists() else []
+    size = 0
+    for f in _ARCHIVE_DIR.glob("*") if _ARCHIVE_DIR.exists() else []:
+        try:
+            size += f.stat().st_size if f.is_file() else 0
+        except OSError:
+            pass
+    return {"enabled": enabled(), "recordings": len(wavs), "bytes": size,
+            "retention_days": RETENTION_DAYS, "max_per_kind": _MAX_CAPTURES}
+
+
+def delete_all() -> int:
+    """Delete every recording, its transcript, and the gate histogram.
+    Returns the number of recordings removed."""
+    removed = 0
+    if not _ARCHIVE_DIR.exists():
+        return 0
+    with _rejection_lock:
+        for f in list(_ARCHIVE_DIR.iterdir()):
+            if not f.is_file() or f.suffix not in (".wav", ".json"):
+                continue
+            try:
+                f.unlink()
+                removed += f.suffix == ".wav"
+            except OSError as e:
+                log.warning("could not delete %s: %s", f.name, e)
+    return removed
 
 
 def archive(audio: np.ndarray | bytes, transcript: str, *,

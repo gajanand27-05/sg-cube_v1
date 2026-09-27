@@ -15,6 +15,7 @@ import {
   Timer,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { RecordingsControl } from "@/components/RecordingsControl";
 import { useUiConnectionState, useUiEvent } from "@/hooks/useUiEvents";
 
 const EM_DASH = "—";
@@ -64,6 +65,8 @@ export function BottomBar() {
         <ActionBtn icon={<FileText className="w-3.5 h-3.5" />} label="Open Notepad" />
         <ActionBtn icon={<Plus className="w-3.5 h-3.5" />} label="Add Command" />
       </div>
+
+      <RecordingsControl />
 
       <div className="ml-auto flex items-center gap-5">
         <Stat icon={<Cpu className="w-4 h-4" />} label="CPU" value={cpu} />

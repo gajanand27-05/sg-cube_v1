@@ -26,6 +26,56 @@ def get_session(request: Request):
     return {"token": session.TOKEN}
 
 
+def _hud_only(request: Request) -> None:
+    """This app's own HUD page on this machine, holding the session token —
+    the same three checks as /ws/ui. A page on another site can't read the
+    token, so it can't turn recording on or delete anything."""
+    if not session.host_header_ok(request.headers.get("host"), settings.allow_lan_hud):
+        raise HTTPException(status_code=403, detail="unexpected Host")
+    if not session.origin_ok(request.headers.get("origin"), request.headers.get("host"),
+                             settings.allow_lan_hud):
+        raise HTTPException(status_code=403, detail="unexpected Origin")
+    if not session.token_ok(request.headers.get("x-sg-session")):
+        raise HTTPException(status_code=401, detail="missing or stale session token")
+
+
+# ── Recordings (capture archive) ─────────────────────────────────────────
+# Off by default: it keeps audio of whatever the microphone hears in the
+# user's home. The HUD shows when it is on, turns it on or off (saved to the
+# user's .env), and deletes everything in one action.
+
+@session_router.get("/api/recordings", dependencies=[Depends(require_local_peer)])
+def recordings_status(request: Request):
+    _hud_only(request)
+    from backend.core import capture_archive
+
+    return capture_archive.stats()
+
+
+@session_router.post("/api/recordings", dependencies=[Depends(require_local_peer)])
+def recordings_set(request: Request, body: dict):
+    _hud_only(request)
+    from backend.core import capture_archive, env_file, paths
+
+    enabled = body.get("enabled")
+    if not isinstance(enabled, bool):
+        raise HTTPException(status_code=422, detail="enabled must be true or false")
+    env_file.set_value(paths.USER_ENV, "STT_ARCHIVE_CAPTURES", "true" if enabled else "false")
+    settings.stt_archive_captures = enabled
+    log.info("Recordings %s from the HUD", "turned on" if enabled else "turned off")
+    return capture_archive.stats()
+
+
+@session_router.post("/api/recordings/delete", dependencies=[Depends(require_local_peer)])
+def recordings_delete(request: Request):
+    _hud_only(request)
+    from backend.core import capture_archive
+
+    removed = capture_archive.delete_all()
+    log.info("Deleted all recordings from the HUD (%d)", removed)
+    return {"deleted": removed, **capture_archive.stats()}
+
+
 @router.websocket("/ui")
 async def ui_websocket(websocket: WebSocket):
     # This socket streams every transcript, clipboard change and memory hit,

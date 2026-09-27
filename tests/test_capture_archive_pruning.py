@@ -58,15 +58,18 @@ def test_dropped_captures_expire_by_age_even_under_the_count_cap(tmp_path, monke
     assert not stale.with_suffix(".json").exists(), "sidecar must go with the wav"
 
 
-def test_real_captures_are_not_aged_out(tmp_path, monkeypatch):
-    """Only the gated ones expire on a clock. A real command from last month
-    is still the most interesting file in the directory."""
+def test_real_captures_age_out_too(tmp_path, monkeypatch):
+    """Changed 2026-09-27 for release: the user's own commands expire after
+    7 days like everything else — an archive of someone's voice at home
+    should not keep a month-old recording just because they speak rarely.
+    Evaluation clips worth keeping go to tools/_wake/keep/."""
     monkeypatch.setattr(ca, "_MAX_CAPTURES", 500)
     old_real = _make(tmp_path, "20260101-000000-000", age_s=90 * 24 * 3600)
+    new_real = _make(tmp_path, "20260927-000000-000", age_s=60)
 
     ca._prune(tmp_path)
 
-    assert old_real.exists()
+    assert not old_real.exists() and new_real.exists()
 
 
 def test_archive_prefixes_only_dropped_captures(tmp_path, monkeypatch):
