@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from typing import Any, AsyncGenerator
 
@@ -10,6 +11,14 @@ from backend.core.tools.registry import schemas_prompt
 from backend.daemon.ui_events import AgentReasoningEvent, AgentThinkingEvent, TokenStreamEvent
 from backend.ai_modules.llm.routing import TaskType
 from backend.core.context.types import AgentContext
+from backend.server.config import settings
+
+
+def _first_sentence(text: str) -> str:
+    """Up to the first ". " / "! " / "? " — a period inside "e.g." or a
+    version number is not followed by a space and a capital, so it stays."""
+    m = re.search(r"[.!?](?=\s+[A-Z(\"'`])", text)
+    return text[: m.end()] if m else text
 
 
 class PlannerAgent(BaseInternalAgent):
@@ -168,7 +177,17 @@ class PlannerAgent(BaseInternalAgent):
         def _cap_line(c):
             sec = c.security.value if hasattr(c.security, "value") else str(c.security)
             tags = f" [{','.join(c.tags)}]" if c.tags else ""
-            return f"- {c.name}{tags} ({sec}): {c.description}"
+            desc = " ".join((c.description or "").split())
+            if settings.planner_short_tool_descriptions:
+                # The first sentence alone dropped the argument names that the
+                # later sentences carried (set_reminder got seconds/text), so
+                # the signature rides along: name(required, optional?).
+                params = (c.schema or {}).get("parameters") or {}
+                required = set(params.get("required") or [])
+                args = ", ".join(a if a in required else f"{a}?"
+                                 for a in (params.get("properties") or {}))
+                return f"- {c.name}({args}){tags} ({sec}): {_first_sentence(desc)}"
+            return f"- {c.name}{tags} ({sec}): {desc}"
         caps = "\n".join(_cap_line(c) for c in context.capabilities)
         
         # Build memory context string.

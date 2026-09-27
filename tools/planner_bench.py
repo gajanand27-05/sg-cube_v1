@@ -188,13 +188,18 @@ async def _build_context():
     ))
 
 
-async def run_case(planner, case: dict, context) -> tuple[list[dict], float, float]:
-    """Returns (calls, ttft_ms, total_ms). A final_response yields no calls."""
+async def run_case(planner, case: dict, context) -> tuple[list[dict], float, float, int]:
+    """Returns (calls, ttft_ms, total_ms, streamed_tokens). A final_response
+    yields no calls. streamed_tokens counts token chunks (one per token on
+    Ollama, roughly so on Groq) for a tokens/s comparable across both."""
     t0 = time.perf_counter()
     ttft = None
+    n_tokens = 0
     calls: list[dict] = []
 
     async for chunk in planner.generate_plan_stream(case["utterance"], [], context):
+        if chunk["type"] == "token":
+            n_tokens += 1
         if chunk["type"] in ("token", "prose") and ttft is None:
             ttft = (time.perf_counter() - t0) * 1000
         elif chunk["type"] == "final":
@@ -206,7 +211,7 @@ async def run_case(planner, case: dict, context) -> tuple[list[dict], float, flo
             break
 
     total = (time.perf_counter() - t0) * 1000
-    return [c for c in calls if isinstance(c, dict)], (ttft or total), total
+    return [c for c in calls if isinstance(c, dict)], (ttft or total), total, n_tokens
 
 
 def _select_provider(name: str, model: str | None = None) -> str:
@@ -229,9 +234,14 @@ def _select_provider(name: str, model: str | None = None) -> str:
             settings.ollama_cloud_model = model
         elif name == "gemini":
             settings.gemini_model = model
+        elif name == "groq":
+            settings.groq_llm_model = model
         else:
             settings.fast_model = model
 
+    # No failover: a failed request must show up as a failed case, never as
+    # the local fallback model's answer reported under this provider's name.
+    settings.llm_fallback_backend = ""
     create_llm_provider()
     llm = get_llm()
     if name not in llm._backends:
@@ -280,6 +290,9 @@ async def main_async(args) -> int:
         cases = [c for c in cases if c.get("group") == args.only]
     if args.case:
         cases = [c for c in cases if c["id"] == args.case]
+    if args.sample and args.sample < len(cases):
+        # Evenly spaced over the file's order, so every group keeps its share.
+        cases = [cases[i * len(cases) // args.sample] for i in range(args.sample)]
     if not cases:
         raise SystemExit("no cases selected")
 
@@ -290,13 +303,31 @@ async def main_async(args) -> int:
     planner = PlannerAgent()
     context = await _build_context()
 
-    print(f"provider={args.provider}  model={model}  cases={len(cases)}\n")
+    from backend.ai_modules.llm.provider import get_llm
+    backend = get_llm()._backends[args.provider]
+    prompt_chars = len(planner._build_prompt(context))
+    print(f"provider={args.provider}  model={model}  cases={len(cases)}  "
+          f"system prompt {prompt_chars} chars (~{prompt_chars // 4} tokens)\n")
 
-    results, ttfts, totals = [], [], []
+    results, ttfts, totals, rates, usage_prompt = [], [], [], [], []
     for i, case in enumerate(cases, 1):
         try:
-            calls, ttft, total = await run_case(planner, case, context)
+            if args.pace_s and i > 1:
+                await asyncio.sleep(args.pace_s)
+            calls, ttft, total, n_tok = await run_case(planner, case, context)
             r = score_case(case, calls, schemas, coerce=_coerce_args)
+            usage = getattr(backend, "last_usage", None) or {}
+            gen_s = (total - ttft) / 1000
+            if usage.get("completion_tokens") and usage.get("completion_time"):
+                # The provider's own clock. Reasoning models (gpt-oss) generate
+                # hidden tokens before the first visible one, so counting
+                # streamed chunks says nothing about their speed.
+                rates.append(usage["completion_tokens"] / usage["completion_time"])
+            elif n_tok > 1 and gen_s > 0:
+                rates.append(n_tok / gen_s)
+            if usage.get("prompt_tokens"):
+                usage_prompt.append(usage["prompt_tokens"])
+                r["usage"] = usage
         except Exception as e:
             r = {"id": case["id"], "group": case.get("group", "?"), "tool_ok": False,
                  "argnames_ok": False, "argvals_ok": False, "effective_ok": False,
@@ -323,8 +354,13 @@ async def main_async(args) -> int:
     full = sum(1 for r in results if r["tool_ok"] and r["argnames_ok"] and r["argvals_ok"])
     print(f"{'all three':12} {full}/{n}  {full / n * 100:5.1f}%")
     if ttfts:
-        print(f"\nTTFT  median {statistics.median(ttfts):.0f}ms   "
+        print(f"\nTTFT  median {statistics.median(ttfts):.0f}ms  p90 "
+              f"{sorted(ttfts)[max(0, int(len(ttfts) * 0.9) - 1)]:.0f}ms   "
               f"total median {statistics.median(totals):.0f}ms  (n={len(ttfts)})")
+    if rates:
+        print(f"tokens/s after first token: median {statistics.median(rates):.0f}")
+    if usage_prompt:
+        print(f"prompt tokens (provider count): median {statistics.median(usage_prompt):.0f}")
 
     by_group: dict[str, list] = {}
     for r in results:
@@ -353,6 +389,9 @@ def main() -> int:
     p.add_argument("--check-access", action="store_true",
                    help="one real POST to prove entitlement, then exit")
     p.add_argument("--json-out", help="write per-case results to this path")
+    p.add_argument("--sample", type=int, help="run N evenly spaced cases")
+    p.add_argument("--pace-s", type=float, default=0.0,
+                   help="seconds to wait between cases (stay under per-minute token limits)")
     args = p.parse_args()
     return asyncio.run(main_async(args))
 

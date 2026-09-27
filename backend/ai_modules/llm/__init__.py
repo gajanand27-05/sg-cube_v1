@@ -45,6 +45,16 @@ def create_llm_provider(test_mode: bool = False) -> LLMProvider:
         except Exception as e:
             log.warning(f"Ollama Cloud backend unavailable: {e}")
 
+    # Groq chat: registered for measurement (tools/planner_bench.py); no
+    # route points at it unless routing is changed on purpose.
+    if settings.groq_api_key:
+        try:
+            from backend.ai_modules.llm.backends.groq_backend import GroqBackend
+
+            provider.register("groq", GroqBackend())
+        except Exception as e:
+            log.warning(f"Groq chat backend unavailable: {e}")
+
     # Register Gemini if API key present
     if settings.gemini_api_key:
         try:

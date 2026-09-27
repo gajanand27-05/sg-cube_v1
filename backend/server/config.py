@@ -234,6 +234,16 @@ class Settings(BaseSettings):
     # not served and send_to_phone is not registered, so the planner never
     # sees it.
     phone_link_enabled: bool = False
+    # Planner prompt: each tool as name(args) + the first sentence of its
+    # description (~3,500 prompt tokens instead of ~6,200). OFF: on gemma4:31b
+    # it saved no time (Ollama Cloud caches the fixed prefix; first token
+    # 1.03s vs 1.08s) and cost two tool choices of 40 (2026-09-27). It is what
+    # fits Groq's free-tier 8K tokens/minute.
+    planner_short_tool_descriptions: bool = False
+    # Groq chat models (llm/backends/groq_backend.py). Registered when
+    # GROQ_API_KEY is set; nothing routes to it by default.
+    groq_llm_model: str = "qwen/qwen3.8-27b"
+    groq_reasoning_effort: str = ""   # e.g. "low" for gpt-oss; empty = provider default
     # Extra folders the file tools may read/write, beyond the user's own
     # (Desktop, Documents, Downloads, Pictures, Videos, Music). ";"-separated
     # local absolute paths. Config/.env only — no tool sets it, so voice
