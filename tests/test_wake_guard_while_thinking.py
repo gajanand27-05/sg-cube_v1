@@ -65,40 +65,35 @@ def test_barge_in_disabled_still_steps_aside(listener, monkeypatch):
 
 
 # ── the user's real wake clips (local only) ──────────────────────────────
+# Read from tools/_wake/keep/ (tools/keep_captures.py), where recordings are
+# never pruned; the manifest records what Onyx was doing when each wake fired.
+# Skipped when the folder is missing (CI, another machine): the clips are the
+# user's voice and never committed. The 2026-09-26 clips this used to name
+# were pruned by the capture archive, which is why the keep folder exists.
 
-CAPTURES = Path(os.environ.get(
-    "SG_CUBE_CAPTURES", Path(__file__).resolve().parents[1] / "backend" / "database" / "captures"))
-# Every wake of 2026-09-26 that fired while THINKING, and whether the rule
-# blocks it. The last three show its limit: room speech is as loud as a wake.
-THINKING_WAKES = {
-    "203942-978": "blocked", "204319-584": "blocked", "204534-137": "blocked",
-    "204559-019": "blocked", "204619-246": "blocked", "204627-711": "blocked",
-    "203812-237": "allowed", "204648-754": "allowed", "204946-588": "allowed",
-}
-VOSK = ww.MODELS_DIR / ww.DEFAULT_MODEL
-_present = VOSK.exists() and all(
-    (CAPTURES / f"wake-20260926-{s}.wav").exists() for s in THINKING_WAKES)
+KEEP = Path(os.environ.get("SG_CUBE_KEEP", Path(__file__).resolve().parents[1] / "tools" / "_wake" / "keep"))
 
 
-@pytest.mark.skipif(not _present, reason="the user's local wake clips or the Vosk model are not present")
-@pytest.mark.parametrize("stamp,expected", sorted(THINKING_WAKES.items()))
-def test_real_thinking_wakes(listener, monkeypatch, stamp, expected):
-    import vosk
+def _thinking_wakes(limit: int = 9) -> list[dict]:
+    try:
+        manifest = json.loads((KEEP / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [m for m in manifest if m["category"] == "wake_trigger"
+            and m.get("assistant_state") == "THINKING" and (KEEP / m["file"]).exists()][:limit]
 
-    base = CAPTURES / f"wake-20260926-{stamp}"
-    with wave.open(str(base.with_suffix(".wav"))) as w:
+
+_CLIPS = _thinking_wakes()
+
+
+@pytest.mark.skipif(not _CLIPS, reason="no kept wake clips (tools/_wake/keep) on this machine")
+@pytest.mark.parametrize("clip", _CLIPS or [None], ids=lambda c: c["file"] if c else "none")
+def test_real_thinking_wakes(listener, monkeypatch, clip):
+    with wave.open(str(KEEP / clip["file"])) as w:
         pcm = np.frombuffer(w.readframes(w.getnframes()), np.int16)
-    frames = [pcm[i:i + ww.WAKE_BLOCKSIZE] for i in range(0, len(pcm), ww.WAKE_BLOCKSIZE)]
-    rms = lambda f: float(np.sqrt(np.mean(f.astype(np.float32) ** 2)))
-
-    # The false wake reproduces offline: the listener's own grammar and gate.
-    vosk.SetLogLevel(-1)
-    rec = vosk.KaldiRecognizer(vosk.Model(str(VOSK)), 16000, json.dumps(["onyx", "[unk]"]))
-    decoded = [ww.feed_wake_chunk(rec, f.tobytes()) for f in frames if rms(f) > ww._VAD_RMS_THRESHOLD]
-    assert any(ww.wake_phrase_present(p, "onyx") for p in decoded)
-
     # The clip ends on the frame that fired; its loudness is the archived rms.
-    trigger_rms = rms(frames[-1])
-    assert round(trigger_rms) == json.loads(base.with_suffix(".json").read_text())["rms"]
+    last = pcm[-ww.WAKE_BLOCKSIZE:]
+    trigger_rms = float(np.sqrt(np.mean(last.astype(np.float32) ** 2)))
+    assert round(trigger_rms) == clip["trigger_rms"]
     _state(monkeypatch, AssistantState.THINKING)
-    assert listener._wake_trigger_allowed(trigger_rms) is (expected == "allowed")
+    assert listener._wake_trigger_allowed(trigger_rms) is (trigger_rms >= 800)

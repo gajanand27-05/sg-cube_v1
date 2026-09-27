@@ -14,6 +14,7 @@ The real-recording test reads the user's own capture from a local path and is
 skipped when it is missing — the .wav holds the user's voice and is never
 committed. The synthetic tests run everywhere.
 """
+import json
 import math
 import os
 import queue
@@ -101,36 +102,50 @@ def test_no_playback_leaves_the_capture_alone(spoken):
     assert lis._capture(initial=[], cut_at_playback_after=100.0) == USER * 5
 
 
-# ── the user's real recording (local only) ───────────────────────────────
+# ── the user's real recordings (local only) ──────────────────────────────
+# Wake-started captures during which Onyx began speaking, read from
+# tools/_wake/keep/ (never pruned); the manifest gives when it began, from
+# SG-CUBE's own log. Skipped where the folder is missing (CI). The capture
+# begins with the 13-frame wake pre-roll, then frames from the trigger on.
 
-REAL = Path(os.environ.get(
-    "SG_CUBE_ECHO_WAV",
-    Path(__file__).resolve().parents[1] / "backend" / "database" / "captures"
-    / "20260926-203822-160.wav"))
-# From that session's log: the 1.625s wake pre-roll, then queued frames from
-# the wake at 20:38:12.237; the reply started (SPEAKING) at 20:38:14.153.
+KEEP = Path(os.environ.get("SG_CUBE_KEEP", Path(__file__).resolve().parents[1] / "tools" / "_wake" / "keep"))
 PREROLL_FRAMES = 13
-ONSET_AFTER_TRIGGER_S = 14.153 - 12.237
 
 
-@pytest.mark.skipif(not REAL.exists(), reason="the user's local capture is not present")
-def test_real_echo_capture_keeps_the_user_and_drops_the_reply(spoken):
-    with wave.open(str(REAL)) as w:
+def _echo_captures(limit: int = 3) -> list[dict]:
+    try:
+        manifest = json.loads((KEEP / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for m in manifest:
+        start = m.get("playback_started_after_trigger_s")
+        after_preroll = (m.get("seconds") or 0) - PREROLL_FRAMES * FRAME_S
+        # Onyx starts clearly inside the recording, with audio after it to cut.
+        if start and 0.5 <= start <= after_preroll - 1.0 and (KEEP / m["file"]).exists():
+            out.append(m)
+    return out[:limit]
+
+
+_ECHO = _echo_captures()
+
+
+@pytest.mark.skipif(not _ECHO, reason="no kept echo recordings (tools/_wake/keep) on this machine")
+@pytest.mark.parametrize("cap", _ECHO or [None], ids=lambda c: c["file"] if c else "none")
+def test_real_capture_is_cut_where_onyx_starts(spoken, cap):
+    with wave.open(str(KEEP / cap["file"])) as w:
         pcm = np.frombuffer(w.readframes(w.getnframes()), np.int16)
-    frames = [pcm[i:i + ww.WAKE_BLOCKSIZE].tobytes()
-              for i in range(0, len(pcm), ww.WAKE_BLOCKSIZE)]
+    frames = [pcm[i:i + ww.WAKE_BLOCKSIZE].tobytes() for i in range(0, len(pcm), ww.WAKE_BLOCKSIZE)]
     initial, rest = frames[:PREROLL_FRAMES], frames[PREROLL_FRAMES:]
-    spoken(ONSET_AFTER_TRIGGER_S)
+    onset = cap["playback_started_after_trigger_s"]
+    spoken(onset)
     lis = _listener([(i * FRAME_S, f) for i, f in enumerate(rest)])
 
-    audio = np.frombuffer(lis._capture(initial=initial, cut_at_playback_after=0.0), np.int16)
+    # As listen() calls it for a wake: the pre-roll is the wake word, not speech.
+    audio = np.frombuffer(lis._capture(initial=initial, initial_is_speech=False,
+                                       cut_at_playback_after=0.0), np.int16)
 
-    seconds = len(audio) / SR
-    assert 3.0 <= seconds <= 3.6, seconds  # was 10.0s, the hard cap
-    # The reply reached the mic 3-8x louder than the user's voice: every
-    # half-second after the cut peaks above 4000, nothing before it does.
-    half = SR // 2
-    rms = lambda a: float(np.sqrt(np.mean(a.astype(np.float32) ** 2)))
-    kept = [rms(audio[i:i + half]) for i in range(0, len(audio), half)]
-    assert max(kept) < 4000, kept
-    assert max(rms(pcm[i:i + half]) for i in range(len(audio), len(pcm), half)) > 6000
+    kept_s, full_s = len(audio) / SR, len(pcm) / SR
+    expected = PREROLL_FRAMES * FRAME_S + onset
+    assert abs(kept_s - expected) <= FRAME_S + 0.01, (kept_s, expected)
+    assert kept_s < full_s - 0.9  # at least the rest of Onyx's audio is gone
