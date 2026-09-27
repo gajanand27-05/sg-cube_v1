@@ -12,6 +12,9 @@ from backend.core.plugins.manager import plugin_manager
 log = logging.getLogger(__name__)
 
 
+# See _discover_plugins: no code path executes a plugin capability yet.
+_PLUGINS_EXECUTABLE = False
+
 class CapabilityRegistry:
     """Central registry of all capabilities — native tools, plugins, MCP, REST, shell."""
     
@@ -59,7 +62,14 @@ class CapabilityRegistry:
         """Register capabilities from user plugins."""
         if not plugin_manager.discovered:
             plugin_manager.discover()
-        
+        # ponytail: plugins are loaded but NOT offered to the planner. Nothing
+        # executes a capability (the planner calls REGISTRY tools by name, and
+        # "plugin.Spotify" is not one), so listing them showed the planner a
+        # tool that could only fail. Upgrade path: route plugin calls through
+        # tool dispatch, then drop this return.
+        if not _PLUGINS_EXECUTABLE:
+            return
+
         for plugin_name, plugin in plugin_manager.plugins.items():
             # Register plugin as a single capability that wraps its execute method
             cap_name = f"plugin.{plugin_name}"
