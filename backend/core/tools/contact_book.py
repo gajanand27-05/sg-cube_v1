@@ -15,11 +15,26 @@ nothing.
 # would be ignored here and these tools would write real phone numbers during
 # a test run. Same shape as the ledger trap documented in tests/conftest.py.
 from backend.core import contacts as _contacts
-from backend.core.contacts import looks_like_a_number
+from backend.core.contacts import ContactsUnreadable, looks_like_a_number
 from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
 
 
+def _unreadable(fn):
+    """A contacts file that can't be read is an error the user hears, not an
+    empty book (which the next save would write over every number)."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except ContactsUnreadable as e:
+            return ToolResult.error(str(e))
+    return wrapper
+
+
 @tool(tier=CapabilityTier.READONLY)  # tier: reads a local file, no side effects
+@_unreadable
 def list_contacts() -> ToolResult:
     """List every saved contact and their phone number. Use for "who do I
     have saved", "list my contacts", or before sending a message when you are
@@ -34,6 +49,7 @@ def list_contacts() -> ToolResult:
 
 
 @tool(tier=CapabilityTier.READONLY)  # tier: reads a local file, no side effects
+@_unreadable
 def find_contact(name: str) -> ToolResult:
     """Look up one saved contact by name and return their number. Returns the
     possible matches instead of guessing when the name is ambiguous. Use this
@@ -50,6 +66,7 @@ def find_contact(name: str) -> ToolResult:
 
 
 @tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.SYSTEM_WRITE)  # tier: writes a local file, undone by delete_contact
+@_unreadable
 def add_contact(name: str, phone: str) -> ToolResult:
     """Save a phone number under a name so it can be messaged by name later.
     `phone` must include the country code (e.g. "+919876543210"). Saving a
@@ -69,6 +86,7 @@ def add_contact(name: str, phone: str) -> ToolResult:
 
 
 @tool(security=SecurityLevel.CAUTION, tier=CapabilityTier.DESTRUCTIVE)  # tier: loses a number the user would have to re-enter
+@_unreadable
 def delete_contact(name: str) -> ToolResult:
     """Remove a saved contact by name. The name must match exactly — this
     does NOT fuzzy-match, so a mis-heard name cannot delete the wrong

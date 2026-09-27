@@ -71,11 +71,14 @@ def send_whatsapp(contact: str, message: str) -> ToolResult:
     # Names, not just digits. Resolution refuses to guess between two similar
     # contacts, because this opens a real chat with a real person and there is
     # no undo — see backend/core/contacts.py.
-    from backend.core.contacts import book
+    from backend.core.contacts import ContactsUnreadable, book
 
-    resolved = book.resolve(contact)
+    try:
+        resolved = book.resolve(contact)
+        options = book.candidates(contact) if resolved is None else []
+    except ContactsUnreadable as e:
+        return ToolResult.error(str(e))
     if resolved is None:
-        options = book.candidates(contact)
         if options:
             return ToolResult.blocked(
                 f"{contact!r} matches more than one contact: "

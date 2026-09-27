@@ -16,7 +16,12 @@ message sent to the wrong person cannot be recalled.
 
 Storage mirrors the dogfooding ledger: a human-readable JSON file under
 backend/database/, written via temp-file rename so a crash mid-write cannot
-truncate it.
+truncate it, with the previous version kept as contacts.json.bak.
+
+A file that exists but cannot be read is NOT an empty book. It used to be:
+the next add_contact then saved a one-entry book over every saved number and
+said "Saved X". Now reads and writes raise ContactsUnreadable (after one
+retry, in case the file was only briefly locked) and nothing is written.
 """
 from __future__ import annotations
 
@@ -56,6 +61,10 @@ def looks_like_a_number(raw: str) -> bool:
     return len(digits_of(raw)) >= _MIN_DIGITS
 
 
+class ContactsUnreadable(RuntimeError):
+    """contacts.json exists but could not be read; nothing was changed."""
+
+
 @dataclass(frozen=True)
 class Contact:
     name: str
@@ -67,30 +76,49 @@ class ContactBook:
         self._path = Path(path) if path is not None else _CONTACTS_PATH
         self._lock = threading.RLock()
         self._contacts: list[Contact] = []
+        self._load_error: str | None = None
         self._load()
 
     # ── storage ──────────────────────────────────────────────────────────
 
     def _load(self) -> None:
+        self._contacts, self._load_error = [], None
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
-            rows = raw.get("contacts", []) if isinstance(raw, dict) else []
+            if not isinstance(raw, dict) or not isinstance(raw.get("contacts", []), list):
+                raise ValueError("not a contacts file")
             self._contacts = [
                 Contact(str(r["name"]), digits_of(str(r["number"])))
-                for r in rows
+                for r in raw.get("contacts", [])
                 if isinstance(r, dict) and r.get("name") and r.get("number")
             ]
-        except (OSError, ValueError, KeyError, TypeError):
-            # A truncated or hand-edited file degrades to an empty book. It
-            # must never be the reason a turn dies.
-            self._contacts = []
+        except FileNotFoundError:
+            pass  # no contacts saved yet: a genuinely empty book
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            self._load_error = f"{type(e).__name__}: {e}"
+
+    def _require_loaded(self) -> None:
+        """Raise ContactsUnreadable if the file could not be read. The
+        caller (a tool) turns it into a spoken error, not a dead turn."""
+        if self._load_error is not None:
+            self._load()  # once more: it may only have been locked
+        if self._load_error is not None:
+            raise ContactsUnreadable(
+                f"your contacts file could not be read ({self._load_error}); "
+                f"nothing was changed. It is {self._path}")
 
     def _save(self) -> None:
+        """Temp file + fsync + replace, keeping the previous file as .bak."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"contacts": [{"name": c.name, "number": c.number}
                                 for c in self._contacts]}
         tmp = self._path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(json.dumps(payload, indent=2))
+            f.flush()
+            os.fsync(f.fileno())
+        if self._path.exists():
+            os.replace(self._path, self._path.with_suffix(".json.bak"))
         os.replace(tmp, self._path)
 
     # ── mutation ─────────────────────────────────────────────────────────
@@ -106,6 +134,7 @@ class ContactBook:
                 f"{number!r} is not a phone number with a country code")
         contact = Contact(_ws.sub(" ", name.strip()), digits_of(number))
         with self._lock:
+            self._require_loaded()
             self._contacts = [c for c in self._contacts if _norm(c.name) != clean]
             self._contacts.append(contact)
             self._save()
@@ -114,6 +143,7 @@ class ContactBook:
     def delete(self, name: str) -> bool:
         clean = _norm(name)
         with self._lock:
+            self._require_loaded()
             before = len(self._contacts)
             self._contacts = [c for c in self._contacts if _norm(c.name) != clean]
             if len(self._contacts) == before:
@@ -122,6 +152,7 @@ class ContactBook:
             return True
 
     def all(self) -> list[Contact]:
+        self._require_loaded()
         return list(self._contacts)
 
     # ── resolution ───────────────────────────────────────────────────────
@@ -129,6 +160,7 @@ class ContactBook:
     def _tiers(self, query: str) -> list[list[Contact]]:
         """Candidate sets, most precise first. Each tier is only consulted if
         every tier above it matched nothing."""
+        self._require_loaded()
         q = _norm(query)
         if not q:
             return []

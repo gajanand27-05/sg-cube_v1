@@ -149,11 +149,14 @@ def test_the_file_is_valid_json_a_human_can_edit(book, tmp_path):
 
 
 def test_a_corrupt_file_does_not_crash_startup(tmp_path):
-    """A half-written file must degrade to an empty book, not take down every
-    turn that touches contacts."""
+    """A half-written file must not stop startup. It must not read as an empty
+    book either: the next save would write that over every saved number. Use
+    raises ContactsUnreadable, which the tools speak (test_contacts_unreadable)."""
     path = tmp_path / "contacts.json"
     path.write_text("{ this is not json", encoding="utf-8")
-    assert contacts_mod.ContactBook(path).all() == []
+    book = contacts_mod.ContactBook(path)  # constructing must not raise
+    with pytest.raises(contacts_mod.ContactsUnreadable):
+        book.all()
 
 
 def test_the_tool_layer_uses_the_isolated_book_not_the_real_file():
