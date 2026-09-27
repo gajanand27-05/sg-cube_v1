@@ -21,6 +21,7 @@ from backend.daemon.ui_events import (
     ConfirmationResolved,
     Executed,
     TypingFocusEvent,
+    ReplyLatencyEvent,
     HandoverEvent,
     IntentResolved,
     InternalAgentEvent,
@@ -82,6 +83,7 @@ TYPE_MAP: dict[type, str] = {
     ConfirmationRequested: "confirmation_request",
     ConfirmationResolved: "confirmation_resolved",
     TypingFocusEvent: "typing_focus",
+    ReplyLatencyEvent: "reply_latency",
 }
 
 EVENT_TYPES = list(TYPE_MAP.keys())

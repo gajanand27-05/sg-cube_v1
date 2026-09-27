@@ -92,6 +92,7 @@ const REQUIRED_FIELDS: Record<UiEventType, Record<string, "number" | "string" | 
   },
   confirmation_resolved: { id: "string", outcome: "string" },
   typing_focus: { state: "string", title: "string", process: "string", timeout_s: "number" },
+  reply_latency: { first_word_ms: "number" },
   system_stats: {
     cpu_percent: "number",
     memory_percent: "number",

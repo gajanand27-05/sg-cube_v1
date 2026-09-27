@@ -55,6 +55,7 @@ class _PlaybackSession:
     # thread-safe — it would mutate state belonging to another loop.
     stop: threading.Event
     player: asyncio.Task | None = None
+    utterance: "_Utterance | None" = None
 
 
 _current_session: _PlaybackSession | None = None
@@ -146,6 +147,9 @@ class _Utterance:
     tokens: tuple[str, ...]
     started_at: float
     ended_at: float | None = None
+    # perf_counter when its first audio reached the output device — what the
+    # user hears as "Onyx started talking" (started_at is queue time).
+    played_at: float | None = None
 
 
 _recent_spoken: deque[_Utterance] = deque(maxlen=_RECENT_SPOKEN_CAP)
@@ -238,6 +242,14 @@ def speech_onset_after(t: float) -> float:
     with _spoken_lock:
         starts = [u.started_at for u in _recent_spoken if u.started_at >= t]
     return min(starts, default=math.inf)
+
+
+def first_playback_after(t: float) -> float | None:
+    """perf_counter time the first audio played at or after `t` (a
+    perf_counter time, e.g. a turn's start), or None if nothing has."""
+    with _spoken_lock:
+        played = [u.played_at for u in _recent_spoken if u.played_at is not None and u.played_at >= t]
+    return min(played, default=None)
 
 
 def _live_utterances(now: float) -> list[_Utterance]:
@@ -397,6 +409,8 @@ async def _audio_player(session: _PlaybackSession) -> None:
         if audio_data.size > 0:
             stream = sd.OutputStream(samplerate=rate, channels=1, dtype="int16")
             stream.start()
+            if session.utterance is not None and session.utterance.played_at is None:
+                session.utterance.played_at = time.perf_counter()
             stream.write(audio_data)
 
         while True:
@@ -471,7 +485,8 @@ async def speak_stream(text: str) -> AsyncGenerator[dict, None]:
     voice = _get_voice()
 
     # Per-call state, bound to THIS call's event loop. See _PlaybackSession.
-    session = _PlaybackSession(queue=asyncio.Queue(maxsize=10), stop=threading.Event())
+    session = _PlaybackSession(queue=asyncio.Queue(maxsize=10), stop=threading.Event(),
+                               utterance=utterance)
     _activate(session)
     session.player = asyncio.create_task(_audio_player(session))
 

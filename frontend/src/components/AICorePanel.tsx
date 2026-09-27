@@ -126,6 +126,12 @@ export function AICorePanel() {
   const lastResponseAt =
     completedEnv === null ? null : Date.parse(completedEnv.timestamp);
 
+  // Headline: how long the user waited for Onyx to start talking. The
+  // provider's latency/inference figures are the WHOLE generation, most of
+  // which is spoken over, so they read as a 4-5s delay that nobody waits.
+  const [firstWordMs, setFirstWordMs] = useState<number | null>(null);
+  useUiEventListener("reply_latency", (p) => setFirstWordMs(p.first_word_ms));
+
   const [latencyHistory, setLatencyHistory] = useState<number[]>([]);
   useUiEventListener("ai_metrics", (p) => {
     setLatencyHistory((h) => {
@@ -146,7 +152,6 @@ export function AICorePanel() {
 
   const tokPerSec =
     metrics === null ? null : metrics.tokens_per_second.toFixed(1);
-  const latencyMs = metrics === null ? null : `${metrics.latency_ms}ms`;
   const inferMs = metrics === null ? null : `${metrics.inference_ms}ms`;
   const agoText =
     lastResponseAt === null ? null : formatAgo(now - lastResponseAt);
@@ -176,11 +181,23 @@ export function AICorePanel() {
         </div>
       </div>
 
-      {/* Row 3 — Three-stat row */}
-      <div className="grid grid-cols-3 gap-3">
-        <MetricStat label="Tok/s" value={tokPerSec} />
-        <MetricStat label="Latency" value={latencyMs} tone="cyan" />
-        <MetricStat label="Infer" value={inferMs} />
+      {/* Row 3 — Time to first word (headline), full generation (secondary) */}
+      <div className="leading-tight" data-testid="first-word">
+        <div className="text-[10px] uppercase tracking-[0.15em] text-hud-text-dim">
+          First word
+        </div>
+        <div className="text-lg font-mono text-hud-cyan-glow">
+          {firstWordMs === null ? (
+            <span className="text-hud-text-dim">—</span>
+          ) : (
+            <span key={firstWordMs} className="inline-block hud-crossfade">
+              {(firstWordMs / 1000).toFixed(1)}s
+            </span>
+          )}
+        </div>
+        <div className="text-[10px] font-mono text-hud-text-dim" data-testid="full-reply">
+          full reply {inferMs ?? "—"} · {tokPerSec ?? "—"} tok/s
+        </div>
       </div>
 
       {/* Row 3.5 — Confidence */}
@@ -312,38 +329,6 @@ function Sparkline({ data }: { data: number[] }) {
         points={points}
       />
     </svg>
-  );
-}
-
-function MetricStat({
-  label,
-  value,
-  tone = "default",
-}: {
-  label: string;
-  value: string | null;
-  tone?: "default" | "cyan";
-}) {
-  return (
-    <div className="leading-tight">
-      <div className="text-[10px] uppercase tracking-[0.15em] text-hud-text-dim">
-        {label}
-      </div>
-      <div
-        className={cn(
-          "text-sm font-mono",
-          tone === "cyan" ? "text-hud-cyan-glow" : "text-hud-text",
-        )}
-      >
-        {value === null ? (
-          <span className="text-hud-text-dim">—</span>
-        ) : (
-          <span key={value} className="inline-block hud-crossfade">
-            {value}
-          </span>
-        )}
-      </div>
-    </div>
   );
 }
 

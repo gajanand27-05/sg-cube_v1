@@ -319,6 +319,15 @@ class SpeechInterruptedEvent:
 
 
 @dataclass
+class ReplyLatencyEvent:
+    """How long the user waited: end of their recording -> Onyx's first
+    audio actually playing. The HUD's headline number; AIMetricsEvent's
+    inference_ms is the whole generation, most of it spoken over."""
+    first_word_ms: int
+    request_id: str = ""
+
+
+@dataclass
 class AIMetricsEvent:
     """Single source of truth for live AI performance telemetry."""
     tokens_per_second: float

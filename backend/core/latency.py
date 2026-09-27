@@ -70,8 +70,29 @@ class LatencyLedger:
         self._turns: deque[dict] = deque(maxlen=capacity)
 
     def record(self, turn: TurnLatency) -> None:
+        # "first_sound": when Onyx's first audio actually PLAYED, which is
+        # what the user waits for. first_audio_out only marks the first
+        # sentence being ready; Piper still has to synthesize it (0.1-0.8s).
+        # Measured from the end of the recording, as every stage here is.
+        try:
+            from backend.ai_modules.speech.tts_piper import first_playback_after
+
+            played = first_playback_after(turn._start_perf)
+        except Exception:  # noqa: BLE001 — telemetry must not break a turn
+            played = None
+        if played is not None and "first_sound" not in turn.stages and not turn._sealed:
+            turn.stages["first_sound"] = int((played - turn._start_perf) * 1000)
         turn.seal()
         self._turns.append(turn.to_dict())
+        if "first_sound" in turn.stages:
+            try:
+                from backend.core.events import get_bus
+                from backend.daemon.ui_events import ReplyLatencyEvent
+
+                get_bus().publish(ReplyLatencyEvent(first_word_ms=turn.stages["first_sound"],
+                                                    request_id=turn.request_id))
+            except Exception:  # noqa: BLE001
+                pass
 
     def recent(self, n: int = 20) -> list[dict]:
         n = max(1, min(n, len(self._turns)))

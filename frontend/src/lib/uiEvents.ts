@@ -176,6 +176,12 @@ export type TypingFocusPayload = {
   total: number;
 };
 
+/** End of the user's recording -> Onyx's first audio actually playing. */
+export type ReplyLatencyPayload = {
+  first_word_ms: number;
+  request_id: string;
+};
+
 export type UiEventPayloadMap = {
   ai_metrics: AIMetricsPayload;
   wake_heard: WakeHeardPayload;
@@ -197,6 +203,7 @@ export type UiEventPayloadMap = {
   confirmation_request: ConfirmationRequestPayload;
   confirmation_resolved: ConfirmationResolvedPayload;
   typing_focus: TypingFocusPayload;
+  reply_latency: ReplyLatencyPayload;
 };
 
 export type FollowUpExpiredPayload = {
