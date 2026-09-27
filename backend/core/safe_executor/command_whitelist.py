@@ -1,6 +1,8 @@
+import difflib
 import json
 import logging
 import os
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -253,28 +255,82 @@ def refresh_apps_cache() -> None:
     _apps_cache = _load_start_apps()
 
 
+def _norm(name: str) -> str:
+    """Lowercase words only: brackets and what they hold go ("Adobe Acrobat
+    [64-bit]" -> "adobe acrobat"), punctuation becomes a space."""
+    name = re.sub(r"[\[(][^\])]*[\])]", " ", name.lower())
+    return " ".join(re.findall(r"[a-z0-9]+", name))
+
+
+def _acronyms(words: list[str]) -> set[str]:
+    """"visual studio code" -> {"vsc", "vscode"}: how people shorten names."""
+    if len(words) < 2:
+        return set()
+    initials = "".join(w[0] for w in words)
+    return {initials, initials[:-1] + words[-1]}
+
+
 def _match_app(query: str, candidates: list[str]) -> str | None:
     """Pick the best app name from `candidates` for the spoken `query`.
 
-    Match order: exact (case-insensitive) > query is a substring of name
-    > name is a substring of query. Ties broken by shortest name.
+    In order, on normalised names (_norm): exact; the same letters without
+    spaces ("whats app"); an acronym ("vscode" -> Visual Studio Code); every
+    query word starts a word of the name ("calc" -> Calculator, "adobe
+    acrobat" -> "Adobe Acrobat Reader"); the whole name inside the query
+    ("google chrome browser" -> Google Chrome); then a close spelling
+    ("notpad"). Word boundaries, never raw substrings: "code" must not open
+    "Barcode Scanner". Ties go to the shortest name.
     """
-    q = query.strip().lower()
+    q = _norm(query)
     if not q or not candidates:
         return None
-    # 1. Exact
-    for n in candidates:
-        if n.lower() == q:
-            return n
-    # 2. Query is substring of name ("calc" -> "Calculator", "whatsapp" -> "WhatsApp")
-    matches = [n for n in candidates if q in n.lower()]
-    if matches:
-        return min(matches, key=len)
-    # 3. Name is substring of query ("google chrome" -> "Chrome")
-    matches = [n for n in candidates if n.lower() in q]
-    if matches:
-        return max(matches, key=len)
+    qwords, qflat = q.split(), q.replace(" ", "")
+    norm = {n: v for n in candidates if (v := _norm(n))}
+
+    tests = (
+        lambda v: v == q,
+        lambda v: v.replace(" ", "") == qflat,
+        lambda v: qflat in _acronyms(v.split()),
+        lambda v: len(qflat) >= 3 and all(
+            any(w.startswith(qw) for w in v.split()) for qw in qwords),
+    )
+    for test in tests:
+        hits = [n for n, v in norm.items() if test(v)]
+        if hits:
+            return min(hits, key=len)
+    inside = [n for n, v in norm.items() if f" {v} " in f" {q} "]
+    if inside:
+        return max(inside, key=lambda n: len(norm[n]))
+    close = difflib.get_close_matches(q, list(norm.values()), n=1, cutoff=0.85)
+    if close:
+        return min((n for n, v in norm.items() if v == close[0]), key=len)
     return None
+
+
+def _app_paths() -> dict[str, str]:
+    """{name: exe} from the App Paths registrations — how the Run dialog
+    finds "code" or "winword". HKCU overrides HKLM, as in Windows. Only
+    registered .exe files that exist on disk."""
+    import winreg
+
+    out: dict[str, str] = {}
+    key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            root = winreg.OpenKey(hive, key_path)
+        except OSError:
+            continue
+        with root:
+            for i in range(winreg.QueryInfoKey(root)[0]):
+                try:
+                    key = winreg.EnumKey(root, i)
+                    exe = os.path.expandvars(winreg.QueryValue(root, key)).strip('"')
+                except OSError:
+                    continue
+                if key.lower().endswith(".exe") and exe.lower().endswith(".exe") \
+                        and os.path.isfile(exe):
+                    out[key[:-4]] = exe
+    return out
 
 
 def _resolve_app_id(query: str) -> tuple[str, str] | None:
@@ -392,10 +448,21 @@ def handle_open_app(intent: Intent) -> dict:
                 return {"status": "error", "reason": str(e)}
         return {"status": "success", "message": f"opened Chrome ({profile_arg})"}
 
+    # Installed apps by NAME only. A path or a file name ("C:\x\y.exe",
+    # "setup.bat") is refused outright: nothing below may turn it into a launch.
+    if re.search(r"[\\/:]", target_raw) or \
+            re.search(r"\.(exe|bat|cmd|ps1|vbs|lnk|msi|com|scr)$", target):
+        return {"status": "blocked",
+                "reason": f"I only open installed apps by name, not files or paths: {target_raw!r}"}
+
     # 3. Resolve via Get-StartApps. Apply OPEN_HINTS first for human-language
     #    phrases that won't naturally match a Start Menu name ("browser", "files").
+    #    A miss rescans once: the app may have been installed since the cache.
     query = OPEN_HINTS.get(target, target_raw)
     resolved = _resolve_app_id(query)
+    if resolved is None:
+        refresh_apps_cache()
+        resolved = _resolve_app_id(query)
     if resolved is not None:
         name, app_id = resolved
         try:
@@ -404,13 +471,19 @@ def handle_open_app(intent: Intent) -> dict:
             return {"status": "error", "reason": str(e)}
         return {"status": "success", "message": f"opened {name}"}
 
-    # 4. Last-resort fallback: hand the raw target to `start` (catches things
-    #    not in Get-StartApps — typed paths, App-Paths registrations, etc.).
-    try:
-        subprocess.Popen(f'start "" "{target_raw}"', shell=True)
-    except Exception as e:
-        return {"status": "error", "reason": str(e)}
-    return {"status": "success", "message": f"opened {target_raw}"}
+    # 4. App Paths registrations (what the Run dialog uses), matched by name.
+    registered = _app_paths()
+    hit = _match_app(query, list(registered))
+    if hit is not None:
+        try:
+            subprocess.Popen([registered[hit]])
+        except Exception as e:
+            return {"status": "error", "reason": str(e)}
+        return {"status": "success", "message": f"opened {hit}"}
+
+    # No `start "" <name>` fallback: it reported "opened vscode" while Windows
+    # showed "Windows cannot find 'vscode'" (2026-09-26).
+    return {"status": "error", "reason": f"I couldn't find {target_raw}"}
 
 
 def handle_close_app(intent: Intent) -> dict:
