@@ -4,9 +4,10 @@ import logging
 import os
 import re
 import subprocess
+import webbrowser
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote, quote_plus, urlparse
 
 from backend.core.orchestrator.llm_layer import Intent
 
@@ -524,12 +525,28 @@ def handle_unknown(intent: Intent) -> dict:  # noqa: ARG001 — name is the cont
 
 # ── Phase 10c: in-app actions (web search + YouTube play) ────────────────
 
+# A scheme is letters before a colon — but "localhost:8001" is a host and a
+# port, not a scheme, so a digit right after the colon doesn't count.
+_SCHEME = re.compile(r"^([a-z][a-z0-9+.\-]*):(?!\d)", re.IGNORECASE)
+
+
 def _open_url(url: str) -> dict:
-    """Open `url` in the user's default browser via Windows `start`."""
+    """Open an http(s) `url` in the default browser. No shell: this used to be
+    `start "" "{url}"` with shell=True, and a quote in the URL closed the
+    string — `x.com" & calc & "` ran calc. Every other scheme (file:,
+    ms-settings:, search-ms:, javascript:, data:, app protocols) is refused:
+    each hands the string to something other than a browser. mailto: and
+    wa.me have their own tools (send_email, send_whatsapp)."""
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname \
+            or any(c.isspace() or ord(c) < 32 for c in url):
+        return {"status": "blocked", "reason": f"I only open web addresses (http or https): {url!r}"}
     try:
-        subprocess.Popen(f'start "" "{url}"', shell=True)
+        opened = webbrowser.open(url)
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": f"couldn't open a browser: {e}"}
+    if not opened:
+        return {"status": "error", "reason": f"couldn't open a browser for {url}"}
     return {"status": "success", "message": url}
 
 
@@ -539,7 +556,7 @@ def handle_open_url(intent: Intent) -> dict:
         return {"status": "blocked", "reason": "empty URL"}
     if is_target_dangerous(target):
         return {"status": "blocked", "reason": f"dangerous URL rejected: {target!r}"}
-    url = target if "://" in target else f"https://{target}"
+    url = target if _SCHEME.match(target) else f"https://{target}"
     return _open_url(url)
 
 
@@ -615,7 +632,9 @@ def handle_play_youtube(intent: Intent) -> dict:
             r["message"] = f"could not resolve video id for {query!r}, opened results"
         return r
 
-    watch_url = vid if vid.startswith("http") else f"https://www.youtube.com/watch?v={vid}"
+    # The id comes from YouTube via yt-dlp, not from us: encode it like any
+    # other query value. A full URL still goes through _open_url's http(s) check.
+    watch_url = vid if vid.startswith("http") else f"https://www.youtube.com/watch?v={quote(vid, safe='')}"
     r = _open_url(watch_url)
     if r["status"] == "success":
         r["message"] = f"playing {title!r}"
