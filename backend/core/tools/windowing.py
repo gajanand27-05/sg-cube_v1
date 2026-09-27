@@ -25,6 +25,7 @@ import difflib
 import json
 import logging
 import subprocess
+import threading
 
 import pyautogui
 import pygetwindow as gw
@@ -697,46 +698,117 @@ def lock_screen() -> ToolResult:
     return ToolResult.success("screen locked")
 
 
+# ── power ─────────────────────────────────────────────────────────────────
+# Each result comes from Windows, never from having asked. shutdown.exe was
+# started with Popen and its exit code thrown away, so "shutting down in 10s"
+# was said even when Windows refused. Decisions go by exit code, never by the
+# English text of an error, which a localized Windows doesn't print.
+_ERROR_SHUTDOWN_IS_SCHEDULED = 1190
+_ERROR_NO_SHUTDOWN_IN_PROGRESS = 1116
+
+_sleep_lock = threading.Lock()
+_sleep_timer: threading.Timer | None = None
+
+
+def _suspend() -> tuple[bool, int]:
+    """Sleep now: SetSuspendState(Hibernate=FALSE, ...). Called directly —
+    `rundll32 powrprof.dll,SetSuspendState 0,1,0` hands the function junk
+    arguments and hibernates instead when hibernation is on. (ok, winerror)."""
+    import ctypes
+
+    ok = bool(ctypes.windll.powrprof.SetSuspendState(False, True, False))
+    return ok, (0 if ok else ctypes.GetLastError())
+
+
+def _sleep_allowed() -> bool:
+    import ctypes
+
+    return bool(ctypes.windll.powrprof.IsPwrSuspendAllowed())
+
+
+def _fire_sleep() -> None:
+    global _sleep_timer
+    with _sleep_lock:
+        _sleep_timer = None
+    ok, err = _suspend()
+    if not ok:
+        log.error("sleep_pc: Windows refused to sleep (error %s)", err)
+
+
+def _shutdown_exe(*args: str) -> subprocess.CompletedProcess:
+    # shutdown.exe returns as soon as the request is registered, so waiting
+    # for it costs nothing and gives us Windows' answer.
+    return subprocess.run(["shutdown", *args], capture_output=True, text=True, timeout=15)
+
+
+def _schedule(flag: str, seconds: int, doing: str) -> ToolResult:
+    try:
+        r = _shutdown_exe(flag, "/t", str(seconds))
+    except (OSError, subprocess.SubprocessError) as e:
+        return ToolResult.error(f"couldn't ask Windows to {doing}: {e}")
+    if r.returncode == 0:
+        return ToolResult.success(f"{doing} in {seconds}s — say cancel shutdown to abort")
+    if r.returncode == _ERROR_SHUTDOWN_IS_SCHEDULED:
+        return ToolResult.blocked("a shutdown or restart is already scheduled — "
+                                  "say cancel shutdown first")
+    detail = (r.stderr or r.stdout or "").strip()
+    return ToolResult.error(f"Windows refused to {doing} (code {r.returncode}){': ' + detail if detail else ''}")
+
+
 @tool(security=SecurityLevel.CRITICAL, tier=CapabilityTier.DESTRUCTIVE)  # tier: sleeps machine, disrupts running work
 def sleep_pc(seconds: int = 5) -> ToolResult:
     """Put the PC to sleep after a `seconds` countdown (default 5).
     Use cancel_shutdown to abort within the countdown window."""
+    global _sleep_timer
     seconds = max(0, int(seconds))
+    if not _sleep_allowed():
+        return ToolResult.blocked("this PC doesn't allow sleep (its power settings or hardware)")
     if seconds == 0:
-        subprocess.Popen(
-            ["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"]
-        )
-        return ToolResult.success("sleeping now")
-    cmd = (
-        f"timeout /t {seconds} && "
-        f"rundll32.exe powrprof.dll,SetSuspendState 0,1,0"
-    )
-    subprocess.Popen(["cmd", "/c", cmd])
-    return ToolResult.success(f"sleeping in {seconds}s")
+        ok, err = _suspend()
+        if not ok:
+            return ToolResult.error(f"Windows refused to sleep (error {err})")
+        return ToolResult.success("slept")  # returns after the PC wakes up again
+    with _sleep_lock:
+        if _sleep_timer is not None:
+            return ToolResult.blocked("sleep is already scheduled — say cancel shutdown to stop it")
+        timer = _sleep_timer = threading.Timer(seconds, _fire_sleep)
+        timer.daemon = True
+    timer.start()  # outside the lock: _fire_sleep takes it
+    return ToolResult.success(f"sleeping in {seconds}s — say cancel shutdown to abort")
 
 
 @tool(security=SecurityLevel.CRITICAL, tier=CapabilityTier.DESTRUCTIVE)  # tier: power state, unsaved work is lost
 def shutdown_pc(seconds: int = 10) -> ToolResult:
     """Shut down the PC after a `seconds` countdown (default 10).
     Run cancel_shutdown to abort within the countdown."""
-    seconds = max(0, int(seconds))
-    subprocess.Popen(["shutdown", "/s", "/t", str(seconds)])
-    return ToolResult.success(f"shutting down in {seconds}s — say cancel shutdown to abort")
+    return _schedule("/s", max(0, int(seconds)), "shutting down")
 
 
 @tool(security=SecurityLevel.CRITICAL, tier=CapabilityTier.DESTRUCTIVE)  # tier: power state, unsaved work is lost
 def restart_pc(seconds: int = 10) -> ToolResult:
     """Restart the PC after a `seconds` countdown (default 10).
     Run cancel_shutdown to abort within the countdown."""
-    seconds = max(0, int(seconds))
-    subprocess.Popen(["shutdown", "/r", "/t", str(seconds)])
-    return ToolResult.success(f"restarting in {seconds}s — say cancel shutdown to abort")
+    return _schedule("/r", max(0, int(seconds)), "restarting")
 
 
 @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: aborts a pending shutdown — prompting to CANCEL a destructive event is backwards
 def cancel_shutdown() -> ToolResult:
-    """Cancel a pending shutdown or restart."""
-    r = subprocess.run(["shutdown", "/a"], capture_output=True, text=True)
-    if r.returncode != 0 and "no shutdown" in (r.stderr or "").lower():
-        return ToolResult.blocked("no shutdown was scheduled")
-    return ToolResult.success("shutdown cancelled")
+    """Cancel a pending shutdown, restart or sleep."""
+    global _sleep_timer
+    with _sleep_lock:
+        timer, _sleep_timer = _sleep_timer, None
+    if timer is not None:
+        timer.cancel()
+    try:
+        r = _shutdown_exe("/a")
+    except (OSError, subprocess.SubprocessError) as e:
+        return ToolResult.error(f"couldn't ask Windows to cancel: {e}")
+    if r.returncode == 0:
+        return ToolResult.success("shutdown cancelled" + (" and sleep cancelled" if timer else ""))
+    if r.returncode == _ERROR_NO_SHUTDOWN_IN_PROGRESS:
+        if timer is not None:
+            return ToolResult.success("sleep cancelled")
+        return ToolResult.blocked("nothing was scheduled — no shutdown, restart or sleep")
+    detail = (r.stderr or r.stdout or "").strip()
+    return ToolResult.error(f"Windows refused to cancel (code {r.returncode}){': ' + detail if detail else ''}"
+                            + (" — sleep was cancelled" if timer else ""))
