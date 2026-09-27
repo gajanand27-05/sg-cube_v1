@@ -40,6 +40,18 @@ describe("AICorePanel latency", () => {
     expect(screen.getByTestId("full-reply").textContent).toBe("full reply 4578ms · 10.0 tok/s");
   });
 
+  it("names a failover on the reply it happened to, and only then", () => {
+    metrics = {
+      tokens_per_second: 20, latency_ms: 900, inference_ms: 900, queue_depth: 0,
+      tool_calls: 1, active_model: "qwen2.5:7b", failed_over_from: "gemma4:31b",
+    };
+    const { rerender } = render(<AICorePanel />);
+    expect(screen.getByTestId("failover").textContent).toBe("fallback (gemma4:31b failed)");
+    metrics = { ...metrics, active_model: "gemma4:31b", failed_over_from: "" };
+    rerender(<AICorePanel />);
+    expect(screen.queryByTestId("failover")).toBeNull();
+  });
+
   it("shows a dash until a reply has been spoken", () => {
     render(<AICorePanel />);
     expect(screen.getByTestId("first-word").textContent).toContain("—");

@@ -11,6 +11,8 @@ export type AIMetricsPayload = {
   queue_depth: number;
   tool_calls: number;
   active_model: string;
+  /** Set when the configured model failed and active_model answered instead. */
+  failed_over_from?: string;
 };
 
 export type IntentResolvedPayload = {

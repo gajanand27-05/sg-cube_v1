@@ -19,6 +19,7 @@ Stages are optional — missing stages just don't appear in the breakdown.
 That way a text-only turn (no wake, no audio) reports the stages it
 actually crossed rather than filling in zeros.
 """
+import contextvars
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -31,6 +32,17 @@ class TurnLatency:
     _start_perf: float = field(default_factory=time.perf_counter)
     stages: dict[str, int] = field(default_factory=dict)  # stage → ms since start
     _sealed: bool = False
+    # Which model answered each streamed LLM call of this turn, and whether
+    # it was a failover. Without it a turn answered by the local fallback
+    # looked exactly like one answered by the planner model.
+    llm_calls: list[dict] = field(default_factory=list)
+
+    def note_llm(self, task: str, model: str, failed_over_from: str = "") -> None:
+        if not self._sealed:
+            call = {"task": task, "model": model}
+            if failed_over_from:
+                call["failed_over_from"] = failed_over_from
+            self.llm_calls.append(call)
 
     def mark(self, stage: str) -> None:
         """Record the elapsed ms for `stage`. Idempotent per stage — the
@@ -54,7 +66,15 @@ class TurnLatency:
             "request_id": self.request_id,
             "mode": self.mode,
             "stages_ms": dict(self.stages),
+            "llm_calls": list(self.llm_calls),
         }
+
+
+# The turn being handled in this async context, so code far from trigger.py
+# (the LLM provider) can note which model answered without threading the
+# TurnLatency through every call. asyncio tasks inherit it from their creator.
+current_turn: contextvars.ContextVar["TurnLatency | None"] = contextvars.ContextVar(
+    "current_turn", default=None)
 
 
 class LatencyLedger:

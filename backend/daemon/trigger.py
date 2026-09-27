@@ -30,7 +30,7 @@ from backend.core.brain import brain, BrainRequest, BrainResponse
 from backend.core.events import get_bus, Priority
 from backend.core.state import AssistantState, manager as state_manager
 from backend.core.dogfooding import ledger as dogfooding_ledger
-from backend.core.latency import TurnLatency, ledger as latency_ledger
+from backend.core.latency import TurnLatency, current_turn, ledger as latency_ledger
 from backend.server.config import settings
 from backend.daemon.ui_events import (
     CommandTranscribed,
@@ -362,6 +362,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         # start one now so /diagnostics/latency has something to show for
         # every turn regardless of entry point.
         turn = TurnLatency(request_id=request_id, mode="voice")
+        current_turn.set(turn)
     event = CommandTranscribed(text=command, peak=peak)
     get_bus().publish(event, priority=Priority.HIGH)
     _emit(emit, event)
@@ -713,6 +714,7 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
     # Phase 4C: t=0 is here (wake VAD onset — the earliest observable
     # moment). Mark `wake` and thread the record through the pipeline.
     turn = TurnLatency(request_id=str(uuid.uuid4())[:8], mode="voice")
+    current_turn.set(turn)
     turn.mark("wake")
 
     try:

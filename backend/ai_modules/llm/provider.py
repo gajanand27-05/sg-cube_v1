@@ -158,7 +158,8 @@ class LLMProvider:
         self._emit_metrics(model, result, latency_ms)
         return result
 
-    def _emit_metrics(self, model: str, result: str, latency_ms: float) -> None:
+    def _emit_metrics(self, model: str, result: str, latency_ms: float,
+                      failed_over_from: str = "") -> None:
         """Publish AIMetricsEvent — single source of truth for live telemetry.
 
         latency_ms is measured; tokens/s is estimated from actual output
@@ -177,6 +178,7 @@ class LLMProvider:
                 queue_depth=self._inflight,
                 tool_calls=self._calls,
                 active_model=model,
+                failed_over_from=failed_over_from,
             ))
         except Exception:
             pass
@@ -205,6 +207,7 @@ class LLMProvider:
         t0 = time.monotonic()
         accumulated = ""
         model = _model_label(primary, primary_name)
+        failed_over_from = ""
         completed = False
 
         # Try primary. Track whether we've yielded anything — once we have,
@@ -230,6 +233,7 @@ class LLMProvider:
                 _emit_fallback(primary_name, fb_name, str(e)[:200])
                 log.warning("LLM primary '%s' stream failed pre-yield (%s); falling over to '%s'",
                             primary_name, type(e).__name__, fb_name)
+                failed_over_from = model
                 model = _model_label(fb_backend, fb_name)
 
             if not completed:
@@ -247,8 +251,13 @@ class LLMProvider:
             # failure so a dead stream doesn't report as throughput.
             if completed:
                 self._emit_metrics(
-                    model, accumulated, (time.monotonic() - t0) * 1000
+                    model, accumulated, (time.monotonic() - t0) * 1000, failed_over_from
                 )
+                from backend.core.latency import current_turn
+
+                turn = current_turn.get()
+                if turn is not None:
+                    turn.note_llm(getattr(task, "value", str(task)), model, failed_over_from)
 
     def embed(self, text: str, **kwargs: Any) -> list[float]:
         # Embeddings always use the embedding backend

@@ -109,10 +109,10 @@ export function AICorePanel() {
     (p) => p.source_layer === "llm",
   );
 
-  const [fallbackTarget, setFallbackTarget] = useState<string | null>(null);
-  useUiEventListener("provider_degraded", (p) => {
-    if (p.action === "fallback" && p.fallback) setFallbackTarget(p.fallback);
-  });
+  // Which model answered comes from each reply's metrics, not from a
+  // provider_degraded event latched forever: that kept showing "→ fallback"
+  // long after the planner model was answering again.
+  const failedOverFrom = metrics?.failed_over_from || null;
 
   // Confidence + Last Response must survive a remount (HMR/StrictMode),
   // so they come from the cache-seeded envelope, not a listener-backed
@@ -173,9 +173,13 @@ export function AICorePanel() {
           <span className="font-mono text-xs text-hud-text truncate">
             {metrics === null ? "—" : metrics.active_model}
           </span>
-          {fallbackTarget && (
-            <span className="font-mono text-xs text-hud-cyan-dim truncate">
-              → {fallbackTarget}
+          {failedOverFrom && (
+            <span
+              className="font-mono text-xs text-hud-warning truncate"
+              data-testid="failover"
+              title={`${failedOverFrom} failed, so ${metrics?.active_model} answered`}
+            >
+              fallback ({failedOverFrom} failed)
             </span>
           )}
         </div>

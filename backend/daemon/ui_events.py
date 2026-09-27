@@ -336,6 +336,8 @@ class AIMetricsEvent:
     queue_depth: int
     tool_calls: int
     active_model: str
+    # Set when the configured model failed and another answered instead.
+    failed_over_from: str = ""
 
 
 @dataclass
