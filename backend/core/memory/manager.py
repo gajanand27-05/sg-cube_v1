@@ -21,17 +21,22 @@ class MemoryManager:
         self.ltm = LongTermMemory()
         self.timeline = timeline
 
-    def remember_fact(self, content: str, metadata: Optional[dict] = None):
-        """Explicitly store a fact in Long-Term Memory."""
+    def remember_fact(self, content: str, metadata: Optional[dict] = None) -> bool:
+        """Explicitly store a fact in Long-Term Memory. False = not stored
+        (the store refused or failed; it has already logged why)."""
         entry = MemoryEntry(content=content, mtype=MemoryType.FACT, metadata=metadata or {})
-        self.ltm.store(entry)
-        log.info(f"Fact remembered: {content}")
+        stored = bool(self.ltm.store(entry))
+        if stored:
+            log.info(f"Fact remembered: {content}")
+        return stored
 
-    def remember_preference(self, content: str, metadata: Optional[dict] = None):
-        """Explicitly store a user preference."""
+    def remember_preference(self, content: str, metadata: Optional[dict] = None) -> bool:
+        """Explicitly store a user preference. False = not stored."""
         entry = MemoryEntry(content=content, mtype=MemoryType.PREFERENCE, metadata=metadata or {})
-        self.ltm.store(entry)
-        log.info(f"Preference remembered: {content}")
+        stored = bool(self.ltm.store(entry))
+        if stored:
+            log.info(f"Preference remembered: {content}")
+        return stored
 
     def get_relevant_context(self, query: str) -> str:
         """Retrieve relevant memories to inject into the Agent's prompt."""

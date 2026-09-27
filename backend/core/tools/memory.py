@@ -7,7 +7,10 @@ def remember(fact: str) -> dict:
     """Store a piece of information for long-term recall.
     Example: 'remember that my cat is named Luna'
     """
-    memory_manager.remember_fact(fact)
+    # The store's answer, not an assumption: it refuses when the embedding
+    # model is unavailable, and "I'll remember that" was said anyway.
+    if not memory_manager.remember_fact(fact):
+        return {"status": "error", "reason": "I couldn't save that: my memory store is unavailable right now"}
     return {"status": "success", "message": f"I'll remember that: {fact}"}
 
 
@@ -16,7 +19,8 @@ def set_preference(preference: str) -> dict:
     """Store a user preference for future behavior.
     Example: 'always open chrome in incognito mode'
     """
-    memory_manager.remember_preference(preference)
+    if not memory_manager.remember_preference(preference):
+        return {"status": "error", "reason": "I couldn't save that preference: my memory store is unavailable right now"}
     return {"status": "success", "message": "Preference saved."}
 
 
