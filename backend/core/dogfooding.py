@@ -10,15 +10,16 @@ no time-series queries needed, and a human-readable file is easier to
 diff/eyeball during dogfooding. Upgrade path: SQLite + daily rollups
 if we ever need to plot a 30-day chart.
 """
-import json
-import os
+import logging
 import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from backend.core import paths
+from backend.core import json_file, paths
+
+log = logging.getLogger(__name__)
 
 _DATA_DIR = paths.DB_DIR
 _LEDGER_PATH = _DATA_DIR / "dogfooding.json"
@@ -151,26 +152,23 @@ class Ledger:
             win[key] = win.get(key, 0) + n
 
     def _load(self) -> dict[str, Any]:
-        if not self._path.exists():
-            return {}
+        # An unreadable ledger is kept as it is, not renamed and restarted:
+        # the rename failed whenever a .bak already existed, and the next save
+        # then wrote the fresh counters over it. Counting goes on in memory
+        # and nothing is written until the file can be read again.
+        self._load_error: str | None = None
         try:
-            with self._path.open("r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            # corrupt or unreadable — back it up and start fresh
-            try:
-                self._path.rename(self._path.with_suffix(".json.bak"))
-            except OSError:
-                pass
+            data = json_file.read(self._path)
+        except json_file.Unreadable as e:
+            self._load_error = str(e)
+            log.error("dogfooding ledger unreadable, not saving over it: %s", e)
             return {}
+        return data if isinstance(data, dict) else {}
 
     def _save(self) -> None:
-        tmp = self._path.with_suffix(".json.tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            json.dump(self._data, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, self._path)
+        if self._load_error is not None:
+            return
+        json_file.write(self._path, self._data)
 
     _WAKE_SOURCE_PREFIX = {
         "wake": "wake",

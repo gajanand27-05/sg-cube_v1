@@ -32,7 +32,7 @@ import threading
 import time
 import wave
 from pathlib import Path
-from backend.core import paths
+from backend.core import json_file, paths
 
 import numpy as np
 
@@ -135,11 +135,10 @@ def record_gate_rejection(rms: float, *, floor: float) -> None:
     try:
         with _rejection_lock:
             path = _ARCHIVE_DIR / GATE_REJECTIONS_FILE
-            try:
-                hist = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                hist = {"floor": floor, "bin_width": _REJECTION_BIN,
-                        "bins": {}, "total": 0}
+            # Unreadable is not empty: raising here skips this count rather
+            # than writing a one-count histogram over the whole sample.
+            hist = json_file.read(path) or {"floor": floor, "bin_width": _REJECTION_BIN,
+                                             "bins": {}, "total": 0}
             # The floor is stored, not assumed: it is the censoring point of
             # the whole archived sample, and a record that does not name it
             # reads as the full population of follow-up attempts.
@@ -148,8 +147,7 @@ def record_gate_rejection(rms: float, *, floor: float) -> None:
             hist["bins"][key] = hist["bins"].get(key, 0) + 1
             hist["total"] = hist.get("total", 0) + 1
             hist["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-            _ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(hist, indent=2), encoding="utf-8")
+            json_file.write(path, hist)
     except Exception as e:
         log.debug("could not count a gate rejection: %s", e)
 
