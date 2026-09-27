@@ -652,9 +652,56 @@ def arrange_windows(layout: str, assignments: str = "", monitor: int = -1) -> To
 
 @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: reversible by restoring
 def minimize_all() -> ToolResult:
-    """Minimize every window and show the desktop (Win+D)."""
-    pyautogui.hotkey("win", "d")
-    return ToolResult.success("showed desktop")
+    """Minimize every window and show the desktop."""
+    # Win+D is a TOGGLE: with the desktop already showing it brought every
+    # window back, and still said "showed desktop". Shell.MinimizeAll only
+    # ever minimizes, and the windows are counted before and after.
+    before = _open_app_windows()
+    if not before:
+        return ToolResult.success("the desktop is already showing — nothing to minimize")
+    _minimize_all_windows()
+    deadline = time.monotonic() + 1.5
+    while True:
+        left = _open_app_windows()
+        if not left or time.monotonic() >= deadline:
+            break
+        time.sleep(0.1)
+    if not left:
+        return ToolResult.success(f"minimized {len(before)} window(s)")
+    names = ", ".join(sorted({w["app"] or w["title"] for w in left}))
+    if len(left) >= len(before):
+        return ToolResult.error(f"the windows didn't minimize ({names})")
+    return ToolResult.success(
+        f"minimized {len(before) - len(left)} of {len(before)} windows; still open: {names}")
+
+
+_SHELL_CLASSES = frozenset({"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"})
+
+
+def _open_app_windows() -> list[dict]:
+    """Windows "show the desktop" would hide: visible, not minimized, not the
+    desktop or taskbar, and not cloaked (suspended Store apps keep a visible,
+    titled window that nobody can see)."""
+    import ctypes
+
+    import win32gui
+
+    out = []
+    for w in _enumerate_windows():
+        if w["minimized"] or win32gui.GetClassName(w["hwnd"]) in _SHELL_CLASSES:
+            continue
+        cloaked = ctypes.c_int(0)
+        ctypes.windll.dwmapi.DwmGetWindowAttribute(  # 14 = DWMWA_CLOAKED
+            w["hwnd"], 14, ctypes.byref(cloaked), ctypes.sizeof(cloaked))
+        if not cloaked.value:
+            out.append(w)
+    return out
+
+
+def _minimize_all_windows() -> None:
+    import win32com.client
+
+    win32com.client.Dispatch("Shell.Application").MinimizeAll()
 
 
 @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # tier: window focus, reversible; trusted: benign UX affordance
