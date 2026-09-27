@@ -10,7 +10,7 @@ Replaces "Phase 3" in `2026-09-24-laptop-release.md`. Decided 2026-09-27.
 | No Groq key | Speech-to-text falls back to local Whisper `base` on the CPU. The spoken message names the right key (today it says "check GEMINI_API_KEY"). |
 | Models | **Bundled in the installer, checksummed:** Whisper `base`, MiniLM-L6 (memory), Vosk small (wake word), the Piper voice. **Downloaded on demand**, with progress and resume: multilingual MiniLM, Whisper `small`/`medium`. |
 | Browser | Installed **Edge by default**, Chrome if the user picks it. A **separate automation profile** the user signs into once. No Chromium download. |
-| OCR | Open: measured below; decide before step 8. |
+| OCR | **Windows OCR by default** (built in, 3.4 MB of Python packages). **Tesseract optional**, downloaded on demand by the step 6 downloader, for code-heavy screens; a setting prefers it when installed. |
 | Piper voice | Open: `ryan-high` (current) vs `ryan-medium`, measured below. |
 
 ## What exists today (measured 2026-09-26/27)
@@ -69,7 +69,7 @@ Replaces "Phase 3" in `2026-09-24-laptop-release.md`. Decided 2026-09-27.
 - Rewrite `preflight.check_browser` to look for the installed browser, and replace the three "playwright install chromium" messages.
 - Tests: channel passed through; preflight OK with the browser present, clear message without.
 
-### 8. OCR
+### 8. OCR: Windows OCR by default, Tesseract on demand
 - Measured 2026-09-27 on 8 rendered test screenshots (4 kinds × 100%/150% scale, known text):
 
   | | Words right (mean) | Time per image (median) | Install size |
@@ -77,8 +77,14 @@ Replaces "Phase 3" in `2026-09-24-laptop-release.md`. Decided 2026-09-27.
   | Windows OCR (`Windows.Media.Ocr` via `winrt-*` packages) | 84.2% | 15 ms | 3.4 MB of Python packages; engine ships with Windows |
   | Tesseract 5.4 | 94.0% | 119 ms | 239 MB |
 
-  Equal on dialog and article text (97–100%). Windows OCR is weaker on code (50–71% vs 86–100%: `ToolResu1t`, dropped operators) and on small status-bar text. Windows OCR languages follow the Windows language packs installed (here: en-GB). Not yet measured on real screenshots.
-- Options: (a) Windows OCR by default, Tesseract optional for code-heavy reading; (b) Tesseract bundled; (c) Windows OCR only.
+  Equal on dialog and article text (97–100%). Windows OCR is weaker on code (50–71% vs 86–100%: `ToolResu1t`, dropped operators) and on small status-bar text. Its languages follow the Windows language packs installed (here: en-GB). Not yet measured on real screenshots.
+- `backend/core/vision/ocr_reader.py` gets two engines behind one function: `windows` (default) and `tesseract`.
+  - Add the `winrt-runtime`, `winrt-Windows.Media.Ocr`, `winrt-Windows.Graphics.Imaging`, `winrt-Windows.Storage.Streams` packages to `pyproject.toml`.
+  - Windows OCR: image → BGRA `SoftwareBitmap` → `OcrEngine.try_create_from_user_profile_languages().recognize_async`. No engine for the user's languages → report which language pack to add.
+- Setting `OCR_ENGINE`: `auto` (default: Windows OCR; Tesseract when installed and the screen looks like code: a monospace-font window such as an editor or terminal), `windows`, `tesseract`.
+- Tesseract is a manifest entry for the step 6 downloader (the UB-Mannheim build, SHA-256 pinned, installed per user under `DATA_DIR/tools/tesseract`), offered in Setup as "Better OCR for code (239 MB)". `ocr_reader` looks there before PATH.
+- Preflight reports: engine in use, Windows OCR language, Tesseract present or not.
+- Tests: engine selection per setting; Windows OCR on a rendered image with known text (skipped off Windows); Tesseract absent → Windows OCR with no error; `auto` picks Tesseract for an editor window only when installed.
 
 ### 9. Ollama
 - Detect installed/running (already in `local_llm_health`); the setup screen shows state and the official install link. Not bundled.
@@ -89,6 +95,5 @@ Replaces "Phase 3" in `2026-09-24-laptop-release.md`. Decided 2026-09-27.
 - `preflight` shows: planner key, Groq (optional), each model verified, browser, Ollama, OCR.
 
 ## Open decisions
-1. OCR engine (step 8).
-2. Piper voice: `ryan-medium` is 3–6× faster to first audio (44/76/193 ms vs 138/381/1,098 ms for short/medium/long first sentences); listen before choosing. Changes the bundle by −57 MB.
-3. Whether the setup screen also offers the phone link (off by default) or leaves it to `.env`.
+1. Piper voice: `ryan-medium` is 3–6× faster to first audio (44/76/193 ms vs 138/381/1,098 ms for short/medium/long first sentences); listen before choosing. Changes the bundle by −57 MB.
+2. Whether the setup screen also offers the phone link (off by default) or leaves it to `.env`.
