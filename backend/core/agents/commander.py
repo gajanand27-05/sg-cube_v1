@@ -59,6 +59,7 @@ _READBACK_FIELDS: dict[str, tuple[str, ...]] = {
 _READBACK_MAX_CHARS = 160
 
 
+from backend.core.privacy import said  # noqa: E402
 from backend.core.agents.pending_clarification import (  # noqa: E402
     Clarification as _Clarification,
     context_for as _clarification_context,
@@ -492,8 +493,8 @@ class CommanderAgent:
                 # The losing half of a voice/HUD race: the confirmation was
                 # already consumed an instant ago. Ignored, never planned —
                 # a bare "yes" handed to the planner could authorise anything.
-                log.info("Confirmation %s: late voice %r ignored — already consumed by %s",
-                         raced[0], text, raced[1])
+                log.info("Confirmation %s: late voice %s ignored — already consumed by %s",
+                         raced[0], said(text), raced[1])
                 _publish_completed("completed", 100.0, t0, "")
                 return
         if pending is not None:

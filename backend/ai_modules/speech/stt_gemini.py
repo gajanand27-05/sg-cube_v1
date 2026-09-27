@@ -31,6 +31,7 @@ from google.genai import types
 
 from backend.ai_modules.llm.key_pool import pool
 from backend.server.config import settings
+from backend.core.privacy import said
 
 log = logging.getLogger(__name__)
 
@@ -189,7 +190,7 @@ def _parse(raw: str | None) -> str:
     try:
         data = json.loads(raw)
     except (ValueError, TypeError):
-        log.warning("stt_gemini: unparseable response body %r", raw[:200])
+        log.warning("stt_gemini: unparseable response body %s", said(raw[:200]))
         return ""
     # Every empty outcome leaves a trace. Measured on the archived captures:
     # Gemini returned "" for three clips that local Whisper decodes cleanly at
@@ -199,10 +200,10 @@ def _parse(raw: str | None) -> str:
     # the room was genuinely just noise. Two very different failures wearing
     # the same face is how the wake word got blamed for all of them.
     if not isinstance(data, dict):
-        log.warning("stt_gemini: response was not an object: %r", raw[:200])
+        log.warning("stt_gemini: response was not an object: %s", said(raw[:200]))
         return ""
     if not data.get("speech_detected"):
-        log.info("stt_gemini: speech_detected=false; raw=%r", raw[:200])
+        log.info("stt_gemini: speech_detected=false; raw=%s", said(raw[:200]))
         return ""
     transcript = data.get("transcript")
     if not isinstance(transcript, str):
@@ -210,7 +211,7 @@ def _parse(raw: str | None) -> str:
                     type(transcript).__name__, raw[:200])
         return ""
     if not transcript.strip():
-        log.info("stt_gemini: speech_detected but transcript empty; raw=%r", raw[:200])
+        log.info("stt_gemini: speech_detected but transcript empty; raw=%s", said(raw[:200]))
     return transcript.strip()
 
 

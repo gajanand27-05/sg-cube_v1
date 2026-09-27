@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 import pyautogui
 import pygetwindow as gw
 from PIL import Image
+from backend.core.privacy import said
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +44,6 @@ if __name__ == "__main__":
     # Test capture
     img, title = capture_screen()
     if img:
-        print(f"Captured: {title} ({len(img)} bytes)")
+        print(f"Captured: {said(title)} ({len(img)} bytes)")
     else:
         print("Capture failed.")

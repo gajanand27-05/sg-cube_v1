@@ -14,6 +14,7 @@ from backend.core.memory.embedding import (
 )
 from backend.core.memory.base import MemoryEntry, MemoryType, naive_local, parse_ts
 from backend.database import CHROMA_PATH, get_chroma_client
+from backend.core.privacy import said
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ class LongTermMemory:
                 documents=[entry.content],
                 metadatas=[metadata]
             )
-            log.info(f"Stored semantic memory: {entry.content[:50]}... (importance={entry.importance:.2f})")
+            log.info(f"Stored semantic memory: {said(entry.content)} (importance={entry.importance:.2f})")
             return True
         except EmbeddingUnavailable as e:
             # Refused, not stored. Previously this appended a zero vector and

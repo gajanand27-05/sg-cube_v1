@@ -41,6 +41,7 @@ from backend.daemon.ui_events import (
     WakeHeard,
 )
 from backend.daemon.ui_events import STTPartialEvent
+from backend.core.privacy import said
 
 log = logging.getLogger(__name__)
 
@@ -279,11 +280,11 @@ async def _try_rule_fast_path(command: str, emit: EmitFn | None, turn) -> Option
     except Exception as e:
         # Never let the fast path break a turn — fall through to the planner,
         # which is what happened before this existed.
-        log.warning("rule fast path failed for %r: %s", command, e)
+        log.warning("rule fast path failed for %s: %s", said(command), e)
         return None
 
     spoken = (result or {}).get("message") or ""
-    print(f"[ai] response: {spoken!r} (rule: {hit.action}, no planner)")
+    print(f"[ai] response: {said(spoken)} (rule: {hit.action}, no planner)")
 
     try:
         from backend.daemon.ui_events import IntentResolved
@@ -413,7 +414,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         _emit(emit, err_event)
         reply = "Sorry, I encountered an error"
         print(f"[ai] Brain error: {e}")
-        print(f"[ai] → {reply}")
+        print(f"[ai] → {said(reply)}")
 
         state_manager.transition_to(AssistantState.SPEAKING)
         await _speak_selective(reply, device_id)
@@ -424,7 +425,7 @@ async def _process_and_execute(command: str, peak: int, t0: float, emit: EmitFn 
         latency_ledger().record(turn)
         return False
 
-    print(f"[ai] response: {response.spoken_text} (latency: {response.latency_ms}ms, tools: {len(response.tool_calls)})")
+    print(f"[ai] response: {said(response.spoken_text)} (latency: {response.latency_ms}ms, tools: {len(response.tool_calls)})")
 
     # Publish IntentResolved so the UI tier counters (cache/rule/llm) work.
     # Voice path bypasses the router, so we publish it here. source_layer
@@ -827,7 +828,7 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
                 return False
             turn.mark("stt_done")
             command = (stt.get("text") or "").strip()
-            print(f"[command] {command!r}")
+            print(f"[command] {said(command)}")
 
             # Archive BEFORE the gates. An empty or rejected transcript is the
             # most interesting case there is — it is the one that failed — so
@@ -856,8 +857,8 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
             #
             # Loudness alone is not consent to run a command.
             if not _is_dispatchable(command):
-                print(f"[trigger] dropping non-command transcript {command!r}")
-                log.info("dropped non-command transcript: %r", command)
+                print(f"[trigger] dropping non-command transcript {said(command)}")
+                log.info("dropped non-command transcript: %s", said(command))
                 state_manager.transition_to(AssistantState.IDLE)
                 latency_ledger().record(turn)
                 return False
@@ -868,8 +869,8 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
             # hallucination into the prompt and into long-term memory.
             cleaned = strip_hallucinated_sentences(command)
             if cleaned and cleaned != command:
-                print(f"[trigger] stripped hallucinated text: {command!r} -> {cleaned!r}")
-                log.info("stripped hallucinated text: %r -> %r", command, cleaned)
+                print(f"[trigger] stripped hallucinated text: {said(command)} -> {said(cleaned)}")
+                log.info("stripped hallucinated text: %s -> %s", said(command), said(cleaned))
                 command = cleaned
 
             # The capture starts with the wake word, and every rule pattern is
@@ -881,7 +882,7 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
 
             unprefixed = strip_wake_prefix(command)
             if unprefixed != command:
-                print(f"[trigger] stripped wake prefix: {command!r} -> {unprefixed!r}")
+                print(f"[trigger] stripped wake prefix: {said(command)} -> {said(unprefixed)}")
                 command = unprefixed
 
             # Echo gate. Separate from _is_dispatchable on purpose: that
@@ -894,8 +895,8 @@ async def _handle_wake_async(audio_bytes: bytes, emit: EmitFn | None = None, dev
             # barge-in fires on loudness, Whisper transcribes our own sentence,
             # and it used to be dispatched and executed.
             if was_recently_spoken(command):
-                print(f"[trigger] dropping TTS echo {command!r}")
-                log.info("dropped TTS echo: %r", command)
+                print(f"[trigger] dropping TTS echo {said(command)}")
+                log.info("dropped TTS echo: %s", said(command))
                 # T-barge-in-tuning: an echo dropped on a barge-in turn means
                 # the assistant interrupted ITSELF. That ratio is the number
                 # the ticket needs and it cannot be got any other way — the
@@ -991,7 +992,7 @@ async def _handle_proactive_async(event: ProactiveEvent):
 
     state_manager.transition_to(AssistantState.THINKING)
     state_manager._voice_trigger_source = "background"
-    print(f"[proactive] announce={event.query!r} tool={event.tool!r} args={event.args!r}")
+    print(f"[proactive] announce={said(event.query)} tool={event.tool!r} args={said(event.args)}")
     parts = [event.query] if event.query else []
     try:
         if event.tool:

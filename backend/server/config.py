@@ -339,6 +339,11 @@ class Settings(BaseSettings):
     # loudness-only — e.g. if a mic ever proves too quiet for Vosk to decode
     # the barge-in utterance at all.
     barge_in_require_speech: bool = True
+    # Full text of what the user said, Onyx's replies and personal tool
+    # arguments in sg_cube.log / the console. OFF: lines keep their metadata
+    # (timings, model, tool names, lengths) and the text becomes "<N chars>"
+    # (backend/core/privacy.py). A dev machine turns it on in .env.
+    log_transcripts: bool = False
     # E1 (leftovers): open-air echo test harness flag. OFF by default so
     # production barge-in keeps interrupting TTS instantly. When ON,
     # stop_speech() is deferred from wake-onset to after capture completes,

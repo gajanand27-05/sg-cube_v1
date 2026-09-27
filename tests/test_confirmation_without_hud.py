@@ -90,9 +90,11 @@ def test_timeout_refuses(tmp_path, monkeypatch):
     assert not target.exists()
 
 
-def test_a_late_voice_yes_after_the_hud_won_is_ignored_not_planned(tmp_path, caplog):
+def test_a_late_voice_yes_after_the_hud_won_is_ignored_not_planned(tmp_path, caplog, monkeypatch):
     """The race the other way round: the HUD approved, then "yes" arrives by
     voice. It must not reach the planner as a new request."""
+    from backend.server.config import settings
+    monkeypatch.setattr(settings, "log_transcripts", False)  # not whatever the dev .env says
     target = _ask(tmp_path)
     p = next(iter(pcm.store._slots.values()))
     got, _ = pcm.store.take_by_id(p.id, p.digest)          # HUD wins
@@ -111,7 +113,8 @@ def test_a_late_voice_yes_after_the_hud_won_is_ignored_not_planned(tmp_path, cap
             pass
     with caplog.at_level("INFO"):
         asyncio.run(go())
-    assert "late voice 'yes' ignored" in caplog.text and "consumed by hud" in caplog.text
+    # The words themselves are logged only with LOG_TRANSCRIPTS (off in tests).
+    assert "late voice <3 chars> ignored" in caplog.text and "consumed by hud" in caplog.text
 
 
 def test_a_quick_yes_still_answers_a_NEW_pending(tmp_path):

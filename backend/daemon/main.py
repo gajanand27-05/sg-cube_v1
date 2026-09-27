@@ -205,9 +205,17 @@ class RedactingFormatter(logging.Formatter):
     (/ws/ui?token=...) — so the log file held a live credential."""
 
     _SECRET = re.compile(r"(token=)[^&\s\"']+")
+    # A request line's query string ("GET /memory/search?q=my+doctor") can
+    # carry what the user asked. Kept only with LOG_TRANSCRIPTS.
+    _QUERY = re.compile(r"(\"[A-Z]+ /[^\s?\"]*)\?[^\s\"]*")
 
     def format(self, record: logging.LogRecord) -> str:
-        return self._SECRET.sub(r"\1<redacted>", super().format(record))
+        from backend.server.config import settings
+
+        line = self._SECRET.sub(r"\1<redacted>", super().format(record))
+        if not settings.log_transcripts:
+            line = self._QUERY.sub(r"\1?<query>", line)
+        return line
 
 
 def configure_logging() -> Path:

@@ -8,6 +8,7 @@ import numpy as np
 
 from backend.ai_modules.speech.stt_manager import get_model  # noqa: F401
 from backend.server.config import settings
+from backend.core.privacy import said
 
 log = logging.getLogger(__name__)
 
@@ -257,7 +258,7 @@ def _collect_segments(segments, info) -> dict:
     # sentence. Dropped to "" so the existing content gate rejects it exactly
     # like any other empty capture.
     if is_prompt_echo(text):
-        print(f"[stt] dropped prompt echo: {text!r}")
+        print(f"[stt] dropped prompt echo: {said(text)}")
         text = ""
 
     return {

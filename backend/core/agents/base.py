@@ -10,6 +10,7 @@ from backend.core.events import get_bus
 # nowhere: no "agent_status" ever crossed the wire, and /agents/status stayed
 # empty. Identical shape to the duplicate SelfHealingEvent removed in 6720ca3.
 from backend.daemon.ui_events import InternalAgentEvent, TokenStreamEvent
+from backend.core.privacy import said
 
 log = logging.getLogger(__name__)
 
@@ -24,4 +25,4 @@ class BaseInternalAgent:
         """Notify the system via the event bus."""
         event = InternalAgentEvent(agent_name=self.name, action=action, details=kwargs)
         get_bus().publish(event)
-        log.debug(f"Agent {self.name} -> {action}: {kwargs}")
+        log.debug(f"Agent {self.name} -> {action}: {said(kwargs)}")

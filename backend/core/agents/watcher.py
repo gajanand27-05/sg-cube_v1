@@ -6,6 +6,7 @@ import psutil
 
 from backend.core.events import get_bus
 from backend.daemon.ui_events import ProactiveEvent, InternalAgentEvent
+from backend.core.privacy import said
 
 log = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ class WatcherAgent:
                        "Set it up again if you still want it.")))
             return
         announce = " ".join(x for x in (action.get("announce", ""), context) if x)
-        log.info("Watcher firing: announce=%r tool=%r", announce, action.get("tool"))
+        log.info("Watcher firing: announce=%s tool=%r", said(announce), action.get("tool"))
         get_bus().publish(ProactiveEvent(query=announce, tool=action.get("tool", ""),
                                          args=dict(action.get("args") or {})))
 

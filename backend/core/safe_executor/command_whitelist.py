@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import quote, quote_plus, urlparse
 
 from backend.core.orchestrator.llm_layer import Intent
+from backend.core.privacy import said
 
 log = logging.getLogger(__name__)
 
@@ -657,7 +658,7 @@ def handle_play_youtube(intent: Intent) -> dict:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(f"ytsearch1:{query}", download=False)
     except Exception as e:
-        log.warning("yt-dlp search failed for %r: %s", query, e)
+        log.warning("yt-dlp search failed for %s: %s", said(query), e)
         r = _open_url(fallback_url)
         if r["status"] == "success":
             r["message"] = f"youtube search for {query!r} (yt-dlp unavailable, opened results page)"

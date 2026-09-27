@@ -23,6 +23,7 @@ import time
 from backend.core.websearch.base import SearchProvider, SearchResponse, SearchResult
 from backend.core.websearch.duckduckgo import DuckDuckGoProvider
 from backend.core.websearch.wikipedia import WikipediaProvider
+from backend.core.privacy import said
 
 log = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ def search(query: str, limit: int = 5) -> SearchResponse:
             return response
 
     if hit is not None:
-        log.warning("all providers failed for %r; serving stale results", query)
+        log.warning("all providers failed for %s; serving stale results", said(query))
         stale = hit[1]
         return SearchResponse(stale.provider, stale.query, stale.results, cached=True)
 

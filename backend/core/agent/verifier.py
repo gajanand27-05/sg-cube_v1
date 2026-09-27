@@ -8,6 +8,7 @@ from backend.ai_modules.llm.routing import TaskType
 from backend.core.agent import tool_policy
 from backend.core.state import manager as state_manager
 from backend.core.tools.registry import REGISTRY, CapabilityTier, SecurityLevel, _resolve_name
+from backend.core.privacy import said
 
 log = logging.getLogger(__name__)
 
@@ -235,7 +236,7 @@ async def verify(user_query: str, call: dict, is_multi_step: bool = False, reque
             log.warning("confirm_if guard for %r raised (%s) — confirming", resolved, e)
             guard_reason = "its safety check could not be evaluated"
         if guard_reason:
-            log.info("Trusted tool %r requires confirmation: %s", resolved, guard_reason)
+            log.info("Trusted tool %r requires confirmation: %s", resolved, said(guard_reason))
             is_trusted = False
     is_explicit_trigger = state_manager._voice_trigger_source in (None, "wake")
     if tier == CapabilityTier.SYSTEM_WRITE and is_trusted and is_explicit_trigger:

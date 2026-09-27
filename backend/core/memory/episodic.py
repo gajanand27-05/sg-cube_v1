@@ -7,6 +7,7 @@ from backend.ai_modules.llm.routing import TaskType
 from backend.core.memory.base import MemoryEntry, MemoryType
 from backend.core.memory.manager import memory as memory_manager
 from backend.server.config import settings
+from backend.core.privacy import said
 
 log = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ Reply with a single JSON object:
                     metadata={"query": user_query}
                 )
                 memory_manager.ltm.store(entry)
-                log.info(f"Learned new pattern: {text}")
+                log.info(f"Learned new pattern: {said(text)}")
 
         except Exception as e:
             # Log the TYPE, not just str(e). This fired repeatedly in live use

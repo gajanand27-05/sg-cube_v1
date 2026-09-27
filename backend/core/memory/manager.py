@@ -8,6 +8,7 @@ from backend.core.memory.short_term import ShortTermMemory
 from backend.core.memory.working import WorkingMemory
 from backend.core.memory.screen_memory import screen_memory
 from backend.core.memory.timeline import timeline
+from backend.core.privacy import said
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class MemoryManager:
         entry = MemoryEntry(content=content, mtype=MemoryType.FACT, metadata=metadata or {})
         stored = bool(self.ltm.store(entry))
         if stored:
-            log.info(f"Fact remembered: {content}")
+            log.info(f"Fact remembered: {said(content)}")
         return stored
 
     def remember_preference(self, content: str, metadata: Optional[dict] = None) -> bool:
@@ -35,7 +36,7 @@ class MemoryManager:
         entry = MemoryEntry(content=content, mtype=MemoryType.PREFERENCE, metadata=metadata or {})
         stored = bool(self.ltm.store(entry))
         if stored:
-            log.info(f"Preference remembered: {content}")
+            log.info(f"Preference remembered: {said(content)}")
         return stored
 
     def get_relevant_context(self, query: str) -> str:

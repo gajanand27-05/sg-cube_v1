@@ -12,6 +12,7 @@ from backend.core.memory.embedding import (
     report_write_failure,
 )
 from backend.database import CHROMA_PATH, get_chroma_client
+from backend.core.privacy import said
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class TimelineMemory:
                 documents=[content],
                 metadatas=[meta]
             )
-            log.info(f"Timeline: Recorded {source} event -> {content[:50]}...")
+            log.info(f"Timeline: Recorded {source} event -> {said(content)}")
             return True
         except EmbeddingUnavailable as e:
             report_write_failure("sg_cube_timeline", str(e), content)
