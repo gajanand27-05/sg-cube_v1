@@ -48,6 +48,12 @@ if str(_project_root) not in sys.path:
 # checkout, so real-audio tests keep their Vosk model.
 os.environ["SG_CUBE_HOME"] = tempfile.mkdtemp(prefix="sg_cube_test_home_")
 
+# The phone link is OFF by default in production. The suite runs with it ON so
+# the phone tests (send_to_phone, /remote/connect) exercise real code; the OFF
+# state is checked in a fresh process by test_phone_link_opt_in.py, since the
+# flag decides what is registered at import time.
+os.environ["PHONE_LINK_ENABLED"] = "true"
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _isolate_dogfooding_ledger(tmp_path_factory):

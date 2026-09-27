@@ -227,6 +227,13 @@ class Settings(BaseSettings):
     # instead of localhost — it widens the guard to RFC1918 peers, which means
     # anything on the same Wi-Fi can screenshot this desktop. Off by default.
     allow_lan_hud: bool = False
+    # The phone link (/remote/connect + send_to_phone + replies spoken on the
+    # phone). OFF by default: there is no phone app in this repo, the socket
+    # carries no credential (it only refuses non-private addresses), and a
+    # phone can only reach it with APP_HOST=0.0.0.0. When off, the route is
+    # not served and send_to_phone is not registered, so the planner never
+    # sees it.
+    phone_link_enabled: bool = False
     # Extra folders the file tools may read/write, beyond the user's own
     # (Desktop, Documents, Downloads, Pictures, Videos, Music). ";"-separated
     # local absolute paths. Config/.env only — no tool sets it, so voice

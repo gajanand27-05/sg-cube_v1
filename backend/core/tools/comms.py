@@ -7,6 +7,7 @@ import pyperclip
 
 from backend.core.tools.registry import CapabilityTier, SecurityLevel, ToolResult, tool
 from backend.core.events import get_bus
+from backend.server.config import settings
 from backend.daemon.ui_events import HandoverEvent
 
 
@@ -31,30 +32,35 @@ def clipboard_get() -> ToolResult:
     )
 
 
-@tool(tier=CapabilityTier.DESTRUCTIVE)  # tier: external comms — cannot be recalled once sent
-def send_to_phone(content: str, is_url: bool = False) -> ToolResult:
-    """Send a link or a text snippet directly to the connected Android device.
-    Useful for "send this to my phone", "open this link on my mobile"."""
-    # Used to publish and report success unconditionally — "Sent to mobile
-    # device" with no phone connected. The remote protocol has no delivery
-    # acknowledgement, so the honest claim is dispatch to N live connections.
-    from backend.server.routes.remote import manager as remote_manager
+# Registered only with PHONE_LINK_ENABLED (config.py): with the link off there
+# is no phone to send to, and a tool the planner can see but never use is a
+# promise it can only break.
+if settings.phone_link_enabled:
 
-    devices = remote_manager.live_device_count()
-    if devices == 0:
-        return ToolResult.error(
-            "No phone is connected, so nothing was sent. Open the SG-CUBE remote "
-            "on your phone and try again.")
-    event = HandoverEvent(
-        url=content if is_url else None,
-        text=content if not is_url else None,
-        htype="link" if is_url else "text"
-    )
-    get_bus().publish(event)
-    what = "link" if is_url else "text"
-    return ToolResult.success(
-        f"Sent the {what} to {devices} connected device{'s' if devices != 1 else ''} "
-        "(delivery is not confirmed by the phone)")
+    @tool(tier=CapabilityTier.DESTRUCTIVE)  # tier: external comms — cannot be recalled once sent
+    def send_to_phone(content: str, is_url: bool = False) -> ToolResult:
+        """Send a link or a text snippet directly to the connected Android device.
+        Useful for "send this to my phone", "open this link on my mobile"."""
+        # Used to publish and report success unconditionally — "Sent to mobile
+        # device" with no phone connected. The remote protocol has no delivery
+        # acknowledgement, so the honest claim is dispatch to N live connections.
+        from backend.server.routes.remote import manager as remote_manager
+
+        devices = remote_manager.live_device_count()
+        if devices == 0:
+            return ToolResult.error(
+                "No phone is connected, so nothing was sent. Open the SG-CUBE remote "
+                "on your phone and try again.")
+        event = HandoverEvent(
+            url=content if is_url else None,
+            text=content if not is_url else None,
+            htype="link" if is_url else "text"
+        )
+        get_bus().publish(event)
+        what = "link" if is_url else "text"
+        return ToolResult.success(
+            f"Sent the {what} to {devices} connected device{'s' if devices != 1 else ''} "
+            "(delivery is not confirmed by the phone)")
 
 
 # trusted: opens a pre-filled chat; nothing is sent until the user presses Send

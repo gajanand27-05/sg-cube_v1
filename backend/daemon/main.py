@@ -290,7 +290,7 @@ def claim_single_instance(port: int) -> bool:
     return True
 
 
-def warn_if_exposed(host: str, allow_lan_hud: bool) -> str | None:
+def warn_if_exposed(host: str, allow_lan_hud: bool, phone_link: bool = False) -> str | None:
     """Warn when the server listens beyond this machine. Returns the warning.
 
     /ws/ui accepts confirmation answers ("yes, delete that file"). Measured
@@ -304,6 +304,9 @@ def warn_if_exposed(host: str, allow_lan_hud: bool) -> str | None:
     except ValueError:
         loopback = False
     if loopback:
+        if phone_link:
+            log.info("PHONE_LINK_ENABLED is on but the server listens on %s only, so a "
+                     "phone cannot reach /remote/connect. Set APP_HOST=0.0.0.0 to use it.", host)
         return None
     if allow_lan_hud:
         msg = (f"Listening on {host}: reachable from the network, and ALLOW_LAN_HUD=true, so "
@@ -313,6 +316,10 @@ def warn_if_exposed(host: str, allow_lan_hud: bool) -> str | None:
         msg = (f"Listening on {host}: reachable from the network. The confirmation endpoint "
                "(/ws/ui) and /api/session still refuse non-local peers (ALLOW_LAN_HUD is off), "
                "but the port is exposed. Set APP_HOST=127.0.0.1 unless you need LAN access.")
+    if phone_link:
+        msg += (" PHONE_LINK_ENABLED is on: /remote/connect accepts any device on your "
+                "private network, with no password, and it can trigger commands and write "
+                "your clipboard.")
     log.warning(msg)
     return msg
 
@@ -356,7 +363,7 @@ def main() -> None:
                   "second backend", paths.DATA_DIR)
         sys.exit(3)
     log.info("Starting SG_CUBE web server on http://%s:%s", host, port)
-    warn_if_exposed(host, settings.allow_lan_hud)
+    warn_if_exposed(host, settings.allow_lan_hud, settings.phone_link_enabled)
     log.info("Data dir %s, log file %s", paths.DATA_DIR, log_file)
 
     uvicorn.run(
