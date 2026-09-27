@@ -29,7 +29,7 @@ def opened(tmp_path, monkeypatch):
     book = contacts_mod.ContactBook(tmp_path / "contacts.json")
     monkeypatch.setattr(contacts_mod, "book", book)
     urls: list[str] = []
-    monkeypatch.setattr(comms.webbrowser, "open", lambda u: urls.append(u))
+    monkeypatch.setattr(comms.webbrowser, "open", lambda u: urls.append(u) or True)
     return book, urls
 
 

@@ -93,12 +93,15 @@ def send_whatsapp(contact: str, message: str) -> ToolResult:
     # No shell. `start "" "<url>"` via shell=True let an LLM-supplied url close
     # the quote and append `& <command>`; webbrowser.open hands the string to
     # ShellExecute/xdg-open directly, so there is no command line to break out of.
-    webbrowser.open(url)
+    if not webbrowser.open(url):
+        return ToolResult.error("couldn't open WhatsApp: no browser or WhatsApp app took the link")
     # Lead with the NAME. The user hears this sentence, and a read-back number
     # is unverifiable by ear — the name is their last chance to catch a
-    # resolution that went to the wrong person.
+    # resolution that went to the wrong person. "Draft", never "sent": the
+    # user presses Send.
     who = resolved.name if resolved.name != contact.strip() else f"+{phone}"
-    return ToolResult.success(f"opened WhatsApp chat with {who} (+{phone})")
+    return ToolResult.success(
+        f"opened a WhatsApp draft to {who} (+{phone}) — it isn't sent until you press Send")
 
 
 # trusted: opens a draft in the mail client; the user sends it, never this code.
@@ -116,5 +119,29 @@ def send_email(to: str, subject: str = "", body: str = "") -> ToolResult:
     url = f"mailto:{to.strip()}"
     if parts:
         url += "?" + "&".join(parts)
-    webbrowser.open(url)  # no shell — see send_whatsapp
-    return ToolResult.success(f"opened email composer for {to}")
+    # With no mail app registered for mailto:, Windows shows a "pick an app"
+    # box and the draft never appears — find that out before claiming anything.
+    if not _mailto_handler():
+        return ToolResult.blocked(
+            "no email app is set up for mailto links on this PC — choose one in "
+            "Windows Settings > Apps > Default apps")
+    if not webbrowser.open(url):  # no shell — see send_whatsapp
+        return ToolResult.error("couldn't open the email app")
+    return ToolResult.success(f"opened an email draft to {to} — it isn't sent until you press Send")
+
+
+def _mailto_handler() -> bool:
+    """Is any app registered for mailto: links? AssocQueryString answers
+    for desktop and Store apps alike (friendly name, then executable)."""
+    import ctypes
+    from ctypes import wintypes
+
+    ASSOCF_IS_PROTOCOL, ASSOCSTR_EXECUTABLE, ASSOCSTR_FRIENDLYAPPNAME = 0x1000, 2, 4
+    for what in (ASSOCSTR_FRIENDLYAPPNAME, ASSOCSTR_EXECUTABLE):
+        buf = ctypes.create_unicode_buffer(1024)
+        size = wintypes.DWORD(len(buf))
+        hr = ctypes.windll.shlwapi.AssocQueryStringW(
+            ASSOCF_IS_PROTOCOL, what, "mailto", None, buf, ctypes.byref(size))
+        if hr == 0 and buf.value:
+            return True
+    return False
