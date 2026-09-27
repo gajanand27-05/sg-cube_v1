@@ -694,7 +694,16 @@ def close_active_window() -> ToolResult:
 @tool(tier=CapabilityTier.SYSTEM_WRITE, trusted=True)  # trusted: locking is the SAFE direction, and reversible by unlocking
 def lock_screen() -> ToolResult:
     """Lock the workstation (Win+L)."""
-    subprocess.Popen(["rundll32.exe", "user32.dll,LockWorkStation"])
+    # Called directly: rundll32 swallowed the result, so a lock refused by
+    # policy (DisableLockWorkstation) still said "screen locked" while the
+    # machine stayed open. Nonzero means Windows accepted the request; the
+    # lock itself follows a moment later.
+    import ctypes
+
+    if not ctypes.windll.user32.LockWorkStation():
+        return ToolResult.error(
+            f"Windows refused to lock the screen (error {ctypes.GetLastError()}) — "
+            "locking may be disabled by a policy on this PC")
     return ToolResult.success("screen locked")
 
 
