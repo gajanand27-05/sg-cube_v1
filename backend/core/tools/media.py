@@ -39,6 +39,27 @@ _ALIASES = {
 _KEYEVENTF_KEYUP = 0x0002
 
 
+_AUDIO_SESSION_ACTIVE = 1
+
+
+def _playing() -> list[str]:
+    """Apps with an ACTIVE audio session right now, other than SG-CUBE
+    itself (Onyx's own voice). This is audio actually coming out, not a
+    media session: a paused player has none, so "nothing playing" is
+    knowable but "a player is paused" is not. Unknown (API failure) is
+    reported as None by the caller's except, never as "nothing"."""
+    import os
+
+    from pycaw.pycaw import AudioUtilities
+
+    me = os.getpid()
+    names = []
+    for s in AudioUtilities.GetAllSessions():
+        if s.State == _AUDIO_SESSION_ACTIVE and s.ProcessId and s.ProcessId != me:
+            names.append(s.Process.name() if s.Process else f"pid {s.ProcessId}")
+    return names
+
+
 def _press(vk: int) -> None:
     import ctypes
     ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
@@ -57,24 +78,39 @@ def media_control(action: str = "playpause") -> ToolResult:
 
     To START something playing from nothing, use `play_youtube` — this tool
     only controls what is already going."""
-    key = (action or "playpause").strip().lower().replace(" ", "_")
-    key = _ALIASES.get(key, key)
+    asked = (action or "playpause").strip().lower().replace(" ", "_")
+    key = _ALIASES.get(asked, asked)
     if key not in _VK:
         return ToolResult.error(
             f"unknown media action {action!r} — expected play, pause, next, previous or stop"
         )
     if sys.platform != "win32":
         return ToolResult.error("media keys are only wired up on Windows")
+    # The media key is a TOGGLE: "pause" sent to something already paused
+    # starts it again. So look first, where Windows can tell us.
+    try:
+        playing = _playing()
+    except Exception as e:  # noqa: BLE001
+        log.debug("audio sessions unreadable: %s", e)
+        playing = None
+    if playing is not None:
+        if asked in ("pause", "stop") and not playing:
+            return ToolResult.blocked("nothing is playing")
+        if asked in ("play", "resume") and playing:
+            return ToolResult.success(f"already playing ({', '.join(sorted(set(playing)))})")
     try:
         _press(_VK[key])
     except Exception as e:
         log.warning("media_control(%s) failed: %s", key, e)
         return ToolResult.error(f"could not send the media key: {e}")
 
+    # "Sent", not "paused"/"skipped": the key goes to whichever app holds the
+    # media session, and nothing reports back what it did.
     spoken = {
-        "playpause": "Toggled playback.",
-        "next": "Skipped to the next track.",
-        "previous": "Went back a track.",
-        "stop": "Stopped playback.",
+        "playpause": {"pause": "Sent pause.", "play": "Sent play.",
+                      "resume": "Sent play."}.get(asked, "Sent play/pause."),
+        "next": "Sent next track.",
+        "previous": "Sent previous track.",
+        "stop": "Sent stop.",
     }[key]
     return ToolResult.success(spoken)
